@@ -43,9 +43,15 @@ export default function TrackPage() {
             {STAGE_LABEL[data.trackingStage]} · {STATUS_LABEL[data.portalStatus]}
           </p>
           <Timeline order={data} />
-          <p>
-            {data.originCity}, {data.originState} → {data.destinationCity}, {data.destinationState}
-          </p>
+          <ol className="stop-list">
+            {(data.stops?.length ? data.stops : [{ kind: "pickup" as const, city: data.originCity, state: data.originState }, { kind: "drop" as const, city: data.destinationCity, state: data.destinationState }]).map(
+              (stop, index) => (
+                <li key={`${stop.kind}-${index}`}>
+                  {stop.kind === "pickup" ? "Pickup" : "Drop"} · {stop.city}, {stop.state}
+                </li>
+              ),
+            )}
+          </ol>
           <p className="mini">Ship date {formatDay(data.shipDate)} · Must deliver {formatDay(data.mustDeliverDate)}</p>
           <p>Latest ETA: {data.latestEta ? formatWhen(data.latestEta) : "Not posted yet"}</p>
           {data.truckType && <p className="mini">{data.truckType}</p>}

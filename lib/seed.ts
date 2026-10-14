@@ -544,6 +544,20 @@ const LOADS: SeedLoad[] = [
 
 const SITES = [allen, north, pen, vectis];
 
+function stopsForLoad(load: SeedLoad) {
+  if (load.salesOrderNumber === "SO4555") {
+    return [
+      { id: "stop-1", kind: "pickup" as const, place: load.origin },
+      { id: "stop-2", kind: "pickup" as const, place: allen },
+      { id: "stop-3", kind: "drop" as const, place: load.destination },
+    ];
+  }
+  return [
+    { id: "stop-1", kind: "pickup" as const, place: load.origin },
+    { id: "stop-2", kind: "drop" as const, place: load.destination },
+  ];
+}
+
 async function pdfFromLines(pages: string[][]): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -588,11 +602,11 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
     const insertLoad = ctx.db.prepare(
       `INSERT INTO loads (
          id, sales_order_number, load_number, portal_status, tracking_stage, timeline_json,
-         origin_json, destination_json, truck_type, transit, ship_date, ship_time,
+         origin_json, destination_json, stops_json, truck_type, transit, ship_date, ship_time,
          must_deliver_date, truck_eta, latest_eta, tracking_token, customer_cost_cents,
          rate_reason, comments, created_by, created_at, updated_at, pending_review_count,
          carrier_pay_cents, carrier_name, carrier_mc, staff_notes
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
     );
 
     for (const load of LOADS) {
@@ -610,6 +624,7 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
         JSON.stringify(timelineThrough(load.trackingStage, anchor)),
         JSON.stringify(load.origin),
         JSON.stringify(load.destination),
+        JSON.stringify(stopsForLoad(load)),
         load.truckType,
         load.transit,
         shipDate,

@@ -9,8 +9,11 @@ export function confirmationMessage(order: CustomerOrder, to: string): { subject
     `Your order ${order.salesOrderNumber} has been submitted to Select Transport Partners.`,
     `Select load number: ${order.loadNumber}`,
     ``,
-    `Origin: ${formatPlace(order.origin)}`,
-    `Destination: ${formatPlace(order.destination)}`,
+    `Stops:`,
+    ...order.stops.map(
+      (stop, index) =>
+        `${index + 1}. ${stop.kind === "pickup" ? "Pickup" : "Drop"} — ${formatPlace(stop.place)}`,
+    ),
     `Ship date: ${order.shipDate ?? "not set"}${order.shipTime ? ` ${order.shipTime}` : ""}`,
     `Status: ${STATUS_LABEL[order.portalStatus]}`,
     ``,

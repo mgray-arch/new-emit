@@ -1,4 +1,5 @@
 import { serializeCustomerOrder, trackingUrlFor } from "@/lib/customer-view";
+import { legacyStops, resolvedRoute } from "@/lib/stops";
 import type { CustomerOrder, PortalStatus, TrackingStage } from "@/lib/types";
 import { STAGE_LABEL, TRACKING_STAGES } from "@/lib/types";
 import type { OrderInput } from "@/lib/validate";
@@ -107,9 +108,17 @@ export function mapSamDetailToCustomer(raw: unknown): CustomerOrder {
   const load = firstLoad(order);
   const transit = String(load.transitStatus ?? order.transitStatus ?? "");
   const trackingStage = mapTransitToTracking(transit);
-  const stops = Array.isArray(load.stops) ? load.stops.map((stop) => asRecord(stop)) : [];
-  const pickup = stops.find((stop) => String(stop.type).toLowerCase() === "pickup") ?? stops[0] ?? {};
-  const delivery = [...stops].reverse().find((stop) => String(stop.type).toLowerCase() === "delivery") ?? stops[stops.length - 1] ?? {};
+  const rawStops = Array.isArray(load.stops) ? load.stops.map((stop) => asRecord(stop)) : [];
+  const customerStops = rawStops.map((stop, index) => ({
+    id: String(stop.id ?? `stop-${index + 1}`),
+    kind: String(stop.type).toLowerCase() === "pickup" ? "pickup" : "drop",
+    place: placeFromStop(stop),
+  }));
+  const pickup = rawStops.find((stop) => String(stop.type).toLowerCase() === "pickup") ?? rawStops[0] ?? {};
+  const delivery =
+    [...rawStops].reverse().find((stop) => /deliver|drop/.test(String(stop.type).toLowerCase())) ??
+    rawStops[rawStops.length - 1] ??
+    {};
   const tracking = asRecord(load.tracking);
   const stageIndex = TRACKING_STAGES.indexOf(trackingStage);
   const timeline = TRACKING_STAGES.slice(0, stageIndex + 1).map((stage) => ({
@@ -127,6 +136,7 @@ export function mapSamDetailToCustomer(raw: unknown): CustomerOrder {
     timeline,
     origin: placeFromStop(pickup),
     destination: placeFromStop(delivery),
+    stops: customerStops,
     truckType: load.equipment ?? order.equipment ?? null,
     transit: load.teamRequired === true || order.teamRequired === true ? "Team" : "Normal",
     shipDate: typeof pickup.date === "string" ? pickup.date : null,
@@ -148,6 +158,42 @@ export function mapSamDetailToCustomer(raw: unknown): CustomerOrder {
   });
 }
 
+/**
+ * Full ordered stop list for SAM. Create and later edits both send this whole list
+ * (sequence 1..n), and SAM replaces the load's stops. There is no partial diff.
+ * Carrier pay is not a field on a stop.
+ */
+export function toSamStops(input: OrderInput): Array<Record<string, unknown>> {
+  const route = resolvedRoute({
+    stops:
+      input.stops && input.stops.length > 0
+        ? input.stops
+        : input.origin && input.destination
+          ? legacyStops(input.origin, input.destination)
+          : [],
+  });
+  let seenPickup = false;
+  let dropsRemaining = route.stops.filter((stop) => stop.kind === "drop").length;
+  return route.stops.map((stop, index) => {
+    const firstPickup = stop.kind === "pickup" && !seenPickup;
+    if (stop.kind === "pickup") seenPickup = true;
+    const lastDrop = stop.kind === "drop" && dropsRemaining === 1;
+    if (stop.kind === "drop") dropsRemaining -= 1;
+    return {
+      sequence: index + 1,
+      type: stop.kind === "pickup" ? "Pickup" : "Delivery",
+      locationName: stop.place.company,
+      address1: stop.place.address1,
+      city: stop.place.city,
+      state: stop.place.state,
+      zip: stop.place.postalCode,
+      country: stop.place.country || "US",
+      date: firstPickup ? (input.shipDate ?? null) : lastDrop ? (input.mustDeliverDate ?? null) : null,
+      time: firstPickup ? (input.shipTime ?? null) : null,
+    };
+  });
+}
+
 export function toSamCreatePayload(input: OrderInput, actor: Session): Record<string, unknown> {
   return {
     customerReference: input.salesOrderNumber,
@@ -157,30 +203,16 @@ export function toSamCreatePayload(input: OrderInput, actor: Session): Record<st
     customerRate: input.customerCost ?? 0,
     comments: input.comments ?? "",
     submittedBy: actor.email,
-    stops: [
-      {
-        type: "Pickup",
-        locationName: input.origin.company,
-        address1: input.origin.address1,
-        city: input.origin.city,
-        state: input.origin.state,
-        zip: input.origin.postalCode,
-        country: input.origin.country || "US",
-        date: input.shipDate ?? null,
-        time: input.shipTime ?? null,
-      },
-      {
-        type: "Delivery",
-        locationName: input.destination.company,
-        address1: input.destination.address1,
-        city: input.destination.city,
-        state: input.destination.state,
-        zip: input.destination.postalCode,
-        country: input.destination.country || "US",
-        date: input.mustDeliverDate ?? null,
-      },
-    ],
+    stops: toSamStops(input),
   };
+}
+
+/**
+ * Not called until SAM credentials exist. Editing stops in the portal writes the
+ * mock store today. The live call replaces every stop on the load with `toSamStops`.
+ */
+export function toSamStopReplacement(loadNumber: string, input: OrderInput): Record<string, unknown> {
+  return { loadNumber, stops: toSamStops(input) };
 }
 
 export class SamTmsClient {
@@ -222,6 +254,15 @@ export class SamTmsClient {
 
   async get(id: string): Promise<CustomerOrder> {
     const raw = await this.request(`/v1/orders/${encodeURIComponent(id)}`);
+    return mapSamDetailToCustomer(raw);
+  }
+
+  /** Replace the load's stop sequence. SAM is expected to persist `stops` in order. */
+  async replaceStops(loadNumber: string, input: OrderInput): Promise<CustomerOrder> {
+    const raw = await this.request(`/v1/loads/${encodeURIComponent(loadNumber)}/stops`, {
+      method: "PUT",
+      body: JSON.stringify(toSamStopReplacement(loadNumber, input)),
+    });
     return mapSamDetailToCustomer(raw);
   }
 }

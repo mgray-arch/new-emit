@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Timeline from "@/components/timeline";
 import { formatWhen } from "@/lib/dates";
 import {
@@ -13,12 +13,15 @@ import {
   type Place,
   type PortalStatus,
   type Site,
+  type Stop,
+  type StopKind,
 } from "@/lib/types";
 
 export interface Draft {
   salesOrderNumber: string;
   origin: Place;
   destination: Place;
+  stops: Stop[];
   portalStatus: PortalStatus;
   truckType: string;
   transit: string;
@@ -33,11 +36,28 @@ export interface Draft {
 
 const emptyPlace = (): Place => ({ company: "", address1: "", city: "", state: "", postalCode: "", country: "US" });
 
+function newStopId(): string {
+  return crypto.randomUUID();
+}
+
+function endsFrom(stops: Stop[]): { origin: Place; destination: Place } {
+  const pickup = stops.find((stop) => stop.kind === "pickup");
+  const drop = [...stops].reverse().find((stop) => stop.kind === "drop");
+  return {
+    origin: pickup?.place ?? emptyPlace(),
+    destination: drop?.place ?? emptyPlace(),
+  };
+}
+
 export function emptyDraft(): Draft {
+  const stops: Stop[] = [
+    { id: newStopId(), kind: "pickup", place: emptyPlace() },
+    { id: newStopId(), kind: "drop", place: emptyPlace() },
+  ];
   return {
     salesOrderNumber: "",
-    origin: emptyPlace(),
-    destination: emptyPlace(),
+    stops,
+    ...endsFrom(stops),
     portalStatus: "being_prepared",
     truckType: "",
     transit: "",
@@ -52,10 +72,16 @@ export function emptyDraft(): Draft {
 }
 
 export function draftFromOrder(order: CustomerOrder): Draft {
+  const stops = order.stops.length
+    ? order.stops
+    : [
+        { id: "stop-1", kind: "pickup" as const, place: order.origin },
+        { id: "stop-2", kind: "drop" as const, place: order.destination },
+      ];
   return {
     salesOrderNumber: order.salesOrderNumber,
-    origin: order.origin,
-    destination: order.destination,
+    stops,
+    ...endsFrom(stops),
     portalStatus: order.portalStatus,
     truckType: order.truckType ?? "",
     transit: order.transit ?? "",
@@ -74,6 +100,7 @@ export function payloadFromDraft(draft: Draft) {
     salesOrderNumber: draft.salesOrderNumber,
     origin: draft.origin,
     destination: draft.destination,
+    stops: draft.stops,
     portalStatus: draft.portalStatus,
     truckType: draft.truckType || null,
     transit: draft.transit || null,
@@ -168,18 +195,176 @@ function PlaceFields({
   );
 }
 
+function StopsEditor({
+  draft,
+  setDraft,
+  sites,
+  readOnly,
+}: {
+  draft: Draft;
+  setDraft: (draft: Draft) => void;
+  sites: Site[];
+  readOnly: boolean;
+}) {
+  const warning = sequenceWarning(draft.stops);
+  const missingPickup = !draft.stops.some((stop) => stop.kind === "pickup");
+  const missingDrop = !draft.stops.some((stop) => stop.kind === "drop");
+  const dragFrom = useRef<number | null>(null);
+
+  function commit(stops: Stop[]) {
+    setDraft({ ...draft, stops, ...endsFrom(stops) });
+  }
+
+  function move(from: number, to: number) {
+    if (to < 0 || to >= draft.stops.length || from === to) return;
+    const stops = [...draft.stops];
+    const [item] = stops.splice(from, 1);
+    stops.splice(to, 0, item);
+    commit(stops);
+  }
+
+  function add(kind: StopKind) {
+    commit([...draft.stops, { id: newStopId(), kind, place: emptyPlace() }]);
+  }
+
+  function clearDragOver() {
+    document.querySelectorAll(".stop-card.drag-over").forEach((el) => el.classList.remove("drag-over"));
+  }
+
+  function cardIndexAt(x: number, y: number): number {
+    const target = document.elementFromPoint(x, y);
+    const card = target?.closest(".stop-card");
+    if (!card) return -1;
+    return [...document.querySelectorAll(".stop-card")].indexOf(card);
+  }
+
+  return (
+    <div className="field">
+      <label>Stops</label>
+      <p className="mini">Add pickups and drops in the order the truck should run them. Drag a stop by its handle, or use Up and Down.</p>
+      {missingPickup || missingDrop ? <p className="error">Add at least one pickup and one drop.</p> : null}
+      {warning ? <p className="warn">{warning}</p> : null}
+      {draft.stops.map((stop, index) => (
+        <article key={stop.id} className="stop-card">
+          <div className="stop-head">
+            <strong>
+              {index + 1}. {stop.kind === "pickup" ? "Pickup" : "Drop"}
+            </strong>
+            {!readOnly && (
+              <div className="stop-actions">
+                <button
+                  className="btn secondary drag-handle"
+                  type="button"
+                  aria-label={`Drag stop ${index + 1}`}
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    dragFrom.current = index;
+                  }}
+                  onPointerMove={(event) => {
+                    if (dragFrom.current == null) return;
+                    clearDragOver();
+                    const over = cardIndexAt(event.clientX, event.clientY);
+                    if (over >= 0) document.querySelectorAll(".stop-card")[over]?.classList.add("drag-over");
+                  }}
+                  onPointerUp={(event) => {
+                    const from = dragFrom.current;
+                    dragFrom.current = null;
+                    clearDragOver();
+                    if (from == null) return;
+                    const to = cardIndexAt(event.clientX, event.clientY);
+                    if (to >= 0) move(from, to);
+                  }}
+                  onPointerCancel={() => {
+                    dragFrom.current = null;
+                    clearDragOver();
+                  }}
+                >
+                  Drag
+                </button>
+                <button className="btn secondary" type="button" onClick={() => move(index, index - 1)} disabled={index === 0}>
+                  Up
+                </button>
+                <button
+                  className="btn secondary"
+                  type="button"
+                  onClick={() => move(index, index + 1)}
+                  disabled={index === draft.stops.length - 1}
+                >
+                  Down
+                </button>
+                <button
+                  className="btn danger"
+                  type="button"
+                  onClick={() => commit(draft.stops.filter((item) => item.id !== stop.id))}
+                  disabled={draft.stops.length <= 1}
+                >
+                  Remove
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="field">
+            <label htmlFor={`stop-kind-${stop.id}`}>Stop type</label>
+            <select
+              id={`stop-kind-${stop.id}`}
+              aria-label={`Stop ${index + 1} type`}
+              value={stop.kind}
+              disabled={readOnly}
+              onChange={(event) =>
+                commit(draft.stops.map((item) => (item.id === stop.id ? { ...item, kind: event.target.value as StopKind } : item)))
+              }
+            >
+              <option value="pickup">Pickup</option>
+              <option value="drop">Drop</option>
+            </select>
+          </div>
+          <PlaceFields
+            label={`Stop ${index + 1}`}
+            place={stop.place}
+            sites={stop.kind === "pickup" ? sites : []}
+            onChange={(place) => commit(draft.stops.map((item) => (item.id === stop.id ? { ...item, place } : item)))}
+          />
+        </article>
+      ))}
+      {!readOnly && (
+        <div className="actions" style={{ justifyContent: "flex-start" }}>
+          <button className="btn secondary" type="button" onClick={() => add("pickup")}>
+            Add pickup
+          </button>
+          <button className="btn secondary" type="button" onClick={() => add("drop")}>
+            Add drop
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function sequenceWarning(stops: Stop[]): string | null {
+  const firstPickup = stops.findIndex((stop) => stop.kind === "pickup");
+  const firstDrop = stops.findIndex((stop) => stop.kind === "drop");
+  if (firstPickup < 0 || firstDrop < 0) return null;
+  if (firstDrop < firstPickup) {
+    return "A drop is listed before every pickup. Save only if that sequence is intentional.";
+  }
+  return null;
+}
+
 export default function LoadForm({
   draft,
   setDraft,
   order,
   sites,
   hideCommercial = false,
+  readOnly = false,
 }: {
   draft: Draft;
   setDraft: (draft: Draft) => void;
   order?: CustomerOrder | null;
   sites: Site[];
   hideCommercial?: boolean;
+  readOnly?: boolean;
 }) {
   return (
     <>
@@ -201,13 +386,7 @@ export default function LoadForm({
           </div>
         </section>
       )}
-      <PlaceFields label="Origin" place={draft.origin} sites={sites} onChange={(origin) => setDraft({ ...draft, origin })} />
-      <PlaceFields
-        label="Destination"
-        place={draft.destination}
-        sites={[]}
-        onChange={(destination) => setDraft({ ...draft, destination })}
-      />
+      <StopsEditor draft={draft} setDraft={setDraft} sites={sites} readOnly={readOnly} />
       <div className="field">
         <label>Status</label>
         <select value={draft.portalStatus} onChange={(event) => setDraft({ ...draft, portalStatus: event.target.value as PortalStatus })}>

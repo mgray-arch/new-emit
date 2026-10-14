@@ -149,6 +149,10 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   }
 
   async function save() {
+    if (!draft.stops.some((stop) => stop.kind === "pickup") || !draft.stops.some((stop) => stop.kind === "drop")) {
+      setFormError("Add at least one pickup and one drop.");
+      return;
+    }
     setSaving(true);
     setFormError("");
     try {
@@ -327,6 +331,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                 <td>
                   <div className="company">{order.destination.company}</div>
                   <div className="addr">{formatPlace(order.destination).replace(`${order.destination.company}, `, "")}</div>
+                  {order.stops.length > 2 && <div className="mini">{order.stops.length} stops</div>}
                 </td>
                 <td>{order.truckType || "—"}</td>
                 <td>{order.transit || "—"}</td>
@@ -374,6 +379,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
             <div className="pill">{STATUS_LABEL[order.portalStatus]}</div>
             <p>
               {order.origin.city}, {order.origin.state} → {order.destination.city}, {order.destination.state}
+              {order.stops.length > 2 ? ` · ${order.stops.length} stops` : ""}
             </p>
             <p className="mini">
               Ship {order.shipDate || "—"} {order.shipTime || ""} · ETA {order.latestEta ? formatDay(order.latestEta.slice(0, 10)) : order.truckEta || "—"}
@@ -432,7 +438,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
             )}
             {formError && <p className="error">{formError}</p>}
             <fieldset disabled={receiver} style={{ border: 0, margin: 0, padding: 0 }}>
-              <LoadForm draft={draft} setDraft={setDraft} order={editing} sites={sites} hideCommercial={receiver} />
+              <LoadForm draft={draft} setDraft={setDraft} order={editing} sites={sites} hideCommercial={receiver} readOnly={receiver} />
             </fieldset>
             {editing && (
               <div className="grid-2">

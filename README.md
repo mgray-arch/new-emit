@@ -34,7 +34,7 @@ npm run build && npm start
 
 ## What EMIT can do
 
-- Broker dashboard with status counts, status filter, ship-date range, search by SO or city, and pagination.
+- Broker dashboard with status counts, status filter, ship-date range, search by SO or city, and pagination. A load can have any number of pickups and drops, reordered before or after it is saved.
 - Create and edit a load. Submitting stores the order in the mock SAM layer and shows a confirmation that pairs the sales order with Select's load number. The same message is written to the outbox and sent by SMTP when `SMTP_HOST` and `SMTP_FROM` are set.
 - Status timeline (Submitted, Booked, At Pickup, In Transit, Delivered), latest ETA, and a public tracking link.
 - Ask about an SO. Answers come from the customer-safe shipment view. With no `AI_API_KEY`, a built-in answerer handles status, location, and "this week" questions.

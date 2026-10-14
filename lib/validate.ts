@@ -17,10 +17,17 @@ export const placeSchema = z.object({
   country: z.string().trim().max(2).optional().default("US"),
 });
 
-export const orderInputSchema = z.object({
+export const stopSchema = z.object({
+  id: z.string().trim().min(1).max(80).optional(),
+  kind: z.enum(["pickup", "drop"]),
+  place: placeSchema,
+});
+
+const orderFields = {
   salesOrderNumber: z.string().trim().min(1, "Sales order number is required").max(80),
-  origin: placeSchema,
-  destination: placeSchema,
+  origin: placeSchema.optional(),
+  destination: placeSchema.optional(),
+  stops: z.array(stopSchema).max(25).optional(),
   portalStatus: z.enum(PORTAL_STATUSES).optional(),
   truckType: z.enum(TRUCK_TYPES).nullable().optional(),
   transit: z.enum(TRANSIT_OPTIONS).nullable().optional(),
@@ -35,9 +42,29 @@ export const orderInputSchema = z.object({
   customerCost: z.number().min(0).max(1_000_000).nullable().optional(),
   rateReason: z.enum(RATE_REASONS).nullable().optional(),
   comments: z.string().max(2000).optional(),
-});
+};
 
-export const orderPatchSchema = orderInputSchema.partial();
+function requireRoute(value: { origin?: unknown; destination?: unknown; stops?: Array<{ kind: string }> }, ctx: z.RefinementCtx, mode: "create" | "patch") {
+  if (value.stops && value.stops.length > 0) {
+    if (!value.stops.some((stop) => stop.kind === "pickup")) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Add at least one pickup.", path: ["stops"] });
+    }
+    if (!value.stops.some((stop) => stop.kind === "drop")) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Add at least one drop.", path: ["stops"] });
+    }
+    return;
+  }
+  if (mode === "patch") return;
+  if (!value.origin) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Origin is required.", path: ["origin"] });
+  if (!value.destination) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Destination is required.", path: ["destination"] });
+}
+
+export const orderInputSchema = z.object(orderFields).superRefine((value, ctx) => requireRoute(value, ctx, "create"));
+
+export const orderPatchSchema = z
+  .object({ ...orderFields, salesOrderNumber: orderFields.salesOrderNumber.optional() })
+  .partial()
+  .superRefine((value, ctx) => requireRoute(value, ctx, "patch"));
 
 export const siteSchema = z.object({
   id: z.string().min(1).max(80).optional(),

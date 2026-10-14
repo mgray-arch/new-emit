@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS loads (
   timeline_json TEXT NOT NULL,
   origin_json TEXT NOT NULL,
   destination_json TEXT NOT NULL,
+  stops_json TEXT,
   truck_type TEXT,
   transit TEXT,
   ship_date TEXT,
@@ -118,7 +119,7 @@ CREATE TABLE IF NOT EXISTS receiver_access (
  */
 export const CUSTOMER_LOAD_COLUMNS = `
   id, sales_order_number, load_number, portal_status, tracking_stage, timeline_json,
-  origin_json, destination_json, truck_type, transit, ship_date, ship_time,
+  origin_json, destination_json, stops_json, truck_type, transit, ship_date, ship_time,
   must_deliver_date, truck_eta, latest_eta, tracking_token, customer_cost_cents,
   rate_reason, comments, created_by, created_at, updated_at, pending_review_count
 `;
@@ -131,7 +132,23 @@ export function openDatabase(file: string): DatabaseSync {
   db.exec("PRAGMA foreign_keys = ON");
   db.exec(SCHEMA);
   migrateUserRoles(db);
+  migrateStops(db);
   return db;
+}
+
+function migrateStops(db: DatabaseSync): void {
+  const columns = db.prepare(`PRAGMA table_info(loads)`).all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === "stops_json")) {
+    db.exec(`ALTER TABLE loads ADD COLUMN stops_json TEXT`);
+  }
+  db.exec(`
+    UPDATE loads
+    SET stops_json = json_array(
+      json_object('id', 'stop-1', 'kind', 'pickup', 'place', json(origin_json)),
+      json_object('id', 'stop-2', 'kind', 'drop', 'place', json(destination_json))
+    )
+    WHERE stops_json IS NULL OR stops_json = ''
+  `);
 }
 
 /** Older databases restricted role to customer|admin. Rebuild that table in place. */

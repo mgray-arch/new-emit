@@ -9,7 +9,9 @@ import { sendOrderConfirmation } from "@/lib/email";
 import { PortalError } from "@/lib/http";
 import type { CustomerOrder, PortalStatus, Session, TimelineEvent, TrackingStage } from "@/lib/types";
 import { STAGE_LABEL, TRACKING_STAGES } from "@/lib/types";
+import { legacyStops, resolvedRoute } from "@/lib/stops";
 import type { OrderInput, OrderPatch } from "@/lib/validate";
+import type { Stop } from "@/lib/types";
 
 export interface OrderFilter {
   q?: string;
@@ -45,6 +47,7 @@ interface LoadRow {
   timeline_json: string;
   origin_json: string;
   destination_json: string;
+  stops_json: string | null;
   truck_type: string | null;
   transit: string | null;
   ship_date: string | null;
@@ -85,6 +88,7 @@ function rowToOrder(ctx: PortalContext, row: LoadRow, withDocuments: boolean): C
     timeline: JSON.parse(row.timeline_json),
     origin: JSON.parse(row.origin_json),
     destination: JSON.parse(row.destination_json),
+    stops: parseStops(row),
     truckType: row.truck_type,
     transit: row.transit,
     shipDate: row.ship_date,
@@ -106,6 +110,39 @@ function rowToOrder(ctx: PortalContext, row: LoadRow, withDocuments: boolean): C
   });
 }
 
+function parseStops(row: LoadRow): Stop[] {
+  if (row.stops_json) {
+    try {
+      const parsed = JSON.parse(row.stops_json) as Stop[];
+      if (Array.isArray(parsed) && parsed.length) return parsed;
+    } catch {
+      /* fall through to the two-stop route */
+    }
+  }
+  return resolvedRoute({
+    stops: legacyStops(JSON.parse(row.origin_json), JSON.parse(row.destination_json)),
+  }).stops;
+}
+
+function deliversTo(row: { destination_json: string; stops_json: string | null }, company: string): boolean {
+  const target = company.trim().toLowerCase();
+  try {
+    const destination = JSON.parse(row.destination_json) as { company?: string };
+    if ((destination.company || "").trim().toLowerCase() === target) return true;
+  } catch {
+    /* ignore */
+  }
+  if (!row.stops_json) return false;
+  try {
+    const stops = JSON.parse(row.stops_json) as Stop[];
+    return stops.some(
+      (stop) => stop.kind === "drop" && (stop.place?.company || "").trim().toLowerCase() === target,
+    );
+  } catch {
+    return false;
+  }
+}
+
 function buildWhere(filter: OrderFilter): { sql: string; params: SQLInputValue[] } {
   const clauses: string[] = [];
   const params: SQLInputValue[] = [];
@@ -122,15 +159,22 @@ function buildWhere(filter: OrderFilter): { sql: string; params: SQLInputValue[]
     params.push(filter.shipTo);
   }
   if (filter.receiverCompany) {
-    clauses.push("LOWER(json_extract(destination_json, '$.company')) = LOWER(?)");
-    params.push(filter.receiverCompany);
+    clauses.push(`(
+      LOWER(json_extract(destination_json, '$.company')) = LOWER(?)
+      OR EXISTS (
+        SELECT 1 FROM json_each(stops_json) AS stop
+        WHERE LOWER(json_extract(stop.value, '$.kind')) = 'drop'
+          AND LOWER(json_extract(stop.value, '$.place.company')) = LOWER(?)
+      )
+    )`);
+    params.push(filter.receiverCompany, filter.receiverCompany);
   }
   if (filter.q && filter.q.trim()) {
     const like = likeContains(filter.q.trim());
     clauses.push(
-      `(sales_order_number LIKE ? ESCAPE '\\' OR load_number LIKE ? ESCAPE '\\' OR origin_json LIKE ? ESCAPE '\\' OR destination_json LIKE ? ESCAPE '\\')`,
+      `(sales_order_number LIKE ? ESCAPE '\\' OR load_number LIKE ? ESCAPE '\\' OR origin_json LIKE ? ESCAPE '\\' OR destination_json LIKE ? ESCAPE '\\' OR IFNULL(stops_json, '') LIKE ? ESCAPE '\\')`,
     );
-    params.push(like, like, like, like);
+    params.push(like, like, like, like, like);
   }
   return { sql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
 }
@@ -161,24 +205,27 @@ export function listOrders(ctx: PortalContext, filter: OrderFilter = {}): OrderP
 }
 
 export function listAllOrders(ctx: PortalContext, receiverCompany?: string | null): CustomerOrder[] {
-  const where = receiverCompany ? `WHERE LOWER(json_extract(destination_json, '$.company')) = LOWER(?)` : "";
+  const where = receiverCompany
+    ? `WHERE (
+        LOWER(json_extract(destination_json, '$.company')) = LOWER(?)
+        OR EXISTS (
+          SELECT 1 FROM json_each(stops_json) AS stop
+          WHERE LOWER(json_extract(stop.value, '$.kind')) = 'drop'
+            AND LOWER(json_extract(stop.value, '$.place.company')) = LOWER(?)
+        )
+      )`
+    : "";
   const rows = ctx.db
     .prepare(`${LIST_SQL_HEAD} ${where} ORDER BY ship_date IS NULL, ship_date ASC`)
-    .all(...(receiverCompany ? [receiverCompany] : [])) as unknown as LoadRow[];
+    .all(...(receiverCompany ? [receiverCompany, receiverCompany] : [])) as unknown as LoadRow[];
   return rows.map((row) => rowToOrder(ctx, row, false));
 }
 
 export function getOrder(ctx: PortalContext, id: string, receiverCompany?: string | null): CustomerOrder | null {
   const row = ctx.db.prepare(`${LIST_SQL_HEAD} WHERE id = ?`).get(id) as LoadRow | undefined;
   if (!row) return null;
-  const order = rowToOrder(ctx, row, true);
-  if (
-    receiverCompany &&
-    order.destination.company.trim().toLowerCase() !== receiverCompany.trim().toLowerCase()
-  ) {
-    return null;
-  }
-  return order;
+  if (receiverCompany && !deliversTo(row, receiverCompany)) return null;
+  return rowToOrder(ctx, row, true);
 }
 
 export function getOrderByToken(ctx: PortalContext, token: string): CustomerOrder | null {
@@ -188,10 +235,19 @@ export function getOrderByToken(ctx: PortalContext, token: string): CustomerOrde
 }
 
 export function orderStats(ctx: PortalContext, receiverCompany?: string | null): OrderStats {
-  const where = receiverCompany ? `WHERE LOWER(json_extract(destination_json, '$.company')) = LOWER(?)` : "";
+  const where = receiverCompany
+    ? `WHERE (
+        LOWER(json_extract(destination_json, '$.company')) = LOWER(?)
+        OR EXISTS (
+          SELECT 1 FROM json_each(stops_json) AS stop
+          WHERE LOWER(json_extract(stop.value, '$.kind')) = 'drop'
+            AND LOWER(json_extract(stop.value, '$.place.company')) = LOWER(?)
+        )
+      )`
+    : "";
   const rows = ctx.db
     .prepare(`SELECT portal_status, COUNT(*) AS n FROM loads ${where} GROUP BY portal_status`)
-    .all(...(receiverCompany ? [receiverCompany] : [])) as Array<{
+    .all(...(receiverCompany ? [receiverCompany, receiverCompany] : [])) as Array<{
     portal_status: string;
     n: number;
   }>;
@@ -233,6 +289,20 @@ function advanceStage(current: TrackingStage, portalStatus: PortalStatus): Track
   return order.indexOf(minimum) > order.indexOf(current) ? minimum : current;
 }
 
+function routeFrom(input: { origin?: OrderInput["origin"]; destination?: OrderInput["destination"]; stops?: OrderInput["stops"] }) {
+  const stops =
+    input.stops && input.stops.length > 0
+      ? input.stops
+      : input.origin && input.destination
+        ? legacyStops(input.origin, input.destination)
+        : [];
+  try {
+    return resolvedRoute({ stops });
+  } catch (error) {
+    throw new PortalError(error instanceof Error ? error.message : "Add at least one pickup and one drop.");
+  }
+}
+
 function assertWriter(actor: Session): void {
   if (actor.role === "receiver") {
     throw new PortalError("Receivers can view their loads but cannot change them.", 403);
@@ -251,17 +321,18 @@ export function submitOrder(ctx: PortalContext, input: OrderInput, actor: Sessio
   const portalStatus = input.portalStatus ?? "being_prepared";
   const trackingStage = advanceStage("submitted", portalStatus);
   const timeline = timelineThrough(trackingStage, now);
+  const route = routeFrom(input);
   withTransaction(ctx.db, () => {
     ctx.db
       .prepare(
         `INSERT INTO loads (
            id, sales_order_number, load_number, portal_status, tracking_stage, timeline_json,
-           origin_json, destination_json, truck_type, transit, ship_date, ship_time,
+           origin_json, destination_json, stops_json, truck_type, transit, ship_date, ship_time,
            must_deliver_date, truck_eta, latest_eta, tracking_token, customer_cost_cents,
            rate_reason, comments, created_by, created_at, updated_at, pending_review_count,
            carrier_pay_cents, carrier_name, carrier_mc, staff_notes
          ) VALUES (
-           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 0,
+           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 0,
            NULL, NULL, NULL, NULL
          )`,
       )
@@ -272,8 +343,9 @@ export function submitOrder(ctx: PortalContext, input: OrderInput, actor: Sessio
         portalStatus,
         trackingStage,
         JSON.stringify(timeline),
-        JSON.stringify(input.origin),
-        JSON.stringify(input.destination),
+        JSON.stringify(route.origin),
+        JSON.stringify(route.destination),
+        JSON.stringify(route.stops),
         input.truckType ?? null,
         input.transit ?? null,
         input.shipDate ?? null,
@@ -304,14 +376,26 @@ export function updateOrder(ctx: PortalContext, id: string, patch: OrderPatch, a
   const trackingStage = advanceStage(current.trackingStage, portalStatus);
   const timeline =
     trackingStage === current.trackingStage ? current.timeline : timelineThrough(trackingStage, ctx.now().toISOString());
-  const origin = patch.origin ?? current.origin;
-  const destination = patch.destination ?? current.destination;
+  const route = patch.stops
+    ? routeFrom({ stops: patch.stops })
+    : routeFrom({
+        stops: current.stops.map((stop, index) => {
+          const firstPickup = current.stops.findIndex((item) => item.kind === "pickup");
+          let lastDrop = -1;
+          current.stops.forEach((item, itemIndex) => {
+            if (item.kind === "drop") lastDrop = itemIndex;
+          });
+          if (patch.origin && index === firstPickup) return { ...stop, place: patch.origin };
+          if (patch.destination && index === lastDrop) return { ...stop, place: patch.destination };
+          return stop;
+        }),
+      });
   const now = ctx.now().toISOString();
   ctx.db
     .prepare(
       `UPDATE loads SET
          sales_order_number = ?, portal_status = ?, tracking_stage = ?, timeline_json = ?,
-         origin_json = ?, destination_json = ?, truck_type = ?, transit = ?, ship_date = ?,
+         origin_json = ?, destination_json = ?, stops_json = ?, truck_type = ?, transit = ?, ship_date = ?,
          ship_time = ?, must_deliver_date = ?, truck_eta = ?, customer_cost_cents = ?,
          rate_reason = ?, comments = ?, updated_at = ?
        WHERE id = ?`,
@@ -321,8 +405,9 @@ export function updateOrder(ctx: PortalContext, id: string, patch: OrderPatch, a
       portalStatus,
       trackingStage,
       JSON.stringify(timeline),
-      JSON.stringify(origin),
-      JSON.stringify(destination),
+      JSON.stringify(route.origin),
+      JSON.stringify(route.destination),
+      JSON.stringify(route.stops),
       patch.truckType === undefined ? current.truckType : patch.truckType,
       patch.transit === undefined ? current.transit : patch.transit,
       patch.shipDate === undefined ? current.shipDate : patch.shipDate,

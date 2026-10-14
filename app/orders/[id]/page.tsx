@@ -49,6 +49,15 @@ export default function OrderPage() {
             <a className="track-link" href={order.trackingUrl}>
               Public tracking link
             </a>
+            <ol className="stop-list">
+              {order.stops.map((stop) => (
+                <li key={stop.id}>
+                  <strong>{stop.kind === "pickup" ? "Pickup" : "Drop"}</strong>
+                  <div className="company">{stop.place.company}</div>
+                  <div className="addr">{formatPlace(stop.place)}</div>
+                </li>
+              ))}
+            </ol>
             <div className="grid-2" style={{ marginTop: 16 }}>
               <div>
                 <div className="label">Origin</div>

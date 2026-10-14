@@ -58,6 +58,22 @@ export interface Place {
   country: string;
 }
 
+export type StopKind = "pickup" | "drop";
+
+/** One pickup or drop. Sequence is the array order on the load. */
+export interface Stop {
+  id: string;
+  kind: StopKind;
+  place: Place;
+}
+
+/** Public tracking lists the sequence without street addresses. */
+export interface PublicStop {
+  kind: StopKind;
+  city: string;
+  state: string;
+}
+
 export interface TimelineEvent {
   stage: TrackingStage;
   at: string;
@@ -82,6 +98,7 @@ export interface CustomerOrder {
   timeline: TimelineEvent[];
   origin: Place;
   destination: Place;
+  stops: Stop[];
   truckType: TruckType | null;
   transit: TransitOption | null;
   shipDate: string | null;
@@ -113,6 +130,7 @@ export interface PublicTracking {
   originState: string;
   destinationCity: string;
   destinationState: string;
+  stops: PublicStop[];
   shipDate: string | null;
   mustDeliverDate: string | null;
   truckType: TruckType | null;

@@ -154,7 +154,13 @@ function answerLocally(question: string, orders: CustomerOrder[], now: Date): As
     return { text: rows.length ? rows.map(compact).join("\n") : "Nothing is ready to ship.", references: rows.map(reference), refused: false };
   }
   const cityHits = orders.filter((order) => {
-    const cities = [order.origin.city, order.destination.city, order.origin.state, order.destination.state];
+    const cities = [
+      order.origin.city,
+      order.destination.city,
+      order.origin.state,
+      order.destination.state,
+      ...order.stops.flatMap((stop) => [stop.place.city, stop.place.state]),
+    ];
     return cities.some((city) => city && q.includes(city.toLowerCase()));
   });
   if (cityHits.length) {

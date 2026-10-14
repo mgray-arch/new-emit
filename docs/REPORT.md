@@ -9,7 +9,7 @@ Test portal for EMIT Technologies. It runs against a seeded mock of Select's SAM
 3. **Ask about an SO.** "where is SO2196?" answers from shipment data. "what are you paying the truck?" is refused and does not include a dollar amount. With no AI key, the built-in answerer is used. If `AI_API_KEY` is set, the model receives only the customer-safe JSON.
 4. **Search, pagination, mobile.** Search matches SO or city. Page size is 8. Upcoming ship dates are listed first. Below 980px the table becomes stacked cards.
 
-`npm test` — 23 tests passed (18 security, 3 access, 2 boundary).
+`npm test` — 27 tests passed (18 security, 4 stops, 3 access, 2 boundary).
 
 ## Security
 
@@ -41,6 +41,22 @@ What is not an exact match:
 - The typeface is the system UI font.
 - Stat cards show the 24 demo loads, not the 587 live loads.
 - The PEN site keeps the screenshot spelling "Catersburg, PA". That may be Canonsburg.
+
+## Multi-stop loads
+
+A load is an ordered list of pickups and drops, not only one origin and one destination. The form starts with one of each. Add pickup and Add drop append a stop. Up, Down, and the Drag handle reorder them, including after the load is saved. Remove deletes a stop. Save is blocked unless there is at least one pickup and one drop. If a drop is listed before every pickup, the form shows a warning and still saves, because that sequence is sometimes real.
+
+The first pickup is the origin column and the last drop is the destination column, so the existing table, search, and tracking summary keep working. Intermediate cities are searchable. A receiver sees the load when any drop matches their company, not only the last one. The demo load SO4555 has two pickups and one Enchanted Rock drop. Public tracking lists each stop as city and state only.
+
+### How saved stop edits sync to SAM
+
+They do not sync yet. The running app writes the ordered list to `stops_json` in the mock store. `lib/sam.ts` already has the contract for when credentials arrive:
+
+- Create sends `toSamStops`: the full list with `sequence` 1..n, type Pickup or Delivery, and the address. The first pickup carries the ship date and time. The last drop carries the must-deliver date. No carrier fields are included.
+- A later edit sends that same full list again via `SamTmsClient.replaceStops`, a PUT to `/v1/loads/{loadNumber}/stops`. SAM is expected to replace the load's stops in that order. The portal does not send a diff, so a removed stop disappears and a reordered stop keeps its new index.
+- Reading a SAM order maps every stop back onto `stops`. The first pickup and the last delivery still fill origin and destination. Extra keys on a SAM stop, including a carrier rate, are dropped by the customer serializer.
+
+Those HTTP paths are still a placeholder. Wiring `submitOrder` and `updateOrder` to call the client is the change to make when Mike's API contract is confirmed. Until then, a saved edit is only in `portal.db`.
 
 ## Data layer and SAM
 
@@ -143,7 +159,7 @@ Answered: EMIT staff and receivers sign in with Microsoft. Select staff sign in 
 4. Which model should answer questions once a key exists?
 5. Should a page the screener marks as a rate confirmation be impossible to release, or is one Select admin's approval enough?
 6. Is the PEN address Catersburg or Canonsburg, Pennsylvania?
-7. Which receiver companies and email domains should be in the directory at launch? The demo only has Enchanted Rock LLC / `enchantedrock.example`. The company string has to match the destination on the load.
+7. Which receiver companies and email domains should be in the directory at launch? The demo only has Enchanted Rock LLC / `enchantedrock.example`. A receiver matches any drop on the load, not only the last one. The company string has to match that drop.
 8. Do receivers sign in as guests in EMIT's Entra tenant, or from their own Microsoft 365 tenants? That chooses EMIT's tenant id versus `organizations`.
 9. Enchanted Rock's spreadsheet view is still later. A signed-in receiver currently gets the filtered load list, not a separate grid.
 10. When the 587 loads are migrated, should historical documents be screened the same way, and who reviews that queue?

@@ -5,6 +5,7 @@ import type {
   PortalStatus,
   PublicTracking,
   RateReason,
+  Stop,
   TimelineEvent,
   TrackingStage,
   TransitOption,
@@ -81,6 +82,30 @@ function serializeDocument(value: unknown): CustomerDocument | null {
   };
 }
 
+function serializeStops(value: unknown, origin: Place, destination: Place): Stop[] {
+  const parsed: Stop[] = [];
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as Record<string, unknown>;
+      const kind = row.kind === "pickup" || row.kind === "drop" ? row.kind : null;
+      if (!kind) continue;
+      parsed.push({
+        id: str(row.id) || `stop-${parsed.length + 1}`,
+        kind,
+        place: serializePlace(row.place),
+      });
+    }
+  }
+  if (!parsed.some((stop) => stop.kind === "pickup") || !parsed.some((stop) => stop.kind === "drop")) {
+    return [
+      { id: "stop-1", kind: "pickup", place: origin },
+      { id: "stop-2", kind: "drop", place: destination },
+    ];
+  }
+  return parsed;
+}
+
 function money(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   return Math.round(value * 100) / 100;
@@ -93,6 +118,9 @@ export function serializeCustomerOrder(value: unknown): CustomerOrder {
   const documents = Array.isArray(raw.documents)
     ? raw.documents.map(serializeDocument).filter((doc): doc is CustomerDocument => doc !== null)
     : [];
+  const stops = serializeStops(raw.stops, serializePlace(raw.origin), serializePlace(raw.destination));
+  const pickup = stops.find((stop) => stop.kind === "pickup") ?? stops[0];
+  const drop = [...stops].reverse().find((stop) => stop.kind === "drop") ?? stops[stops.length - 1];
   return {
     id: str(raw.id),
     salesOrderNumber: str(raw.salesOrderNumber),
@@ -100,8 +128,9 @@ export function serializeCustomerOrder(value: unknown): CustomerOrder {
     portalStatus,
     trackingStage,
     timeline: serializeTimeline(raw.timeline),
-    origin: serializePlace(raw.origin),
-    destination: serializePlace(raw.destination),
+    origin: pickup.place,
+    destination: drop.place,
+    stops,
     truckType: oneOf(raw.truckType, TRUCK_TYPES),
     transit: oneOf(raw.transit, TRANSIT_OPTIONS),
     shipDate: strOrNull(raw.shipDate),
@@ -143,6 +172,7 @@ export function toPublicTracking(order: CustomerOrder): PublicTracking {
     originState: order.origin.state,
     destinationCity: order.destination.city,
     destinationState: order.destination.state,
+    stops: order.stops.map((stop) => ({ kind: stop.kind, city: stop.place.city, state: stop.place.state })),
     shipDate: order.shipDate,
     mustDeliverDate: order.mustDeliverDate,
     truckType: order.truckType,

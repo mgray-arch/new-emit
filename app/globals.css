@@ -188,6 +188,28 @@ td select {
 .dialog h2 { margin: 0; font-size: 14px; letter-spacing: 0.08em; }
 .dialog .sub { color: var(--muted); font-size: 13px; margin: 4px 0 14px; }
 .dialog-head { display: flex; justify-content: space-between; align-items: flex-start; }
+.stop-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 10px;
+  background: #23272e;
+}
+.stop-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+.stop-actions { display: flex; gap: 6px; flex-wrap: wrap; max-width: 100%; }
+.stop-actions .btn { padding: 4px 8px; font-size: 12px; }
+.drag-handle { cursor: grab; touch-action: none; user-select: none; }
+.stop-card.drag-over { outline: 2px solid var(--orange); outline-offset: 2px; }
+.stop-list { margin: 8px 0 12px; padding-left: 18px; display: grid; gap: 8px; }
+.warn {
+  background: #2c2618;
+  border: 1px solid #8a6a22;
+  color: #f0d48a;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 0 0 10px;
+  font-size: 13px;
+}
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
 .field label, .label { color: var(--muted); font-size: 13px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -268,6 +290,7 @@ td select {
   .topbar { align-items: flex-start; }
 }
 @media (max-width: 640px) {
+  .stop-actions { flex-basis: 100%; }
   .stats { grid-template-columns: 1fr; }
   .page { padding: 18px 14px 36px; }
   .ask-form { flex-direction: column; }
