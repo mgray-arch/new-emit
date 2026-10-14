@@ -1,1 +1,86 @@
-# new-emit
+# EMIT Load Order Portal
+
+Customer portal for EMIT Technologies, a shipper of Select Transport Partners. This replaces the Lovable portal at emit-select.com. It is a test deployment only: no custom domain, and the 587 existing loads are not migrated.
+
+The app is a Next.js server. Orders, the document review queue, users, and the email outbox live in Turso on Vercel, or in a local SQLite file when `TURSO_DATABASE_URL` is unset. Document and photo bytes live in Vercel Blob, or in `data/blobs` locally. A SAM TMS client is included and unit-tested, but the running app still reads and writes this store. SAM credentials are not available yet.
+
+## Run locally
+
+```bash
+npm ci
+cp .env.example .env.local
+# Set AUTH_SECRET to a long random string before any shared deployment.
+npm run dev
+```
+
+Open http://localhost:3000. With `DEMO_SEED=true` (the default outside production) the first start creates demo users and 24 clearly fake shipments.
+
+| Who | Email | Password | Sign-in in production |
+| --- | --- | --- | --- |
+| EMIT staff | m.gray@emit.example | Emit-Demo-2026 | Microsoft |
+| Select admin | mgray@goselect.com | Emit-Demo-2026 | Google |
+| Select admin | dmartin@goselect.com | Emit-Demo-2026 | Google |
+
+EMIT staff use Microsoft. Select staff use Google (`mgray@goselect.com` and `dmartin@goselect.com` only). Receivers do not sign in: an admin creates a private link under Settings. The demo seed includes one Enchanted Rock LLC link. There is no EMIT admin role and no public signup. Password sign-in is for this demo. Production rejects it unless `DEMO_SEED=true` or `ALLOW_PASSWORD_LOGIN=true`.
+
+The Microsoft and Google buttons explain what is missing until `AZURE_AD_*` and `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` are set.
+
+```bash
+npm test
+npm run typecheck
+npm run build && npm start
+```
+
+## What EMIT can do
+
+- Broker dashboard with status counts, status filter, ship-date range, search by SO or city, and pagination. A load can have any number of pickups and drops, reordered before or after it is saved.
+- Create and edit a load. Submitting stores the order in the mock SAM layer and shows a confirmation that pairs the sales order with Select's load number. The same message is written to the outbox and sent through the Gmail API when `EMAIL_FROM` and the Gmail OAuth values are set.
+- Status timeline (Submitted, Booked, At Pickup, In Transit, Delivered), latest ETA, and a public tracking link.
+- Carrier photo gallery on each load. Select admins and EMIT can view the images. An ingest API (bearer token) and the admin upload accept jpg, png, heic, and webp only.
+- Ask about an SO. Answers come from the customer-safe shipment view. With no `AI_API_KEY`, a built-in answerer handles status, location, and "this week" questions.
+
+Select admins also get the document review queue, the ship-from site list, and receiver companies. A receiver opens a private link and sees only that company's loads, tracking, and photos. The link does not show customer cost or documents.
+
+## Security boundary
+
+Customer responses are an allowlist. Carrier pay is not stored in any table. The serializer still drops a carrier-pay field if one is posted, and the assistant reads that same view. Questions about carrier pay, margins, or rate confirmations are refused before any shipment data is attached.
+
+Every upload is split into pages and screened. A clean page is stored as a customer document. A rate confirmation, or a page the screener cannot read, stays in a separate internal store. Releasing a flagged rate confirmation requires an explicit confirm and records the admin email and time. Carrier photos are a separate path: images only, deduped by hash, and a photo whose name, source, subject, or embedded text looks like a rate confirmation is kept for Select admins and is not shown to EMIT or on a receiver link.
+
+Unauthenticated routes are the tracking link (`/track/[token]`) and a receiver's private link (`/r/[token]`). Tracking returns cities, status, timeline, and ETA. It does not return cost, comments, documents, street address, or carrier data. Demo tracking tokens are derived from the load number and are not secrets. New orders get a random token. Receiver tokens are 32 random bytes.
+
+See [docs/REPORT.md](docs/REPORT.md) for branding notes, credentials still needed, and open questions.
+
+## Put a preview on Vercel
+
+Turso is the database. It is hosted SQLite, so the portal keeps the same schema and the same tests. Local `npm test` and `npm run dev` do not need a Turso or Vercel account.
+
+1. Create the database.
+   - Open [https://turso.tech/app](https://turso.tech/app) and sign in with GitHub.
+   - Click **Create Database**.
+   - Name it `emit-portal`. Pick location **Washington, D.C. (iad)**. Create it.
+   - Copy the database URL. It starts with `libsql://`.
+   - On the database, create a token with full access. Copy the token. Turso shows it once.
+
+2. Import the repo.
+   - In Vercel, **Add New → Project**.
+   - Import GitHub `mgray-arch/new-emit`.
+   - Framework preset **Next.js**. Production branch `main`. Leave preview deployments on.
+
+3. Create the Blob store.
+   - Open the new project's **Storage** tab. **Create → Blob**.
+   - Name it `emit-portal` and connect it to this project.
+   - Vercel fills in `BLOB_READ_WRITE_TOKEN` for Production and Preview.
+
+4. Set environment variables. Add each one for **Preview** and **Production**.
+   - `TURSO_DATABASE_URL` = the `libsql://` URL
+   - `TURSO_AUTH_TOKEN` = the token from step 1
+   - `AUTH_SECRET` = a long random string, at least 16 characters
+   - `DEMO_SEED` = `true` on Preview, `false` on Production
+   - `BLOB_READ_WRITE_TOKEN` is already set if the store is connected
+
+5. Deploy, then open the preview URL from the deployment page.
+   - Sign in as `mgray@goselect.com` / `Emit-Demo-2026`.
+   - Settings shows the Enchanted Rock LLC receiver link.
+
+Leave `PORTAL_PUBLIC_URL` blank and links use that deployment's URL. Set it after you have a stable hostname, then add that origin to the Microsoft and Google callback URLs. The other variables in `.env.example` (Google, Microsoft, Gmail, the photo ingest token) can wait until those features are turned on.
