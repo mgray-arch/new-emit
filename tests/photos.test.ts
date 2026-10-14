@@ -2,6 +2,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { GET as photoBytes } from "@/app/api/carrier-photos/[id]/route";
 import { POST as ingestRoute } from "@/app/api/ingest/carrier-photos/route";
 import { GET as listPhotos } from "@/app/api/orders/[id]/photos/route";
+import { GET as receiverPhoto } from "@/app/api/r/[token]/photos/[photoId]/route";
+import { GET as receiverPortal } from "@/app/api/r/[token]/route";
 import { GET as track } from "@/app/api/track/[token]/route";
 import type { PortalContext } from "@/lib/db";
 import { ingestCarrierPhoto, photoHoldReason, sniffImage, solidPng } from "@/lib/photos";
@@ -17,8 +19,11 @@ beforeAll(async () => {
   ctx = await seededPortal();
 });
 
-function receiverSession(): Session {
-  return { userId: "receiver-1", email: "ops@enchantedrock.example", name: "Enchanted Rock", role: "receiver" };
+function enchantedToken(): string {
+  const row = ctx.db.prepare(`SELECT access_token FROM receivers WHERE company = ?`).get("Enchanted Rock LLC") as {
+    access_token: string;
+  };
+  return row.access_token;
 }
 
 function loadId(salesOrder: string): string {
@@ -196,30 +201,39 @@ describe("carrier photos", () => {
     expect(after.n).toBe(before);
   });
 
-  it("shows a receiver only photos on their own loads, and requires the ingest token or an admin", async () => {
-    const so4555 = loadId("SO4555");
+  it("shows a receiver link only photos on their own loads, and requires the ingest token or an admin", async () => {
     const so2196 = loadId("SO2196");
-    const receiverList = await listPhotos(await asSession(receiverSession(), `http://portal.test/api/orders/${so4555}/photos`), {
-      params: Promise.resolve({ id: so4555 }),
+    const token = enchantedToken();
+    const portal = await receiverPortal(new Request(`http://portal.test/api/r/${token}`), {
+      params: Promise.resolve({ token }),
     });
-    const receiverBody = await receiverList.json();
-    expect(receiverBody.photos.map((photo: { filename: string }) => photo.filename)).toContain("cypress-arrival.png");
+    const receiverBody = await portal.json();
+    const own = receiverBody.loads.find((load: { salesOrderNumber: string }) => load.salesOrderNumber === "SO4555");
+    expect(own.photos.map((photo: { filename: string }) => photo.filename)).toContain("cypress-arrival.png");
+    expect(receiverBody.loads.some((load: { salesOrderNumber: string }) => load.salesOrderNumber === "SO2196")).toBe(false);
+    expect(receiverBody.loads[0].customerCost).toBeUndefined();
     expectNoSecrets(receiverBody);
 
-    const other = await listPhotos(await asSession(receiverSession(), `http://portal.test/api/orders/${so2196}/photos`), {
+    const locked = await listPhotos(new Request(`http://portal.test/api/orders/${so2196}/photos`), {
       params: Promise.resolve({ id: so2196 }),
     });
-    expect(other.status).toBe(404);
+    expect(locked.status).toBe(401);
 
     const dock = ctx.db.prepare(`SELECT id FROM carrier_photos WHERE filename = ?`).get("dock.png") as { id: string };
-    const stolen = await photoBytes(await asSession(receiverSession(), `http://portal.test/api/carrier-photos/${dock.id}`), {
-      params: Promise.resolve({ id: dock.id }),
+    const stolen = await receiverPhoto(new Request(`http://portal.test/api/r/${token}/photos/${dock.id}`), {
+      params: Promise.resolve({ token, photoId: dock.id }),
     });
     expect(stolen.status).toBe(404);
 
+    const held = ctx.db.prepare(`SELECT id FROM carrier_photos WHERE filename = ?`).get("rate-confirmation.png") as { id: string };
+    const hidden = await receiverPhoto(new Request(`http://portal.test/api/r/${token}/photos/${held.id}`), {
+      params: Promise.resolve({ token, photoId: held.id }),
+    });
+    expect(hidden.status).toBe(404);
+
     const cypress = ctx.db.prepare(`SELECT id FROM carrier_photos WHERE filename = ?`).get("cypress-arrival.png") as { id: string };
-    const allowed = await photoBytes(await asSession(receiverSession(), `http://portal.test/api/carrier-photos/${cypress.id}`), {
-      params: Promise.resolve({ id: cypress.id }),
+    const allowed = await receiverPhoto(new Request(`http://portal.test/api/r/${token}/photos/${cypress.id}`), {
+      params: Promise.resolve({ token, photoId: cypress.id }),
     });
     expect(allowed.status).toBe(200);
 
@@ -268,9 +282,11 @@ describe("carrier photos", () => {
     );
     expect(customerPost.status).toBe(403);
 
-    const token = ctx.db.prepare(`SELECT tracking_token FROM loads WHERE id = ?`).get(so2196) as { tracking_token: string };
-    const tracking = await track(new Request(`http://portal.test/api/track/${token.tracking_token}`), {
-      params: Promise.resolve({ token: token.tracking_token }),
+    const trackingRow = ctx.db.prepare(`SELECT tracking_token FROM loads WHERE id = ?`).get(so2196) as {
+      tracking_token: string;
+    };
+    const tracking = await track(new Request(`http://portal.test/api/track/${trackingRow.tracking_token}`), {
+      params: Promise.resolve({ token: trackingRow.tracking_token }),
     });
     const tracked = await tracking.json();
     expect(JSON.stringify(tracked)).not.toMatch(/dock\.png|rate-confirmation|carrier-photos|8765/);

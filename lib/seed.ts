@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { addDaysISO, denverDate, denverLocalToISO } from "@/lib/dates";
 import type { PortalContext } from "@/lib/db";
@@ -9,15 +9,8 @@ import { ingestCarrierPhoto, solidPng } from "@/lib/photos";
 import { demoTrackingToken, timelineThrough } from "@/lib/orders";
 import type { Place, PortalStatus, RateReason, TrackingStage, TransitOption, TruckType } from "@/lib/types";
 
-/** Fake carrier-pay values planted in the internal columns. They must never reach EMIT. */
-export const DEMO_CARRIER_PAY_CENTS = 876543;
-export const DEMO_CARRIER_NAME = "BLACKHAWK HAULING LLC";
-export const DEMO_CARRIER_MC = "998877";
-export const DEMO_STAFF_NOTE =
-  "INTERNAL-ONLY-SENTINEL carrier pay is $8,765.43 for BLACKHAWK HAULING LLC MC 998877";
-
 const allen: Place = {
-  company: "EMIT Technologies",
+  company: "EMIT ALLEN",
   address1: "2437 Allen Avenue",
   city: "Sheridan",
   state: "WY",
@@ -25,7 +18,7 @@ const allen: Place = {
   country: "US",
 };
 const north: Place = {
-  company: "EMIT Technologies",
+  company: "EMIT NORTH",
   address1: "2571 North Main Street",
   city: "Sheridan",
   state: "WY",
@@ -33,15 +26,15 @@ const north: Place = {
   country: "US",
 };
 const pen: Place = {
-  company: "EMIT Technologies - PEN",
+  company: "EMIT PA",
   address1: "102 Ford Cove Drive",
-  city: "Catersburg",
+  city: "Canonsburg",
   state: "PA",
   postalCode: "15317",
   country: "US",
 };
 const vectis: Place = {
-  company: "Vectis Automation",
+  company: "VECTIS LOVELAND",
   address1: "451 St Cloud Dr",
   city: "Loveland",
   state: "CO",
@@ -587,10 +580,19 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
     insertUser.run(randomUUID(), "m.gray@emit.example", "M. Gray", "customer", hash, createdAt);
     insertUser.run(randomUUID(), "mgray@goselect.com", "Mike Gray", "admin", hash, createdAt);
     insertUser.run(randomUUID(), "dmartin@goselect.com", "Drew Martin", "admin", hash, createdAt);
-    insertUser.run(randomUUID(), "ops@enchantedrock.example", "Enchanted Rock", "receiver", hash, createdAt);
     ctx.db
-      .prepare(`INSERT INTO receiver_access (id, match_value, company, created_at) VALUES (?, ?, ?, ?)`)
-      .run(randomUUID(), "enchantedrock.example", "Enchanted Rock LLC", createdAt);
+      .prepare(
+        `INSERT INTO receivers (id, company, contact_emails, access_token, enabled, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 1, ?, ?)`,
+      )
+      .run(
+        randomUUID(),
+        "Enchanted Rock LLC",
+        JSON.stringify(["ops@enchantedrock.example"]),
+        randomBytes(32).toString("base64url"),
+        createdAt,
+        createdAt,
+      );
 
     const insertSite = ctx.db.prepare(
       `INSERT INTO sites (id, company, address1, city, state, postal_code, country, active, sort_order)
@@ -605,9 +607,8 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
          id, sales_order_number, load_number, portal_status, tracking_stage, timeline_json,
          origin_json, destination_json, stops_json, truck_type, transit, ship_date, ship_time,
          must_deliver_date, truck_eta, latest_eta, tracking_token, customer_cost_cents,
-         rate_reason, comments, created_by, created_at, updated_at, pending_review_count,
-         carrier_pay_cents, carrier_name, carrier_mc, staff_notes
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+         rate_reason, comments, created_by, created_at, updated_at, pending_review_count
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
     );
 
     for (const load of LOADS) {
@@ -640,10 +641,6 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
         load.createdBy,
         createdAt,
         createdAt,
-        DEMO_CARRIER_PAY_CENTS,
-        DEMO_CARRIER_NAME,
-        DEMO_CARRIER_MC,
-        DEMO_STAFF_NOTE,
       );
     }
   });
@@ -655,7 +652,7 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
   const bol = await pdfFromLines([
     [
       "BILL OF LADING",
-      "Shipper: EMIT Technologies",
+      "Shipper: EMIT ALLEN",
       "2437 Allen Avenue, Sheridan, WY",
       "Consignee: Kodiak Gas Services",
       "6801 Brooklyn Court, Oklahoma City, OK",
@@ -670,7 +667,7 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
   const mixed = await pdfFromLines([
     [
       "BILL OF LADING",
-      "Shipper: EMIT Technologies",
+      "Shipper: EMIT ALLEN",
       "Consignee: Encore Oilfield Services LLC",
       "Sales order: SO2981",
       "Commodity: Fabricated skid",

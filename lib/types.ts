@@ -136,7 +136,7 @@ export interface PublicTracking {
   truckType: TruckType | null;
 }
 
-export type PortalRole = "customer" | "admin" | "receiver";
+export type PortalRole = "customer" | "admin";
 
 export interface Session {
   userId: string;
@@ -151,6 +151,7 @@ export interface OrderConfirmation {
   emailedTo: string;
   subject: string;
   body: string;
+  sender: string | null;
   delivered: boolean;
   createdAt: string;
 }

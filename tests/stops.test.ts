@@ -129,17 +129,20 @@ describe("stop sequence", () => {
     const order = (await created.json()).order;
     expect(order.destination.company).toBe("Kodiak Gas Services");
 
-    const receiver = await sessionCookie({
-      userId: "receiver-1",
-      email: "ops@enchantedrock.example",
-      name: "Enchanted Rock",
-      role: "receiver",
+    const token = (
+      ctx.db.prepare(`SELECT access_token FROM receivers WHERE company = ?`).get("Enchanted Rock LLC") as {
+        access_token: string;
+      }
+    ).access_token;
+    const { GET: receiverPortal } = await import("@/app/api/r/[token]/route");
+    const list = await receiverPortal(new Request(`http://portal.test/api/r/${token}`), {
+      params: Promise.resolve({ token }),
     });
-    const list = await listOrdersRoute(new Request("http://portal.test/api/orders?q=SO-MID-DROP", { headers: { cookie: receiver } }));
     const listed = await list.json();
-    expect(listed.total).toBe(1);
-    expect(listed.orders[0].customerCost).toBeNull();
-    expect(listed.orders[0].stops.map((stop: { kind: string }) => stop.kind)).toEqual(["pickup", "drop", "drop"]);
+    const match = listed.loads.find((load: { salesOrderNumber: string }) => load.salesOrderNumber === "SO-MID-DROP");
+    expect(match).toBeTruthy();
+    expect(match.customerCost).toBeUndefined();
+    expect(match.stops.map((stop: { kind: string }) => stop.kind)).toEqual(["pickup", "drop", "drop"]);
     expect(listOrders(ctx, { q: "Casper", receiverCompany: "Enchanted Rock LLC" }).total).toBe(0);
   });
 

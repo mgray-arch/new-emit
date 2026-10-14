@@ -2,7 +2,6 @@ import { identityFromMicrosoft } from "@/lib/auth-policy";
 import { json } from "@/lib/http";
 import { upsertExternalUser } from "@/lib/passwords";
 import { readyPortal } from "@/lib/portal";
-import { receiverCompanyForEmail } from "@/lib/receivers";
 import {
   clearStateCookie,
   cookieValue,
@@ -58,7 +57,7 @@ export async function GET(req: Request) {
     const profile = (await profileResponse.json()) as { email?: string; preferred_username?: string; name?: string };
     const email = profile.email || profile.preferred_username || "";
     const ctx = await readyPortal();
-    const decision = identityFromMicrosoft(email, receiverCompanyForEmail(ctx, email));
+    const decision = identityFromMicrosoft(email);
     if (!decision.ok) return loginError(decision.error);
     const session = upsertExternalUser(ctx, {
       email: decision.email,

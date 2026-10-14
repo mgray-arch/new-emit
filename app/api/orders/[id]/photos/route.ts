@@ -3,7 +3,6 @@ import { errorResponse, json } from "@/lib/http";
 import { getOrder } from "@/lib/orders";
 import { listCarrierPhotos } from "@/lib/photos";
 import { readyPortal } from "@/lib/portal";
-import { accessScope } from "@/lib/receivers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,8 +13,7 @@ export async function GET(req: Request, context: { params: Promise<{ id: string 
     if (!isSession(session)) return session;
     const { id } = await context.params;
     const ctx = await readyPortal();
-    const scope = accessScope(ctx, session);
-    const order = getOrder(ctx, id, scope.receiverCompany);
+    const order = getOrder(ctx, id);
     if (!order) return json({ error: "Order not found" }, 404);
     const includeHeld = session.role === "admin";
     const photos = listCarrierPhotos(ctx, id, includeHeld).map((photo) => ({

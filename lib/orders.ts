@@ -303,17 +303,10 @@ function routeFrom(input: { origin?: OrderInput["origin"]; destination?: OrderIn
   }
 }
 
-function assertWriter(actor: Session): void {
-  if (actor.role === "receiver") {
-    throw new PortalError("Receivers can view their loads but cannot change them.", 403);
-  }
-}
-
-export function submitOrder(ctx: PortalContext, input: OrderInput, actor: Session): {
+export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: Session): Promise<{
   order: CustomerOrder;
-  confirmation: ReturnType<typeof sendOrderConfirmation>;
-} {
-  assertWriter(actor);
+  confirmation: Awaited<ReturnType<typeof sendOrderConfirmation>>;
+}> {
   const now = ctx.now().toISOString();
   const id = randomUUID();
   const loadNumber = nextLoadNumber(ctx);
@@ -329,11 +322,9 @@ export function submitOrder(ctx: PortalContext, input: OrderInput, actor: Sessio
            id, sales_order_number, load_number, portal_status, tracking_stage, timeline_json,
            origin_json, destination_json, stops_json, truck_type, transit, ship_date, ship_time,
            must_deliver_date, truck_eta, latest_eta, tracking_token, customer_cost_cents,
-           rate_reason, comments, created_by, created_at, updated_at, pending_review_count,
-           carrier_pay_cents, carrier_name, carrier_mc, staff_notes
+           rate_reason, comments, created_by, created_at, updated_at, pending_review_count
          ) VALUES (
-           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 0,
-           NULL, NULL, NULL, NULL
+           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 0
          )`,
       )
       .run(
@@ -363,12 +354,11 @@ export function submitOrder(ctx: PortalContext, input: OrderInput, actor: Sessio
   });
   const order = getOrder(ctx, id);
   if (!order) throw new PortalError("The order could not be saved", 500);
-  const confirmation = sendOrderConfirmation(ctx, order, actor.email);
+  const confirmation = await sendOrderConfirmation(ctx, order, actor.email);
   return { order, confirmation };
 }
 
 export function updateOrder(ctx: PortalContext, id: string, patch: OrderPatch, actor: Session): CustomerOrder {
-  assertWriter(actor);
   const existing = ctx.db.prepare(`${LIST_SQL_HEAD} WHERE id = ?`).get(id) as LoadRow | undefined;
   if (!existing) throw new PortalError("Order not found", 404);
   const current = rowToOrder(ctx, existing, false);
@@ -432,25 +422,4 @@ export function updateOrder(ctx: PortalContext, id: string, patch: OrderPatch, a
 
 export function demoTrackingToken(loadNumber: string): string {
   return createHash("sha256").update(`emit-demo:${loadNumber}`).digest("base64url");
-}
-
-/** Test-only reader for the columns EMIT must never receive. */
-export function readInternalLoad(ctx: PortalContext, id: string): {
-  carrierPayCents: number | null;
-  carrierName: string | null;
-  carrierMc: string | null;
-  staffNotes: string | null;
-} | null {
-  const row = ctx.db
-    .prepare(`SELECT carrier_pay_cents, carrier_name, carrier_mc, staff_notes FROM loads WHERE id = ?`)
-    .get(id) as
-    | { carrier_pay_cents: number | null; carrier_name: string | null; carrier_mc: string | null; staff_notes: string | null }
-    | undefined;
-  if (!row) return null;
-  return {
-    carrierPayCents: row.carrier_pay_cents,
-    carrierName: row.carrier_name,
-    carrierMc: row.carrier_mc,
-    staffNotes: row.staff_notes,
-  };
 }

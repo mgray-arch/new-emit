@@ -85,21 +85,17 @@ export const sitesSchema = z.object({
   sites: z.array(siteSchema).min(1),
 });
 
-export const receiversSchema = z.object({
-  receivers: z
-    .array(
-      z.object({
-        id: z.string().optional(),
-        matchValue: z
-          .string()
-          .trim()
-          .min(3)
-          .max(200)
-          .transform((value) => value.toLowerCase()),
-        company: z.string().trim().min(2).max(160),
-      }),
-    )
-    .max(200),
+const contactEmail = z.string().trim().email("Enter a contact email").max(200).transform((value) => value.toLowerCase());
+
+export const receiverCreateSchema = z.object({
+  company: z.string().trim().min(2).max(160),
+  contactEmails: z.array(contactEmail).max(30).default([]),
+});
+
+export const receiverPatchSchema = z.object({
+  company: z.string().trim().min(2).max(160).optional(),
+  contactEmails: z.array(contactEmail).max(30).optional(),
+  enabled: z.boolean().optional(),
 });
 
 export type OrderInput = z.infer<typeof orderInputSchema>;

@@ -4,7 +4,6 @@ import { getOrder } from "@/lib/orders";
 import { readCarrierPhoto } from "@/lib/photos";
 import { safeFilename } from "@/lib/documents";
 import { readyPortal } from "@/lib/portal";
-import { accessScope } from "@/lib/receivers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,8 +16,7 @@ export async function GET(req: Request, context: { params: Promise<{ id: string 
     const ctx = await readyPortal();
     const photo = readCarrierPhoto(ctx, id);
     if (!photo) return json({ error: "Photo not found" }, 404);
-    const scope = accessScope(ctx, session);
-    if (!getOrder(ctx, photo.loadId, scope.receiverCompany)) return json({ error: "Photo not found" }, 404);
+    if (!getOrder(ctx, photo.loadId)) return json({ error: "Photo not found" }, 404);
     if (photo.held && session.role !== "admin") return json({ error: "Photo not found" }, 404);
     return new Response(Buffer.from(photo.bytes), {
       headers: {

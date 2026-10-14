@@ -1,8 +1,8 @@
 import { isSession, requireAdmin } from "@/lib/guard";
 import { errorResponse, json } from "@/lib/http";
 import { readyPortal } from "@/lib/portal";
-import { listReceiverAccess, replaceReceiverAccess } from "@/lib/receivers";
-import { receiversSchema } from "@/lib/validate";
+import { createReceiver, listReceivers } from "@/lib/receivers";
+import { receiverCreateSchema } from "@/lib/validate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,19 +12,19 @@ export async function GET(req: Request) {
     const session = await requireAdmin(req);
     if (!isSession(session)) return session;
     const ctx = await readyPortal();
-    return json({ receivers: listReceiverAccess(ctx) });
+    return json({ receivers: listReceivers(ctx) });
   } catch (error) {
     return errorResponse(error);
   }
 }
 
-export async function PUT(req: Request) {
+export async function POST(req: Request) {
   try {
     const session = await requireAdmin(req);
     if (!isSession(session)) return session;
     const ctx = await readyPortal();
-    const body = receiversSchema.parse(await req.json());
-    return json({ receivers: replaceReceiverAccess(ctx, body.receivers) });
+    const body = receiverCreateSchema.parse(await req.json());
+    return json({ receiver: createReceiver(ctx, body) }, 201);
   } catch (error) {
     return errorResponse(error);
   }

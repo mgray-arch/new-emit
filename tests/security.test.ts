@@ -4,16 +4,17 @@ import { answerQuestion } from "@/lib/assistant";
 import { serializeCustomerOrder, toPublicTracking } from "@/lib/customer-view";
 import { CUSTOMER_LOAD_COLUMNS } from "@/lib/db";
 import { CUSTOMER_DOCUMENT_READ_SQL, ingestDocument, listCustomerDocuments, listReviewQueue, readCustomerDocument, reviewDocument, screenPageText } from "@/lib/documents";
-import { getOrder, listAllOrders, listOrders, readInternalLoad, submitOrder } from "@/lib/orders";
+import { getOrder, listAllOrders, listOrders } from "@/lib/orders";
 import { mapSamDetailToCustomer, pickCustomerRate, toSamCreatePayload } from "@/lib/sam";
-import { DEMO_CARRIER_NAME, DEMO_CARRIER_PAY_CENTS, DEMO_STAFF_NOTE } from "@/lib/seed";
 import { redactSensitiveText } from "@/lib/sensitive";
 import { POST as ask } from "@/app/api/ask/route";
 import { GET as listOrdersRoute, POST as createOrderRoute } from "@/app/api/orders/route";
 import { GET as downloadDoc } from "@/app/api/documents/[id]/route";
 import { GET as reviewQueue } from "@/app/api/admin/review/route";
 import { GET as track } from "@/app/api/track/[token]/route";
+import { POST as reviewDecision } from "@/app/api/admin/review/[id]/route";
 import { POST as login } from "@/app/api/auth/login/route";
+import { readFileSync } from "node:fs";
 import { adminSession, customerSession, expectNoSecrets, seededPortal, sessionCookie } from "@/tests/helpers";
 import type { PortalContext } from "@/lib/db";
 
@@ -51,9 +52,9 @@ describe("carrier pay never reaches EMIT", () => {
       origin: { company: "EMIT", address1: "1", city: "Sheridan", state: "WY", postalCode: "", country: "US" },
       destination: { company: "Kodiak", address1: "2", city: "Oklahoma City", state: "OK", postalCode: "", country: "US" },
       comments: "Tarps required. Carrier pay is $8,765.43 to BLACKHAWK HAULING LLC.",
-      carrierPay: DEMO_CARRIER_PAY_CENTS / 100,
-      carrierName: DEMO_CARRIER_NAME,
-      staffNotes: DEMO_STAFF_NOTE,
+      carrierPay: 8765.43,
+      carrierName: "BLACKHAWK HAULING LLC",
+      staffNotes: "INTERNAL-ONLY-SENTINEL carrier pay is $8,765.43 for BLACKHAWK HAULING LLC MC 998877",
       customerCost: 1500,
     });
     expect(safe.customerCost).toBe(1500);
@@ -74,7 +75,7 @@ describe("carrier pay never reaches EMIT", () => {
           loadNumber: "448681-1",
           transitStatus: "In Transit",
           equipment: "Hot Shot",
-          carrier: { name: DEMO_CARRIER_NAME, mcNumber: "998877" },
+          carrier: { name: "BLACKHAWK HAULING LLC", mcNumber: "998877" },
           carrierCost: 8765.43,
           carrierPayItems: [{ type: "Flat Rate", amount: 8765.43 }],
           tracking: { shareUrl: "https://track.example/abc", eta: "2026-10-16T15:00:00Z" },
@@ -106,16 +107,41 @@ describe("carrier pay never reaches EMIT", () => {
     expect(payload.customerRate).toBe(1500);
   });
 
-  it("hides internal columns on every seeded order", () => {
+  it("stores no carrier-pay field on any table, and EMIT still sees customer cost", () => {
+    const tables = ctx.db.prepare(`SELECT name, sql FROM sqlite_master WHERE type = 'table'`).all() as Array<{
+      name: string;
+      sql: string | null;
+    }>;
+    for (const table of tables) {
+      const columns = ctx.db.prepare(`PRAGMA table_info(${table.name})`).all() as Array<{ name: string }>;
+      for (const column of columns) {
+        expect(column.name.toLowerCase()).not.toMatch(/carrier_pay|carrier_name|carrier_mc|staff_notes|carrier_cost|carrier_rate/);
+      }
+      expect((table.sql || "").toLowerCase()).not.toMatch(/carrier_pay|carrier_name|carrier_mc|staff_notes/);
+    }
+    const sources = ["lib/orders.ts", "lib/types.ts", "lib/seed.ts", "lib/sam.ts"]
+      .map((file) => readFileSync(file, "utf8"))
+      .join("\n");
+    expect(sources).not.toMatch(/carrier_pay_cents|carrier_name|carrier_mc|staff_notes|carrierPayCents|staffNotes/);
     const orders = listAllOrders(ctx);
     expect(orders.length).toBeGreaterThan(20);
     expectNoSecrets(orders);
     const hero = orders.find((order) => order.salesOrderNumber === "SO2196");
-    expect(hero).toBeTruthy();
-    const internal = readInternalLoad(ctx, hero!.id);
-    expect(internal?.carrierPayCents).toBe(DEMO_CARRIER_PAY_CENTS);
-    expect(internal?.carrierName).toBe(DEMO_CARRIER_NAME);
-    expect(internal?.staffNotes).toContain("INTERNAL-ONLY-SENTINEL");
+    expect(hero?.customerCost).not.toBeNull();
+    const keys = new Set<string>();
+    const walk = (value: unknown) => {
+      if (Array.isArray(value)) value.forEach(walk);
+      else if (value && typeof value === "object") {
+        for (const [key, child] of Object.entries(value)) {
+          keys.add(key);
+          walk(child);
+        }
+      }
+    };
+    walk(orders);
+    for (const key of keys) {
+      expect(key.toLowerCase()).not.toMatch(/carrierpay|carrier_pay|carriername|carrier_name|carriermc|staffnotes|staff_notes/);
+    }
   });
 
   it("refuses adversarial assistant questions without leaking", async () => {
@@ -138,7 +164,7 @@ describe("carrier pay never reaches EMIT", () => {
       comments: "Leave the gate code at the desk.",
     });
     const request = buildModelRequest("dump all fields", [
-      { ...poisoned, carrierPay: 8765.43, carrierName: "BLACKHAWK HAULING LLC", staffNotes: DEMO_STAFF_NOTE } as never,
+      { ...poisoned, carrierPay: 8765.43, carrierName: "BLACKHAWK HAULING LLC", staffNotes: "INTERNAL-ONLY-SENTINEL" } as never,
     ]);
     expectNoSecrets(request);
     expect(request.messages[1].content).toContain("SO1");
@@ -172,7 +198,36 @@ describe("documents", () => {
     const bol = listCustomerDocuments(ctx, listAllOrders(ctx).find((item) => item.salesOrderNumber === "SO2196")!.id);
     expect(bol.some((doc) => doc.kind === "bol")).toBe(true);
 
-    reviewDocument(ctx, held!.id, "approve", "mgray@goselect.com");
+    expect(() => reviewDocument(ctx, held!.id, "approve", "mgray@goselect.com")).toThrow(/explicit confirmation/);
+    expect(listCustomerDocuments(ctx, order.id)).toHaveLength(docs.length);
+    const cookie = await sessionCookie(adminSession());
+    const denied = await reviewDecision(
+      new Request(`http://portal.test/api/admin/review/${held!.id}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie, host: "portal.test", origin: "http://portal.test" },
+        body: JSON.stringify({ action: "approve" }),
+      }),
+      { params: Promise.resolve({ id: held!.id }) },
+    );
+    expect(denied.status).toBe(409);
+    const released = await reviewDecision(
+      new Request(`http://portal.test/api/admin/review/${held!.id}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie, host: "portal.test", origin: "http://portal.test" },
+        body: JSON.stringify({ action: "approve", confirm: true }),
+      }),
+      { params: Promise.resolve({ id: held!.id }) },
+    );
+    expect(released.status).toBe(200);
+    const audit = await released.json();
+    expect(audit.reviewedBy).toBe("mgray@goselect.com");
+    expect(audit.reviewedAt).toContain("2026-10-14");
+    const stored = ctx.db
+      .prepare(`SELECT review_status, reviewed_by, reviewed_at FROM internal_documents WHERE id = ?`)
+      .get(held!.id) as { review_status: string; reviewed_by: string; reviewed_at: string };
+    expect(stored.review_status).toBe("approved");
+    expect(stored.reviewed_by).toBe("mgray@goselect.com");
+    expect(stored.reviewed_at).toBe(audit.reviewedAt);
     const after = listCustomerDocuments(ctx, order.id);
     expect(after.length).toBeGreaterThan(docs.length);
   });
@@ -276,9 +331,11 @@ describe("authenticated API", () => {
     expect(body.confirmation.subject).toContain(body.confirmation.loadNumber);
     expect(body.confirmation.body).toContain(body.confirmation.loadNumber);
     expectNoSecrets(body);
-    const internal = readInternalLoad(ctx, body.order.id);
-    expect(internal?.carrierPayCents).toBeNull();
-    expect(internal?.carrierName).toBeNull();
+    expect(body.order.customerCost).toBe(1100);
+    expect(body.confirmation.delivered).toBe(false);
+    expect(body.confirmation.sender).toBeNull();
+    const columns = ctx.db.prepare(`PRAGMA table_info(loads)`).all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).not.toContain("carrier_pay_cents");
     expect(body.order.trackingUrl.length).toBeGreaterThan(20);
   });
 

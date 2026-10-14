@@ -3,14 +3,14 @@ import { identityFromGoogle, identityFromMicrosoft } from "@/lib/auth-policy";
 import { answerQuestion } from "@/lib/assistant";
 import type { PortalContext } from "@/lib/db";
 import { listCustomerDocuments } from "@/lib/documents";
-import { getOrder, listAllOrders, listOrders } from "@/lib/orders";
+import { getOrder, listAllOrders } from "@/lib/orders";
+import { DELETE as deleteReceiver, PATCH as patchReceiver } from "@/app/api/admin/receivers/[id]/route";
+import { POST as regenerateLink } from "@/app/api/admin/receivers/[id]/regenerate/route";
+import { GET as listReceiversRoute, POST as createReceiverRoute } from "@/app/api/admin/receivers/route";
 import { GET as downloadDoc } from "@/app/api/documents/[id]/route";
-import { POST as ask } from "@/app/api/ask/route";
-import { GET as listOrdersRoute, POST as createOrderRoute } from "@/app/api/orders/route";
-import { GET as getOrderRoute } from "@/app/api/orders/[id]/route";
+import { GET as receiverPortal } from "@/app/api/r/[token]/route";
 import { GET as googleStart } from "@/app/api/auth/google/route";
-import { expectNoSecrets, seededPortal, sessionCookie } from "./helpers";
-import type { Session } from "@/lib/types";
+import { adminSession, customerSession, expectNoSecrets, seededPortal, sessionCookie } from "./helpers";
 
 let ctx: PortalContext;
 
@@ -18,21 +18,23 @@ beforeAll(async () => {
   ctx = await seededPortal();
 });
 
-function receiverSession(): Session {
-  return { userId: "receiver-1", email: "ops@enchantedrock.example", name: "Enchanted Rock", role: "receiver" };
+function enchantedToken(): string {
+  const row = ctx.db.prepare(`SELECT access_token FROM receivers WHERE company = ?`).get("Enchanted Rock LLC") as {
+    access_token: string;
+  };
+  return row.access_token;
 }
 
 describe("sign-in providers", () => {
-  it("sends EMIT and receivers to Microsoft and Select admins to Google", () => {
-    expect(identityFromMicrosoft("m.gray@emit.com", null)).toEqual({ ok: true, role: "customer", email: "m.gray@emit.com" });
-    expect(identityFromMicrosoft("mgray@goselect.com", null)).toMatchObject({ ok: false });
-    expect(identityFromMicrosoft("someone@goselect.com", "Enchanted Rock LLC")).toMatchObject({ ok: false });
-    expect(identityFromMicrosoft("ops@enchantedrock.example", "Enchanted Rock LLC")).toEqual({
-      ok: true,
-      role: "receiver",
-      email: "ops@enchantedrock.example",
+  it("sends EMIT staff to Microsoft and Select admins to Google", () => {
+    expect(identityFromMicrosoft("m.gray@emit.com")).toEqual({ ok: true, role: "customer", email: "m.gray@emit.com" });
+    expect(identityFromMicrosoft("mgray@goselect.com")).toMatchObject({ ok: false });
+    expect(identityFromMicrosoft("someone@goselect.com")).toMatchObject({ ok: false });
+    expect(identityFromMicrosoft("ops@enchantedrock.example")).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/private link/i),
     });
-    expect(identityFromMicrosoft("stranger@example.com", null)).toMatchObject({ ok: false });
+    expect(identityFromMicrosoft("stranger@example.com")).toMatchObject({ ok: false });
 
     expect(
       identityFromGoogle({ email: "mgray@goselect.com", emailVerified: true, hostedDomain: "goselect.com" }),
@@ -63,73 +65,134 @@ describe("sign-in providers", () => {
   });
 });
 
-describe("receivers see only their loads", () => {
-  it("filters the list, the assistant, and documents to the destination company", async () => {
-    const cookie = await sessionCookie(receiverSession());
-    const response = await listOrdersRoute(new Request("http://portal.test/api/orders?pageSize=50", { headers: { cookie } }));
+describe("receiver private links", () => {
+  it("shows only that company's loads, tracking, and photos", async () => {
+    const token = enchantedToken();
+    const response = await receiverPortal(new Request(`http://portal.test/api/r/${token}`), {
+      params: Promise.resolve({ token }),
+    });
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.orders.length).toBeGreaterThan(0);
-    expect(body.total).toBeGreaterThanOrEqual(body.orders.length);
-    expect(body.total).toBeLessThan(24);
-    expect(body.orders.every((order: { destination: { company: string }; customerCost: number | null }) => {
-      return order.destination.company === "Enchanted Rock LLC" && order.customerCost === null;
-    })).toBe(true);
-    expect(body.orders.some((order: { salesOrderNumber: string }) => order.salesOrderNumber === "SO2196")).toBe(false);
+    expect(body.company).toBe("Enchanted Rock LLC");
+    expect(body.loads.length).toBeGreaterThan(0);
+    expect(body.loads.length).toBeLessThan(24);
+    expect(
+      body.loads.every((load: { stops: Array<{ kind: string; company: string }> }) =>
+        load.stops.some((stop) => stop.kind === "drop" && stop.company === "Enchanted Rock LLC"),
+      ),
+    ).toBe(true);
+    expect(body.loads.some((load: { salesOrderNumber: string }) => load.salesOrderNumber === "SO2196")).toBe(false);
+    expect(body.loads[0].customerCost).toBeUndefined();
+    expect(body.loads[0].documents).toBeUndefined();
+    expect(body.loads[0].comments).toBeUndefined();
+    expect(body.loads[0].trackingUrl).toContain("/track/");
     expectNoSecrets(body);
-    expect(body.stats.total).toBe(body.total);
+
+    const missing = await receiverPortal(new Request("http://portal.test/api/r/not-a-real-receiver-token-value"), {
+      params: Promise.resolve({ token: "not-a-real-receiver-token-value" }),
+    });
+    expect(missing.status).toBe(404);
 
     const kodiak = listAllOrders(ctx).find((order) => order.salesOrderNumber === "SO2196")!;
-    const hidden = await getOrderRoute(new Request(`http://portal.test/api/orders/${kodiak.id}`, { headers: { cookie } }), {
-      params: Promise.resolve({ id: kodiak.id }),
-    });
-    expect(hidden.status).toBe(404);
-
-    const own = listOrders(ctx, { receiverCompany: "Enchanted Rock LLC" }).orders[0];
-    const visible = await getOrderRoute(new Request(`http://portal.test/api/orders/${own.id}`, { headers: { cookie } }), {
-      params: Promise.resolve({ id: own.id }),
-    });
-    expect(visible.status).toBe(200);
-    const visibleBody = await visible.json();
-    expect(visibleBody.order.customerCost).toBeNull();
-    expect(visibleBody.order.destination.company).toBe("Enchanted Rock LLC");
-
-    const created = await createOrderRoute(
-      new Request("http://portal.test/api/orders", {
-        method: "POST",
-        headers: { "content-type": "application/json", cookie, host: "portal.test", origin: "http://portal.test" },
-        body: JSON.stringify({
-          salesOrderNumber: "SO-RCV",
-          origin: { company: "EMIT Technologies", address1: "2437 Allen Avenue", city: "Sheridan", state: "WY", postalCode: "82801" },
-          destination: { company: "Enchanted Rock LLC", address1: "1", city: "Cypress", state: "TX", postalCode: "77429" },
-        }),
-      }),
-    );
-    expect(created.status).toBe(403);
-
-    const question = await ask(
-      new Request("http://portal.test/api/ask", {
-        method: "POST",
-        headers: { "content-type": "application/json", cookie, host: "portal.test", origin: "http://portal.test" },
-        body: JSON.stringify({ question: "where is SO2196?" }),
-      }),
-    );
-    const answer = await question.json();
-    expect(answer.text).not.toContain("900196-1");
-    expect(answer.text).not.toContain("SO2196");
-    expectNoSecrets(answer);
-
-    const week = await answerQuestion(ctx, "what delivers this week?", { receiverCompany: "Enchanted Rock LLC" });
-    expect(week.text).not.toContain("SO2196");
-    expect(week.references.some((ref) => ref.salesOrderNumber === "SO2196")).toBe(false);
-    expect(week.references.every((ref) => ref.destinationCity === "Cypress")).toBe(true);
-
+    expect(kodiak.customerCost).not.toBeNull();
+    expect(getOrder(ctx, kodiak.id, "Enchanted Rock LLC")).toBeNull();
     const bol = listCustomerDocuments(ctx, kodiak.id)[0];
-    expect(bol).toBeTruthy();
-    const download = await downloadDoc(new Request(`http://portal.test/api/documents/${bol.id}`, { headers: { cookie } }), {
+    const download = await downloadDoc(new Request(`http://portal.test/api/documents/${bol.id}`), {
       params: Promise.resolve({ id: bol.id }),
     });
-    expect(download.status).toBe(404);
-    expect(getOrder(ctx, kodiak.id, "Enchanted Rock LLC")).toBeNull();
+    expect(download.status).toBe(401);
+
+    const week = await answerQuestion(ctx, "what delivers this week?");
+    expect(week.references.some((ref) => ref.salesOrderNumber === "SO2196")).toBe(true);
+  });
+
+  it("lets an admin add, edit, disable, regenerate, and remove a receiver", async () => {
+    const cookie = await sessionCookie(adminSession());
+    const headers = { "content-type": "application/json", cookie, host: "portal.test", origin: "http://portal.test" };
+    const created = await createReceiverRoute(
+      new Request("http://portal.test/api/admin/receivers", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ company: "Kodiak Gas Services", contactEmails: ["dock@kodiak.example"] }),
+      }),
+    );
+    expect(created.status).toBe(201);
+    const receiver = (await created.json()).receiver;
+    expect(receiver.token.length).toBeGreaterThan(20);
+    expect(receiver.contactEmails).toEqual(["dock@kodiak.example"]);
+    const firstUrl = await receiverPortal(new Request(`http://portal.test/api/r/${receiver.token}`), {
+      params: Promise.resolve({ token: receiver.token }),
+    });
+    const firstBody = await firstUrl.json();
+    expect(firstBody.loads.some((load: { salesOrderNumber: string }) => load.salesOrderNumber === "SO2196")).toBe(true);
+    expectNoSecrets(firstBody);
+
+    const edited = await patchReceiver(
+      new Request(`http://portal.test/api/admin/receivers/${receiver.id}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ contactEmails: ["dock@kodiak.example", "ops@kodiak.example"] }),
+      }),
+      { params: Promise.resolve({ id: receiver.id }) },
+    );
+    expect((await edited.json()).receiver.contactEmails).toEqual(["dock@kodiak.example", "ops@kodiak.example"]);
+
+    const disabled = await patchReceiver(
+      new Request(`http://portal.test/api/admin/receivers/${receiver.id}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ enabled: false }),
+      }),
+      { params: Promise.resolve({ id: receiver.id }) },
+    );
+    expect((await disabled.json()).receiver.enabled).toBe(false);
+    const blocked = await receiverPortal(new Request(`http://portal.test/api/r/${receiver.token}`), {
+      params: Promise.resolve({ token: receiver.token }),
+    });
+    expect(blocked.status).toBe(404);
+
+    await patchReceiver(
+      new Request(`http://portal.test/api/admin/receivers/${receiver.id}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ enabled: true }),
+      }),
+      { params: Promise.resolve({ id: receiver.id }) },
+    );
+    const restored = await receiverPortal(new Request(`http://portal.test/api/r/${receiver.token}`), {
+      params: Promise.resolve({ token: receiver.token }),
+    });
+    expect(restored.status).toBe(200);
+
+    const regenerated = await regenerateLink(
+      new Request(`http://portal.test/api/admin/receivers/${receiver.id}/regenerate`, { method: "POST", headers }),
+      { params: Promise.resolve({ id: receiver.id }) },
+    );
+    const next = (await regenerated.json()).receiver;
+    expect(next.token).not.toBe(receiver.token);
+    const oldLink = await receiverPortal(new Request(`http://portal.test/api/r/${receiver.token}`), {
+      params: Promise.resolve({ token: receiver.token }),
+    });
+    expect(oldLink.status).toBe(404);
+    const newLink = await receiverPortal(new Request(`http://portal.test/api/r/${next.token}`), {
+      params: Promise.resolve({ token: next.token }),
+    });
+    expect(newLink.status).toBe(200);
+
+    const removed = await deleteReceiver(
+      new Request(`http://portal.test/api/admin/receivers/${receiver.id}`, { method: "DELETE", headers }),
+      { params: Promise.resolve({ id: receiver.id }) },
+    );
+    expect(removed.status).toBe(200);
+    const gone = await receiverPortal(new Request(`http://portal.test/api/r/${next.token}`), {
+      params: Promise.resolve({ token: next.token }),
+    });
+    expect(gone.status).toBe(404);
+
+    const customer = await sessionCookie(customerSession());
+    const forbidden = await listReceiversRoute(
+      new Request("http://portal.test/api/admin/receivers", { headers: { cookie: customer } }),
+    );
+    expect(forbidden.status).toBe(403);
   });
 });

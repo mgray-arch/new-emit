@@ -288,6 +288,10 @@ td select {
 
 .public { max-width: 720px; margin: 40px auto; padding: 0 18px 40px; }
 .public header { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+.receiver-card { background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+.receiver-card h2 { margin: 0 0 6px; font-size: 18px; }
+.confirm-box { border: 1px solid #e08a2f; border-radius: 10px; padding: 10px; margin-top: 8px; display: grid; gap: 8px; }
+.link-box { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
 
 @media (max-width: 980px) {
   .stats { grid-template-columns: 1fr 1fr; }

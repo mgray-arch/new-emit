@@ -12,10 +12,12 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
     const session = await requireAdmin(req);
     if (!isSession(session)) return session;
     const { id } = await context.params;
-    const body = z.object({ action: z.enum(["approve", "reject"]) }).parse(await req.json());
+    const body = z
+      .object({ action: z.enum(["approve", "reject"]), confirm: z.boolean().optional() })
+      .parse(await req.json());
     const ctx = await readyPortal();
-    reviewDocument(ctx, id, body.action, session.email);
-    return json({ ok: true });
+    const result = reviewDocument(ctx, id, body.action, session.email, { confirm: body.confirm });
+    return json({ ok: true, ...result });
   } catch (error) {
     return errorResponse(error);
   }

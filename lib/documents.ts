@@ -271,10 +271,16 @@ export function listReviewQueue(ctx: PortalContext): ReviewItem[] {
   }));
 }
 
-export function reviewDocument(ctx: PortalContext, id: string, action: "approve" | "reject", reviewer: string): void {
+export function reviewDocument(
+  ctx: PortalContext,
+  id: string,
+  action: "approve" | "reject",
+  reviewer: string,
+  options?: { confirm?: boolean },
+): { reviewedBy: string; reviewedAt: string; reviewStatus: "approved" | "rejected" } {
   const row = ctx.db
     .prepare(
-      `SELECT id, load_id, review_status, filename, media_type, bytes, kind
+      `SELECT id, load_id, review_status, filename, media_type, bytes, kind, screen_result
        FROM internal_documents WHERE id = ?`,
     )
     .get(id) as
@@ -286,9 +292,16 @@ export function reviewDocument(ctx: PortalContext, id: string, action: "approve"
         media_type: string;
         bytes: Uint8Array;
         kind: string;
+        screen_result: string;
       }
     | undefined;
   if (!row || row.review_status !== "pending") throw new PortalError("That page is not waiting for review", 404);
+  if (action === "approve" && row.screen_result === "block" && !options?.confirm) {
+    throw new PortalError(
+      "Releasing a page flagged as a rate confirmation requires an explicit confirmation.",
+      409,
+    );
+  }
   const now = ctx.now().toISOString();
   withTransaction(ctx.db, () => {
     if (action === "approve") {
@@ -309,6 +322,11 @@ export function reviewDocument(ctx: PortalContext, id: string, action: "approve"
       .run(action === "approve" ? "approved" : "rejected", now, reviewer, id);
     refreshPending(ctx.db, row.load_id);
   });
+  return {
+    reviewedBy: reviewer,
+    reviewedAt: now,
+    reviewStatus: action === "approve" ? "approved" : "rejected",
+  };
 }
 
 export function readInternalDocumentFile(

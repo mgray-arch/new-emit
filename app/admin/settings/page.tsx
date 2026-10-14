@@ -6,8 +6,11 @@ import type { Site } from "@/lib/types";
 
 interface ReceiverRow {
   id: string;
-  matchValue: string;
   company: string;
+  contactEmails: string[];
+  enabled: boolean;
+  token: string;
+  url: string;
 }
 
 const blank = (): Site => ({
@@ -22,19 +25,43 @@ const blank = (): Site => ({
   sortOrder: 0,
 });
 
+function emailsText(emails: string[]): string {
+  return emails.join(", ");
+}
+
+function parseEmails(value: string): string[] {
+  return value
+    .split(/[,;\s]+/)
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+}
+
 export default function SettingsPage() {
   const [sites, setSites] = useState<Site[]>([]);
   const [receivers, setReceivers] = useState<ReceiverRow[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, { company: string; emails: string }>>({});
+  const [company, setCompany] = useState("");
+  const [emails, setEmails] = useState("");
   const [message, setMessage] = useState("");
+  const [confirming, setConfirming] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/admin/sites")
       .then((response) => (response.ok ? response.json() : { sites: [] }))
       .then((body) => setSites(body.sites));
-    fetch("/api/admin/receivers")
-      .then((response) => (response.ok ? response.json() : { receivers: [] }))
-      .then((body) => setReceivers(body.receivers));
+    void loadReceivers();
   }, []);
+
+  async function loadReceivers() {
+    const response = await fetch("/api/admin/receivers");
+    if (!response.ok) return;
+    const body = await response.json();
+    const rows = body.receivers as ReceiverRow[];
+    setReceivers(rows);
+    setDrafts(
+      Object.fromEntries(rows.map((row) => [row.id, { company: row.company, emails: emailsText(row.contactEmails) }])),
+    );
+  }
 
   async function save() {
     const response = await fetch("/api/admin/sites", {
@@ -51,6 +78,88 @@ export default function SettingsPage() {
     }
     setSites(body.sites);
     setMessage("Ship-from sites saved.");
+  }
+
+  async function addReceiver() {
+    const response = await fetch("/api/admin/receivers", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ company, contactEmails: parseEmails(emails) }),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      setMessage(body.error || "Could not add that receiver");
+      return;
+    }
+    setCompany("");
+    setEmails("");
+    setMessage(`Private link created for ${body.receiver.company}.`);
+    await loadReceivers();
+  }
+
+  async function saveReceiver(id: string) {
+    const draft = drafts[id];
+    const response = await fetch(`/api/admin/receivers/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ company: draft.company, contactEmails: parseEmails(draft.emails) }),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      setMessage(body.error || "Could not save that receiver");
+      return;
+    }
+    setMessage(`Saved ${body.receiver.company}.`);
+    await loadReceivers();
+  }
+
+  async function setEnabled(id: string, enabled: boolean) {
+    const response = await fetch(`/api/admin/receivers/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      setMessage(body.error || "Could not update that link");
+      return;
+    }
+    setConfirming(null);
+    setMessage(enabled ? "Link enabled." : "Link disabled. The old URL no longer opens.");
+    await loadReceivers();
+  }
+
+  async function regenerate(id: string) {
+    const response = await fetch(`/api/admin/receivers/${id}/regenerate`, { method: "POST" });
+    const body = await response.json();
+    if (!response.ok) {
+      setMessage(body.error || "Could not regenerate that link");
+      return;
+    }
+    setConfirming(null);
+    setMessage("New link created. The previous URL no longer opens.");
+    await loadReceivers();
+  }
+
+  async function remove(id: string) {
+    const response = await fetch(`/api/admin/receivers/${id}`, { method: "DELETE" });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setMessage(body.error || "Could not remove that receiver");
+      return;
+    }
+    setConfirming(null);
+    setMessage("Receiver removed.");
+    await loadReceivers();
+  }
+
+  async function copy(url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setMessage("Link copied.");
+    } catch {
+      setMessage(url);
+    }
   }
 
   return (
@@ -79,59 +188,115 @@ export default function SettingsPage() {
             Save sites
           </button>
         </div>
+
         <h2 style={{ marginTop: 28 }}>RECEIVERS</h2>
         <p className="lede">
-          A receiver signs in with Microsoft and sees only loads whose destination company matches. Use a full email or a domain such as enchantedrock.com. The company text must match the destination on the load.
+          Receivers do not sign in. Each company gets a private link that shows only loads with a drop at that company, plus tracking and photos.
+          The company name has to match the drop on the load. Nothing is loaded until you add it here.
         </p>
-        {receivers.map((row, index) => (
-          <div className="site-row" key={row.id || index}>
-            <input
-              aria-label="Receiver email or domain"
-              value={row.matchValue}
-              placeholder="email or domain"
-              onChange={(event) =>
-                setReceivers(receivers.map((item, itemIndex) => (itemIndex === index ? { ...item, matchValue: event.target.value } : item)))
-              }
-            />
-            <input
-              aria-label="Destination company"
-              value={row.company}
-              placeholder="Destination company"
-              onChange={(event) =>
-                setReceivers(receivers.map((item, itemIndex) => (itemIndex === index ? { ...item, company: event.target.value } : item)))
-              }
-            />
-            <button className="btn danger" type="button" onClick={() => setReceivers(receivers.filter((_, itemIndex) => itemIndex !== index))}>
-              Remove
+        <div className="receiver-card">
+          <input aria-label="New receiver company" placeholder="Company name" value={company} onChange={(event) => setCompany(event.target.value)} />
+          <input
+            aria-label="New receiver emails"
+            placeholder="Contact emails, separated by commas"
+            value={emails}
+            onChange={(event) => setEmails(event.target.value)}
+          />
+          <div className="actions" style={{ justifyContent: "flex-start" }}>
+            <button className="btn" type="button" onClick={addReceiver} disabled={!company.trim()}>
+              Add receiver
             </button>
           </div>
-        ))}
-        <div className="actions" style={{ justifyContent: "flex-start" }}>
-          <button className="btn secondary" type="button" onClick={() => setReceivers([...receivers, { id: "", matchValue: "", company: "" }])}>
-            Add receiver
-          </button>
-          <button className="btn" type="button" onClick={saveReceivers}>
-            Save receivers
-          </button>
         </div>
+        {receivers.length === 0 && <p className="mini">No receiver companies yet.</p>}
+        {receivers.map((row) => {
+          const draft = drafts[row.id] ?? { company: row.company, emails: emailsText(row.contactEmails) };
+          return (
+            <article className="receiver-card" key={row.id}>
+              <input
+                aria-label={`Company for ${row.company}`}
+                value={draft.company}
+                onChange={(event) => setDrafts({ ...drafts, [row.id]: { ...draft, company: event.target.value } })}
+              />
+              <input
+                aria-label={`Emails for ${row.company}`}
+                value={draft.emails}
+                onChange={(event) => setDrafts({ ...drafts, [row.id]: { ...draft, emails: event.target.value } })}
+              />
+              <p className="mini">{row.enabled ? "Link is on" : "Link is disabled"}</p>
+              {row.enabled && row.url && (
+                <input className="link-box" aria-label={`Link for ${row.company}`} readOnly value={row.url} />
+              )}
+              <div className="actions" style={{ justifyContent: "flex-start" }}>
+                <button className="btn" type="button" onClick={() => saveReceiver(row.id)}>
+                  Save
+                </button>
+                {row.enabled && (
+                  <button className="btn secondary" type="button" onClick={() => copy(row.url)}>
+                    Copy link
+                  </button>
+                )}
+                <button className="btn secondary" type="button" onClick={() => setConfirming(`regen:${row.id}`)}>
+                  Regenerate
+                </button>
+                {row.enabled ? (
+                  <button className="btn secondary" type="button" onClick={() => setConfirming(`off:${row.id}`)}>
+                    Disable
+                  </button>
+                ) : (
+                  <button className="btn secondary" type="button" onClick={() => setEnabled(row.id, true)}>
+                    Enable
+                  </button>
+                )}
+                <button className="btn danger" type="button" onClick={() => setConfirming(`remove:${row.id}`)}>
+                  Remove
+                </button>
+              </div>
+              {row.enabled && confirming === `off:${row.id}` && (
+                <div className="confirm-box">
+                  <p>Disable this link? The current URL will stop opening until you enable it again.</p>
+                  <div className="actions">
+                    <button className="btn danger" type="button" onClick={() => setEnabled(row.id, false)}>
+                      Yes, disable it
+                    </button>
+                    <button className="btn secondary" type="button" onClick={() => setConfirming(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+              {confirming === `regen:${row.id}` && (
+                <div className="confirm-box">
+                  <p>Regenerate this link? The current URL stops working.</p>
+                  <div className="actions">
+                    <button className="btn" type="button" onClick={() => regenerate(row.id)}>
+                      Yes, regenerate
+                    </button>
+                    <button className="btn secondary" type="button" onClick={() => setConfirming(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+              {confirming === `remove:${row.id}` && (
+                <div className="confirm-box">
+                  <p>Remove {row.company}? Their link stops working.</p>
+                  <div className="actions">
+                    <button className="btn danger" type="button" onClick={() => remove(row.id)}>
+                      Yes, remove
+                    </button>
+                    <button className="btn secondary" type="button" onClick={() => setConfirming(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </article>
+          );
+        })}
       </main>
     </Shell>
   );
-
-  async function saveReceivers() {
-    const response = await fetch("/api/admin/receivers", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ receivers }),
-    });
-    const body = await response.json();
-    if (!response.ok) {
-      setMessage(body.error || "Could not save receivers");
-      return;
-    }
-    setReceivers(body.receivers);
-    setMessage("Receivers saved.");
-  }
 
   function update(index: number, patch: Partial<Site>) {
     setSites(sites.map((site, item) => (item === index ? { ...site, ...patch } : site)));

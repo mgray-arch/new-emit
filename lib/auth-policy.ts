@@ -1,11 +1,12 @@
 /**
  * Who may sign in, and through which provider.
- * EMIT staff and receivers use Microsoft. Select staff use Google.
+ * EMIT staff use Microsoft. Select staff use Google.
+ * Receivers do not sign in. They open a private link.
  * Select never uses Microsoft. EMIT never uses Google.
  * The only admins are the Select addresses in SELECT_ADMIN_EMAILS.
  */
 
-export type SignInRole = "customer" | "admin" | "receiver";
+export type SignInRole = "customer" | "admin";
 
 export interface AllowedIdentity {
   ok: true;
@@ -55,8 +56,8 @@ function isEmitStaff(email: string): boolean {
   return emitAllowedEmails().includes(email) || emitDomains().includes(domainOf(email));
 }
 
-/** Microsoft (Entra ID). Never grants Select admin. */
-export function identityFromMicrosoft(email: string, receiverCompany: string | null): IdentityDecision {
+/** Microsoft (Entra ID). EMIT staff only. Never grants Select admin or a receiver. */
+export function identityFromMicrosoft(email: string): IdentityDecision {
   const normalized = email.trim().toLowerCase();
   if (!normalized.includes("@")) {
     return { ok: false, error: "Microsoft did not return an email address." };
@@ -65,10 +66,9 @@ export function identityFromMicrosoft(email: string, receiverCompany: string | n
     return { ok: false, error: "Select staff sign in with Google, not Microsoft." };
   }
   if (isEmitStaff(normalized)) return { ok: true, role: "customer", email: normalized };
-  if (receiverCompany) return { ok: true, role: "receiver", email: normalized };
   return {
     ok: false,
-    error: "This Microsoft account is not an EMIT user or a receiver registered for this portal.",
+    error: "This Microsoft account is not an EMIT staff user. Receivers use the private link from Select and do not sign in.",
   };
 }
 

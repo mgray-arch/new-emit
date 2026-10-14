@@ -41,13 +41,12 @@ function LoginForm() {
       <form className="login-card" onSubmit={submit}>
         <img src="/brand/emit-logo.png" alt="EMIT" style={{ height: 42 }} />
         <h1>EMIT LOAD ORDER PORTAL</h1>
-        <p className="lede">EMIT and receivers sign in with Microsoft. Select staff sign in with Google.</p>
+        <p className="lede">EMIT staff sign in with Microsoft. Select staff sign in with Google. Receivers use a private link and do not sign in.</p>
         {showHint && (
           <div className="demo-hint">
             <strong>Test sign-in</strong>
             <p>EMIT: m.gray@emit.example</p>
             <p>Select: mgray@goselect.com, dmartin@goselect.com</p>
-            <p>Receiver: ops@enchantedrock.example</p>
             <p>Password: Emit-Demo-2026</p>
           </div>
         )}
@@ -79,7 +78,7 @@ function LoginForm() {
             window.location.href = "/api/auth/microsoft";
           }}
         >
-          Sign in with Microsoft
+          EMIT staff — Microsoft
         </button>
         <button
           className="btn secondary"
@@ -89,7 +88,7 @@ function LoginForm() {
             window.location.href = "/api/auth/google";
           }}
         >
-          Sign in with Google
+          Select staff — Google
         </button>
       </form>
     </div>

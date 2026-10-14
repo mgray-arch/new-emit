@@ -34,7 +34,7 @@ export async function signSession(session: Session): Promise<string> {
 export async function verifySessionToken(token: string): Promise<Session | null> {
   try {
     const { payload } = await jwtVerify(token, authSecret());
-    if (payload.role !== "customer" && payload.role !== "admin" && payload.role !== "receiver") return null;
+    if (payload.role !== "customer" && payload.role !== "admin") return null;
     if (typeof payload.email !== "string" || typeof payload.name !== "string" || typeof payload.sub !== "string") {
       return null;
     }
@@ -86,6 +86,8 @@ export function isPublicPath(pathname: string): boolean {
   if (pathname === "/api/auth/google" || pathname.startsWith("/api/auth/google/")) return true;
   if (pathname.startsWith("/track/")) return true;
   if (pathname.startsWith("/api/track/")) return true;
+  if (pathname.startsWith("/r/")) return true;
+  if (pathname.startsWith("/api/r/")) return true;
   // The Gmail assistant authenticates with a bearer token, not the session cookie.
   // The handler rejects every request that lacks that token or an admin session.
   if (pathname === "/api/ingest/carrier-photos") return true;

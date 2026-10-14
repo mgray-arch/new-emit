@@ -1,5 +1,4 @@
 import { serializeCustomerOrder } from "@/lib/customer-view";
-import { forViewer, type AccessScope } from "@/lib/receivers";
 import { listAllOrders } from "@/lib/orders";
 import type { PortalContext } from "@/lib/db";
 import { weekRange } from "@/lib/dates";
@@ -176,19 +175,13 @@ function answerLocally(question: string, orders: CustomerOrder[], now: Date): As
   };
 }
 
-export async function answerQuestion(
-  ctx: PortalContext,
-  question: string,
-  scope: AccessScope = { receiverCompany: null },
-): Promise<AssistantAnswer> {
+export async function answerQuestion(ctx: PortalContext, question: string): Promise<AssistantAnswer> {
   const trimmed = question.trim();
   if (trimmed.length < 2) {
     return { text: "Ask a question about an EMIT sales order.", references: [], refused: false };
   }
   if (isDisallowedQuestion(trimmed)) return refusal();
-  const orders = listAllOrders(ctx, scope.receiverCompany).map((order) =>
-    serializeCustomerOrder(forViewer(order, scope)),
-  );
+  const orders = listAllOrders(ctx).map((order) => serializeCustomerOrder(order));
   if (process.env.AI_API_KEY) {
     try {
       return await answerWithModel(trimmed, orders);

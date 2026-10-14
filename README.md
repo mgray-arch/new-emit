@@ -20,9 +20,8 @@ Open http://localhost:3000. With `DEMO_SEED=true` (the default outside productio
 | EMIT staff | m.gray@emit.example | Emit-Demo-2026 | Microsoft |
 | Select admin | mgray@goselect.com | Emit-Demo-2026 | Google |
 | Select admin | dmartin@goselect.com | Emit-Demo-2026 | Google |
-| Receiver (Enchanted Rock) | ops@enchantedrock.example | Emit-Demo-2026 | Microsoft |
 
-EMIT staff and receivers use Microsoft. Select staff use Google (`mgray@goselect.com` and `dmartin@goselect.com` only). There is no EMIT admin role and no public signup. Password sign-in is for this demo. Production rejects it unless `DEMO_SEED=true` or `ALLOW_PASSWORD_LOGIN=true`.
+EMIT staff use Microsoft. Select staff use Google (`mgray@goselect.com` and `dmartin@goselect.com` only). Receivers do not sign in: an admin creates a private link under Settings. The demo seed includes one Enchanted Rock LLC link. There is no EMIT admin role and no public signup. Password sign-in is for this demo. Production rejects it unless `DEMO_SEED=true` or `ALLOW_PASSWORD_LOGIN=true`.
 
 The Microsoft and Google buttons explain what is missing until `AZURE_AD_*` and `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` are set.
 
@@ -35,19 +34,19 @@ npm run build && npm start
 ## What EMIT can do
 
 - Broker dashboard with status counts, status filter, ship-date range, search by SO or city, and pagination. A load can have any number of pickups and drops, reordered before or after it is saved.
-- Create and edit a load. Submitting stores the order in the mock SAM layer and shows a confirmation that pairs the sales order with Select's load number. The same message is written to the outbox and sent by SMTP when `SMTP_HOST` and `SMTP_FROM` are set.
+- Create and edit a load. Submitting stores the order in the mock SAM layer and shows a confirmation that pairs the sales order with Select's load number. The same message is written to the outbox and sent through the Gmail API when `EMAIL_FROM` and the Gmail OAuth values are set.
 - Status timeline (Submitted, Booked, At Pickup, In Transit, Delivered), latest ETA, and a public tracking link.
-- Carrier photo gallery on each load. Select admins, EMIT, and that load's receiver can view the images. An ingest API (bearer token) and the admin upload accept jpg, png, heic, and webp only.
+- Carrier photo gallery on each load. Select admins and EMIT can view the images. An ingest API (bearer token) and the admin upload accept jpg, png, heic, and webp only.
 - Ask about an SO. Answers come from the customer-safe shipment view. With no `AI_API_KEY`, a built-in answerer handles status, location, and "this week" questions.
 
-Select admins also get the document review queue, the ship-from site list, and the receiver directory. A receiver sees only loads whose destination company matches their directory entry, and does not see EMIT's rate.
+Select admins also get the document review queue, the ship-from site list, and receiver companies. A receiver opens a private link and sees only that company's loads, tracking, and photos. The link does not show customer cost or documents.
 
 ## Security boundary
 
-Customer responses are an allowlist. Carrier pay, carrier name, MC number, and staff notes are columns the customer query never selects, and the serializer drops anything else. The assistant reads that same view. Questions about carrier pay, margins, or rate confirmations are refused before any shipment data is attached.
+Customer responses are an allowlist. Carrier pay is not stored in any table. The serializer still drops a carrier-pay field if one is posted, and the assistant reads that same view. Questions about carrier pay, margins, or rate confirmations are refused before any shipment data is attached.
 
-Every upload is split into pages and screened. A clean page is stored as a customer document. A rate confirmation, or a page the screener cannot read, stays in a separate internal store until a Select admin releases it. Carrier photos are a separate path: images only, deduped by hash, and a photo whose name, source, subject, or embedded text looks like a rate confirmation is kept for Select admins and is not shown to EMIT or receivers.
+Every upload is split into pages and screened. A clean page is stored as a customer document. A rate confirmation, or a page the screener cannot read, stays in a separate internal store. Releasing a flagged rate confirmation requires an explicit confirm and records the admin email and time. Carrier photos are a separate path: images only, deduped by hash, and a photo whose name, source, subject, or embedded text looks like a rate confirmation is kept for Select admins and is not shown to EMIT or on a receiver link.
 
-The only unauthenticated route is the tracking link (`/track/[token]` and `/api/track/[token]`). It returns cities, status, timeline, and ETA. It does not return cost, comments, documents, street address, or carrier data. Demo tokens are derived from the load number and are not secrets. New orders get a random token.
+Unauthenticated routes are the tracking link (`/track/[token]`) and a receiver's private link (`/r/[token]`). Tracking returns cities, status, timeline, and ETA. It does not return cost, comments, documents, street address, or carrier data. Demo tracking tokens are derived from the load number and are not secrets. New orders get a random token. Receiver tokens are 32 random bytes.
 
 See [docs/REPORT.md](docs/REPORT.md) for branding notes, deploy steps, credentials still needed, and open questions.

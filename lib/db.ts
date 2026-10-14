@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -12,7 +13,7 @@ CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   email TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL,
-  role TEXT NOT NULL CHECK(role IN ('customer', 'admin', 'receiver')),
+  role TEXT NOT NULL CHECK(role IN ('customer', 'admin')),
   password_hash TEXT,
   created_at TEXT NOT NULL
 );
@@ -53,11 +54,7 @@ CREATE TABLE IF NOT EXISTS loads (
   created_by TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  pending_review_count INTEGER NOT NULL DEFAULT 0,
-  carrier_pay_cents INTEGER,
-  carrier_name TEXT,
-  carrier_mc TEXT,
-  staff_notes TEXT
+  pending_review_count INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS customer_documents (
@@ -95,7 +92,8 @@ CREATE TABLE IF NOT EXISTS outbox (
   body TEXT NOT NULL,
   load_id TEXT,
   created_at TEXT NOT NULL,
-  delivered INTEGER NOT NULL DEFAULT 0
+  delivered INTEGER NOT NULL DEFAULT 0,
+  from_email TEXT
 );
 
 CREATE INDEX IF NOT EXISTS loads_ship_date ON loads(ship_date);
@@ -123,17 +121,21 @@ CREATE TABLE IF NOT EXISTS carrier_photos (
 
 CREATE INDEX IF NOT EXISTS carrier_photos_load ON carrier_photos(load_id, received_at);
 
-CREATE TABLE IF NOT EXISTS receiver_access (
+CREATE TABLE IF NOT EXISTS receivers (
   id TEXT PRIMARY KEY,
-  match_value TEXT NOT NULL UNIQUE,
   company TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  contact_emails TEXT NOT NULL DEFAULT '[]',
+  access_token TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS receivers_token ON receivers(access_token);
 `;
 
 /**
- * Columns a customer query is allowed to read. Carrier pay and staff notes are
- * stored on the row for the SAM sync, and they are intentionally absent here.
+ * Every column stored on a load. Carrier pay is not a column.
  */
 export const CUSTOMER_LOAD_COLUMNS = `
   id, sales_order_number, load_number, portal_status, tracking_stage, timeline_json,
@@ -151,6 +153,9 @@ export function openDatabase(file: string): DatabaseSync {
   db.exec(SCHEMA);
   migrateUserRoles(db);
   migrateStops(db);
+  migrateDropCarrierColumns(db);
+  migrateOutboxSender(db);
+  migrateReceivers(db);
   return db;
 }
 
@@ -169,23 +174,82 @@ function migrateStops(db: DatabaseSync): void {
   `);
 }
 
-/** Older databases restricted role to customer|admin. Rebuild that table in place. */
+const CARRIER_COLUMNS = ["carrier_pay_cents", "carrier_name", "carrier_mc", "staff_notes"];
+
+/** Carrier pay is not stored. Drop the columns from databases created before that decision. */
+function migrateDropCarrierColumns(db: DatabaseSync): void {
+  const columns = db.prepare(`PRAGMA table_info(loads)`).all() as Array<{ name: string }>;
+  for (const name of CARRIER_COLUMNS) {
+    if (columns.some((column) => column.name === name)) {
+      db.exec(`ALTER TABLE loads DROP COLUMN ${name}`);
+    }
+  }
+}
+
+function migrateOutboxSender(db: DatabaseSync): void {
+  const columns = db.prepare(`PRAGMA table_info(outbox)`).all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === "from_email")) {
+    db.exec(`ALTER TABLE outbox ADD COLUMN from_email TEXT`);
+  }
+}
+
+/**
+ * Receiver login rows become companies with a private link.
+ * Contact values that are email addresses are kept. Domain-only rows are not emails.
+ */
+function migrateReceivers(db: DatabaseSync): void {
+  const legacy = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'receiver_access'`).get() as
+    | { name: string }
+    | undefined;
+  if (!legacy) return;
+  const rows = db.prepare(`SELECT match_value, company, created_at FROM receiver_access`).all() as Array<{
+    match_value: string;
+    company: string;
+    created_at: string;
+  }>;
+  const grouped = new Map<string, { emails: string[]; createdAt: string }>();
+  for (const row of rows) {
+    const company = row.company.trim();
+    const current = grouped.get(company) ?? { emails: [], createdAt: row.created_at };
+    if (row.match_value.includes("@")) current.emails.push(row.match_value.trim().toLowerCase());
+    if (row.created_at < current.createdAt) current.createdAt = row.created_at;
+    grouped.set(company, current);
+  }
+  const existing = db.prepare(`SELECT id FROM receivers WHERE LOWER(company) = LOWER(?)`);
+  const insert = db.prepare(
+    `INSERT INTO receivers (id, company, contact_emails, access_token, enabled, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 1, ?, ?)`,
+  );
+  for (const [company, info] of grouped) {
+    if (existing.get(company)) continue;
+    const now = info.createdAt || new Date().toISOString();
+    insert.run(cryptoId(), company, JSON.stringify([...new Set(info.emails)]), randomBytes(32).toString("base64url"), now, now);
+  }
+  db.exec(`DROP TABLE receiver_access`);
+}
+
+function cryptoId(): string {
+  return randomBytes(16).toString("hex");
+}
+
+/** Databases that allowed a receiver login role drop those users. */
 function migrateUserRoles(db: DatabaseSync): void {
   const row = db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'`).get() as
     | { sql: string }
     | undefined;
-  if (!row || row.sql.includes("'receiver'")) return;
+  if (!row?.sql.includes("'receiver'")) return;
   db.exec(`
     CREATE TABLE users_migrated (
       id TEXT PRIMARY KEY,
       email TEXT NOT NULL UNIQUE,
       name TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('customer', 'admin', 'receiver')),
+      role TEXT NOT NULL CHECK(role IN ('customer', 'admin')),
       password_hash TEXT,
       created_at TEXT NOT NULL
     );
     INSERT INTO users_migrated (id, email, name, role, password_hash, created_at)
-      SELECT id, email, name, role, password_hash, created_at FROM users;
+      SELECT id, email, name, role, password_hash, created_at FROM users
+      WHERE role IN ('customer', 'admin');
     DROP TABLE users;
     ALTER TABLE users_migrated RENAME TO users;
   `);
