@@ -34,7 +34,7 @@ export async function signSession(session: Session): Promise<string> {
 export async function verifySessionToken(token: string): Promise<Session | null> {
   try {
     const { payload } = await jwtVerify(token, authSecret());
-    if (payload.role !== "customer" && payload.role !== "admin") return null;
+    if (payload.role !== "customer" && payload.role !== "admin" && payload.role !== "receiver") return null;
     if (typeof payload.email !== "string" || typeof payload.name !== "string" || typeof payload.sub !== "string") {
       return null;
     }
@@ -83,30 +83,19 @@ export function isPublicPath(pathname: string): boolean {
   if (pathname === "/login") return true;
   if (pathname === "/api/auth/login" || pathname === "/api/auth/logout") return true;
   if (pathname === "/api/auth/microsoft" || pathname.startsWith("/api/auth/microsoft/")) return true;
+  if (pathname === "/api/auth/google" || pathname.startsWith("/api/auth/google/")) return true;
   if (pathname.startsWith("/track/")) return true;
   if (pathname.startsWith("/api/track/")) return true;
   return false;
 }
 
-export function roleForEmail(email: string): "admin" | "customer" | null {
-  const normalized = email.trim().toLowerCase();
-  const admins = (process.env.SELECT_ADMIN_EMAILS || "mike@select.example,drew@select.example")
-    .split(",")
-    .map((item) => item.trim().toLowerCase())
-    .filter(Boolean);
-  if (admins.includes(normalized)) return "admin";
-  const extra = (process.env.EMIT_ALLOWED_EMAILS || "")
-    .split(",")
-    .map((item) => item.trim().toLowerCase())
-    .filter(Boolean);
-  if (extra.includes(normalized)) return "customer";
-  const domains = (process.env.EMIT_EMAIL_DOMAINS || "emit.example,emit.com,emittechnologies.com")
-    .split(",")
-    .map((item) => item.trim().toLowerCase())
-    .filter(Boolean);
-  const domain = normalized.split("@")[1];
-  if (domain && domains.includes(domain)) return "customer";
-  return null;
+export function oauthCallbackUrl(req: Request, provider: "microsoft" | "google"): string {
+  const path = `/api/auth/${provider}/callback`;
+  const configured = process.env.PORTAL_PUBLIC_URL?.replace(/\/$/, "");
+  if (configured) return `${configured}${path}`;
+  const host = req.headers.get("host") || "localhost:3000";
+  const proto = req.headers.get("x-forwarded-proto") || "http";
+  return `${proto}://${host}${path}`;
 }
 
 export function sameOrigin(req: Request): boolean {
@@ -142,9 +131,24 @@ export function microsoftAuthorizeUrl(state: string, redirectUri: string): strin
 }
 
 export function redirectUriFrom(req: Request): string {
-  const configured = process.env.PORTAL_PUBLIC_URL?.replace(/\/$/, "");
-  if (configured) return `${configured}/api/auth/microsoft/callback`;
-  const host = req.headers.get("host") || "localhost:3000";
-  const proto = req.headers.get("x-forwarded-proto") || "http";
-  return `${proto}://${host}/api/auth/microsoft/callback`;
+  return oauthCallbackUrl(req, "microsoft");
+}
+
+export function googleConfigured(): boolean {
+  return Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+}
+
+export function googleAuthorizeUrl(state: string, redirectUri: string): string {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  if (!clientId) throw new Error("Google sign-in is not configured");
+  const domain = (process.env.GOOGLE_HOSTED_DOMAIN || "goselect.com").trim().toLowerCase();
+  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  url.searchParams.set("client_id", clientId);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("redirect_uri", redirectUri);
+  url.searchParams.set("scope", "openid email profile");
+  url.searchParams.set("state", state);
+  url.searchParams.set("hd", domain);
+  url.searchParams.set("prompt", "select_account");
+  return url.toString();
 }

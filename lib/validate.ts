@@ -58,5 +58,22 @@ export const sitesSchema = z.object({
   sites: z.array(siteSchema).min(1),
 });
 
+export const receiversSchema = z.object({
+  receivers: z
+    .array(
+      z.object({
+        id: z.string().optional(),
+        matchValue: z
+          .string()
+          .trim()
+          .min(3)
+          .max(200)
+          .transform((value) => value.toLowerCase()),
+        company: z.string().trim().min(2).max(160),
+      }),
+    )
+    .max(200),
+});
+
 export type OrderInput = z.infer<typeof orderInputSchema>;
 export type OrderPatch = z.infer<typeof orderPatchSchema>;

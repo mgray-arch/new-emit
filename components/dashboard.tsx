@@ -98,6 +98,8 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   const [editing, setEditing] = useState<CustomerOrder | null>(null);
   const [creating, setCreating] = useState(startNew);
   const [draft, setDraft] = useState<Draft>(emptyDraft());
+  const [role, setRole] = useState<"customer" | "admin" | "receiver" | null>(null);
+  const receiver = role === "receiver";
   const [confirmation, setConfirmation] = useState<OrderConfirmation | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
@@ -106,6 +108,13 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     const handle = setTimeout(() => setQuery(q), 250);
     return () => clearTimeout(handle);
   }, [q]);
+
+  useEffect(() => {
+    fetch("/api/me")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body) => setRole(body?.role ?? null))
+      .catch(() => setRole(null));
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -210,8 +219,10 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
 
   return (
     <main className="page">
-      <h1>BROKER DASHBOARD</h1>
-      <p className="lede">View and track all incoming shipment loads</p>
+      <h1>{receiver ? "YOUR DELIVERIES" : "BROKER DASHBOARD"}</h1>
+      <p className="lede">
+        {receiver ? "Loads delivering to your company, and their tracking." : "View and track all incoming shipment loads"}
+      </p>
       <section className="stats">
         {STATS.map((stat) => (
           <button
@@ -267,26 +278,31 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
           }}
           aria-label="Search by SO or city"
         />
-        <button
-          className="btn"
-          type="button"
-          onClick={() => {
-            setCreating(true);
-            setEditing(null);
-            setDraft(emptyDraft());
-            setConfirmation(null);
-            setFormError("");
-          }}
-        >
-          New load
-        </button>
+        {!receiver && (
+          <button
+            className="btn"
+            type="button"
+            onClick={() => {
+              setCreating(true);
+              setEditing(null);
+              setDraft(emptyDraft());
+              setConfirmation(null);
+              setFormError("");
+            }}
+          >
+            New load
+          </button>
+        )}
       </div>
       {error && <p className="error">{error}</p>}
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              {["PO / Order #", "Origin", "Destination", "Truck Type", "Transit", "Ship Date/Time", "Must Deliver", "Truck ETA", "Status", "Cost", "Notes", "Files", "BOL", "Created By"].map((heading) => (
+              {(receiver
+                ? ["PO / Order #", "Origin", "Destination", "Truck Type", "Transit", "Ship Date/Time", "Must Deliver", "Truck ETA", "Status", "Notes", "Files", "BOL", "Created By"]
+                : ["PO / Order #", "Origin", "Destination", "Truck Type", "Transit", "Ship Date/Time", "Must Deliver", "Truck ETA", "Status", "Cost", "Notes", "Files", "BOL", "Created By"]
+              ).map((heading) => (
                 <th key={heading}>{heading}</th>
               ))}
             </tr>
@@ -324,15 +340,21 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                   <DateStack date={order.truckEta} />
                 </td>
                 <td>
-                  <select aria-label={`Status for ${order.salesOrderNumber}`} value={order.portalStatus} onChange={(event) => changeStatus(order, event.target.value as PortalStatus)}>
-                    {Object.entries(STATUS_LABEL).map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
+                  {receiver ? (
+                    STATUS_LABEL[order.portalStatus]
+                  ) : (
+                    <select aria-label={`Status for ${order.salesOrderNumber}`} value={order.portalStatus} onChange={(event) => changeStatus(order, event.target.value as PortalStatus)}>
+                      {Object.entries(STATUS_LABEL).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </td>
-                <td>{order.customerCost == null ? "—" : order.customerCost.toLocaleString("en-US", { style: "currency", currency: "USD" })}</td>
+                {!receiver && (
+                  <td>{order.customerCost == null ? "—" : order.customerCost.toLocaleString("en-US", { style: "currency", currency: "USD" })}</td>
+                )}
                 <td className="notes">{order.comments || "—"}</td>
                 <td>
                   <div>{order.attachmentCount}</div>
@@ -389,8 +411,8 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
           >
             <div className="dialog-head">
               <div>
-                <h2 id="load-title">{editing ? "EDIT LOAD" : "NEW LOAD"}</h2>
-                <p className="sub">{editing ? "Update load details." : "Submit a load to Select."}</p>
+                <h2 id="load-title">{receiver ? "SHIPMENT" : editing ? "EDIT LOAD" : "NEW LOAD"}</h2>
+                <p className="sub">{receiver ? "Tracking for this delivery." : editing ? "Update load details." : "Submit a load to Select."}</p>
               </div>
               <button className="icon-btn" type="button" aria-label="Close" onClick={() => { setCreating(false); setEditing(null); }}>
                 ✕
@@ -409,17 +431,23 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
               </div>
             )}
             {formError && <p className="error">{formError}</p>}
-            <LoadForm draft={draft} setDraft={setDraft} order={editing} sites={sites} />
+            <fieldset disabled={receiver} style={{ border: 0, margin: 0, padding: 0 }}>
+              <LoadForm draft={draft} setDraft={setDraft} order={editing} sites={sites} hideCommercial={receiver} />
+            </fieldset>
             {editing && (
               <div className="grid-2">
                 <div className="field">
                   <label>Attachments</label>
-                  <input aria-label="Upload attachment" type="file" onChange={(event) => event.target.files?.[0] && upload("attachment", event.target.files[0])} />
+                  {!receiver && (
+                    <input aria-label="Upload attachment" type="file" onChange={(event) => event.target.files?.[0] && upload("attachment", event.target.files[0])} />
+                  )}
                   <FileList docs={editing.documents.filter((doc) => doc.kind === "attachment")} />
                 </div>
                 <div className="field">
                   <label>BOL</label>
-                  <input aria-label="Upload BOL" type="file" onChange={(event) => event.target.files?.[0] && upload("bol", event.target.files[0])} />
+                  {!receiver && (
+                    <input aria-label="Upload BOL" type="file" onChange={(event) => event.target.files?.[0] && upload("bol", event.target.files[0])} />
+                  )}
                   <FileList docs={editing.documents.filter((doc) => doc.kind === "bol")} />
                 </div>
               </div>
@@ -431,9 +459,11 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
               <button className="btn secondary" type="button" onClick={() => { setCreating(false); setEditing(null); }}>
                 Close
               </button>
-              <button className="btn" type="button" disabled={saving} onClick={save}>
-                {saving ? "Saving…" : editing ? "Save changes" : "Submit order"}
-              </button>
+              {!receiver && (
+                <button className="btn" type="button" disabled={saving} onClick={save}>
+                  {saving ? "Saving…" : editing ? "Save changes" : "Submit order"}
+                </button>
+              )}
             </div>
           </div>
         </div>

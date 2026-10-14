@@ -11,7 +11,7 @@ export async function GET(req: Request) {
       headers: { location: "/login?microsoft=unconfigured", "cache-control": "no-store" },
     });
   }
-  const state = randomBytes(16).toString("base64url");
+  const state = `microsoft.${randomBytes(16).toString("base64url")}`;
   const url = microsoftAuthorizeUrl(state, redirectUriFrom(req));
   return new Response(null, {
     status: 302,

@@ -1,5 +1,5 @@
 import { errorResponse, json } from "@/lib/http";
-import { loginWithPassword } from "@/lib/passwords";
+import { loginWithPassword, passwordLoginAllowed } from "@/lib/passwords";
 import { readyPortal } from "@/lib/portal";
 import { sameOrigin, sessionCookie, signSession } from "@/lib/session";
 import { z } from "zod";
@@ -15,6 +15,9 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   try {
     if (!sameOrigin(req)) return json({ error: "Cross-origin request blocked" }, 403);
+    if (!passwordLoginAllowed()) {
+      return json({ error: "Sign in with Microsoft or Google." }, 403);
+    }
     const body = bodySchema.parse(await req.json());
     const ctx = await readyPortal();
     const session = loginWithPassword(ctx, body.email, body.password);

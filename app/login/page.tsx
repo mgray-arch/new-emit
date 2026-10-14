@@ -13,6 +13,8 @@ function LoginForm() {
   const [pending, setPending] = useState(false);
   const showHint = process.env.NEXT_PUBLIC_DEMO_HINT !== "false";
   const microsoftError = params.get("microsoft");
+  const googleError = params.get("google");
+  const queryError = params.get("error");
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -39,19 +41,23 @@ function LoginForm() {
       <form className="login-card" onSubmit={submit}>
         <img src="/brand/emit-logo.png" alt="EMIT" style={{ height: 42 }} />
         <h1>EMIT LOAD ORDER PORTAL</h1>
-        <p className="lede">Sign in with your EMIT Microsoft account or the portal password.</p>
+        <p className="lede">EMIT and receivers sign in with Microsoft. Select staff sign in with Google.</p>
         {showHint && (
           <div className="demo-hint">
             <strong>Test sign-in</strong>
-            <p>Customer: m.gray@emit.example</p>
-            <p>Select staff: mike@select.example, drew@select.example</p>
+            <p>EMIT: m.gray@emit.example</p>
+            <p>Select: mgray@goselect.com, dmartin@goselect.com</p>
+            <p>Receiver: ops@enchantedrock.example</p>
             <p>Password: Emit-Demo-2026</p>
           </div>
         )}
-        {(error || microsoftError) && (
+        {(error || queryError || microsoftError || googleError) && (
           <p className="error">
             {error ||
-              "Microsoft sign-in needs an Entra app registration. Set AZURE_AD_TENANT_ID, AZURE_AD_CLIENT_ID, and AZURE_AD_CLIENT_SECRET."}
+              queryError ||
+              (microsoftError
+                ? "Microsoft sign-in needs an Entra app registration. Set AZURE_AD_TENANT_ID, AZURE_AD_CLIENT_ID, and AZURE_AD_CLIENT_SECRET."
+                : "Google sign-in needs a Workspace OAuth client. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.")}
           </p>
         )}
         <div className="field">
@@ -74,6 +80,16 @@ function LoginForm() {
           }}
         >
           Sign in with Microsoft
+        </button>
+        <button
+          className="btn secondary"
+          type="button"
+          style={{ width: "100%", marginTop: 8 }}
+          onClick={() => {
+            window.location.href = "/api/auth/google";
+          }}
+        >
+          Sign in with Google
         </button>
       </form>
     </div>

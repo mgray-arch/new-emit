@@ -48,5 +48,5 @@ export function customerSession(): Session {
 }
 
 export function adminSession(): Session {
-  return { userId: "admin-1", email: "mike@select.example", name: "Mike", role: "admin" };
+  return { userId: "admin-1", email: "mgray@goselect.com", name: "Mike Gray", role: "admin" };
 }

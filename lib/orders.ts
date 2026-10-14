@@ -18,6 +18,7 @@ export interface OrderFilter {
   shipTo?: string | null;
   page?: number;
   pageSize?: number;
+  receiverCompany?: string | null;
 }
 
 export interface OrderPage {
@@ -120,6 +121,10 @@ function buildWhere(filter: OrderFilter): { sql: string; params: SQLInputValue[]
     clauses.push("ship_date <= ?");
     params.push(filter.shipTo);
   }
+  if (filter.receiverCompany) {
+    clauses.push("LOWER(json_extract(destination_json, '$.company')) = LOWER(?)");
+    params.push(filter.receiverCompany);
+  }
   if (filter.q && filter.q.trim()) {
     const like = likeContains(filter.q.trim());
     clauses.push(
@@ -155,17 +160,25 @@ export function listOrders(ctx: PortalContext, filter: OrderFilter = {}): OrderP
   };
 }
 
-export function listAllOrders(ctx: PortalContext): CustomerOrder[] {
+export function listAllOrders(ctx: PortalContext, receiverCompany?: string | null): CustomerOrder[] {
+  const where = receiverCompany ? `WHERE LOWER(json_extract(destination_json, '$.company')) = LOWER(?)` : "";
   const rows = ctx.db
-    .prepare(`${LIST_SQL_HEAD} ORDER BY ship_date IS NULL, ship_date ASC`)
-    .all() as unknown as LoadRow[];
+    .prepare(`${LIST_SQL_HEAD} ${where} ORDER BY ship_date IS NULL, ship_date ASC`)
+    .all(...(receiverCompany ? [receiverCompany] : [])) as unknown as LoadRow[];
   return rows.map((row) => rowToOrder(ctx, row, false));
 }
 
-export function getOrder(ctx: PortalContext, id: string): CustomerOrder | null {
+export function getOrder(ctx: PortalContext, id: string, receiverCompany?: string | null): CustomerOrder | null {
   const row = ctx.db.prepare(`${LIST_SQL_HEAD} WHERE id = ?`).get(id) as LoadRow | undefined;
   if (!row) return null;
-  return rowToOrder(ctx, row, true);
+  const order = rowToOrder(ctx, row, true);
+  if (
+    receiverCompany &&
+    order.destination.company.trim().toLowerCase() !== receiverCompany.trim().toLowerCase()
+  ) {
+    return null;
+  }
+  return order;
 }
 
 export function getOrderByToken(ctx: PortalContext, token: string): CustomerOrder | null {
@@ -174,8 +187,11 @@ export function getOrderByToken(ctx: PortalContext, token: string): CustomerOrde
   return rowToOrder(ctx, row, false);
 }
 
-export function orderStats(ctx: PortalContext): OrderStats {
-  const rows = ctx.db.prepare(`SELECT portal_status, COUNT(*) AS n FROM loads GROUP BY portal_status`).all() as Array<{
+export function orderStats(ctx: PortalContext, receiverCompany?: string | null): OrderStats {
+  const where = receiverCompany ? `WHERE LOWER(json_extract(destination_json, '$.company')) = LOWER(?)` : "";
+  const rows = ctx.db
+    .prepare(`SELECT portal_status, COUNT(*) AS n FROM loads ${where} GROUP BY portal_status`)
+    .all(...(receiverCompany ? [receiverCompany] : [])) as Array<{
     portal_status: string;
     n: number;
   }>;
@@ -217,10 +233,17 @@ function advanceStage(current: TrackingStage, portalStatus: PortalStatus): Track
   return order.indexOf(minimum) > order.indexOf(current) ? minimum : current;
 }
 
+function assertWriter(actor: Session): void {
+  if (actor.role === "receiver") {
+    throw new PortalError("Receivers can view their loads but cannot change them.", 403);
+  }
+}
+
 export function submitOrder(ctx: PortalContext, input: OrderInput, actor: Session): {
   order: CustomerOrder;
   confirmation: ReturnType<typeof sendOrderConfirmation>;
 } {
+  assertWriter(actor);
   const now = ctx.now().toISOString();
   const id = randomUUID();
   const loadNumber = nextLoadNumber(ctx);
@@ -273,6 +296,7 @@ export function submitOrder(ctx: PortalContext, input: OrderInput, actor: Sessio
 }
 
 export function updateOrder(ctx: PortalContext, id: string, patch: OrderPatch, actor: Session): CustomerOrder {
+  assertWriter(actor);
   const existing = ctx.db.prepare(`${LIST_SQL_HEAD} WHERE id = ?`).get(id) as LoadRow | undefined;
   if (!existing) throw new PortalError("Order not found", 404);
   const current = rowToOrder(ctx, existing, false);

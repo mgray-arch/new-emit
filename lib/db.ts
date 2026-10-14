@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   email TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL,
-  role TEXT NOT NULL CHECK(role IN ('customer', 'admin')),
+  role TEXT NOT NULL CHECK(role IN ('customer', 'admin', 'receiver')),
   password_hash TEXT,
   created_at TEXT NOT NULL
 );
@@ -103,6 +103,13 @@ CREATE INDEX IF NOT EXISTS loads_so ON loads(sales_order_number);
 CREATE INDEX IF NOT EXISTS customer_docs_load ON customer_documents(load_id);
 CREATE INDEX IF NOT EXISTS internal_docs_load ON internal_documents(load_id);
 CREATE INDEX IF NOT EXISTS internal_docs_review ON internal_documents(review_status);
+
+CREATE TABLE IF NOT EXISTS receiver_access (
+  id TEXT PRIMARY KEY,
+  match_value TEXT NOT NULL UNIQUE,
+  company TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 `;
 
 /**
@@ -123,7 +130,30 @@ export function openDatabase(file: string): DatabaseSync {
   const db = new DatabaseSync(file);
   db.exec("PRAGMA foreign_keys = ON");
   db.exec(SCHEMA);
+  migrateUserRoles(db);
   return db;
+}
+
+/** Older databases restricted role to customer|admin. Rebuild that table in place. */
+function migrateUserRoles(db: DatabaseSync): void {
+  const row = db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'`).get() as
+    | { sql: string }
+    | undefined;
+  if (!row || row.sql.includes("'receiver'")) return;
+  db.exec(`
+    CREATE TABLE users_migrated (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('customer', 'admin', 'receiver')),
+      password_hash TEXT,
+      created_at TEXT NOT NULL
+    );
+    INSERT INTO users_migrated (id, email, name, role, password_hash, created_at)
+      SELECT id, email, name, role, password_hash, created_at FROM users;
+    DROP TABLE users;
+    ALTER TABLE users_migrated RENAME TO users;
+  `);
 }
 
 export function withTransaction<T>(db: DatabaseSync, fn: () => T): T {

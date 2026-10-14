@@ -9,7 +9,7 @@ Test portal for EMIT Technologies. It runs against a seeded mock of Select's SAM
 3. **Ask about an SO.** "where is SO2196?" answers from shipment data. "what are you paying the truck?" is refused and does not include a dollar amount. With no AI key, the built-in answerer is used. If `AI_API_KEY` is set, the model receives only the customer-safe JSON.
 4. **Search, pagination, mobile.** Search matches SO or city. Page size is 8. Upcoming ship dates are listed first. Below 980px the table becomes stacked cards.
 
-`npm test` — 20 tests passed (18 security, 2 boundary).
+`npm test` — 23 tests passed (18 security, 3 access, 2 boundary).
 
 ## Security
 
@@ -52,10 +52,32 @@ Documents, users, the review queue, and the outbox stay in that database even af
 
 ## Auth
 
-- Email and password (bcrypt). Demo password is `Emit-Demo-2026` unless `DEMO_USER_PASSWORD` is set.
-- Microsoft Entra ID authorization-code flow. Redirect URI to register: `{PORTAL_PUBLIC_URL}/api/auth/microsoft/callback`.
-- Anyone whose email is in `SELECT_ADMIN_EMAILS` is staff. Everyone else must match `EMIT_ALLOWED_EMAILS` or `EMIT_EMAIL_DOMAINS` (default `emit.example`, `emit.com`, `emittechnologies.com`). EMIT users all have the same access. There are no customer role tiers.
+Two providers, on purpose. Select does not use Microsoft.
+
+- **Microsoft (Entra ID)** is for EMIT staff and for receivers. An EMIT domain (`EMIT_EMAIL_DOMAINS`, default `emit.example`, `emit.com`, `emittechnologies.com`) or an address in `EMIT_ALLOWED_EMAILS` sees every EMIT load. Any other Microsoft account is a receiver only when Settings → Receivers maps their email or domain to a destination company. A Select address is rejected and told to use Google.
+- **Google** is for Select staff. The Workspace hosted domain is `goselect.com`. The only admins are `mgray@goselect.com` (Mike Gray) and `dmartin@goselect.com` (Drew Martin), from `SELECT_ADMIN_EMAILS`. Any other Google account is rejected. EMIT addresses are rejected and told to use Microsoft. There is no EMIT admin role.
+- **Password** is the demo and local path (bcrypt). Demo password is `Emit-Demo-2026` unless `DEMO_USER_PASSWORD` is set. Production rejects passwords unless `DEMO_SEED=true` or `ALLOW_PASSWORD_LOGIN=true`.
 - No self-service signup and no password reset.
+
+### What Mike needs to create
+
+Microsoft, in EMIT's Entra admin (or a dedicated portal tenant):
+
+- App registration, type Web.
+- Redirect URI: `{PORTAL_PUBLIC_URL}/api/auth/microsoft/callback`
+- Delegated scopes: `openid`, `profile`, `email`
+- A client secret. Put the tenant id, client id, and secret in `AZURE_AD_TENANT_ID`, `AZURE_AD_CLIENT_ID`, `AZURE_AD_CLIENT_SECRET`.
+- If receivers live in EMIT's tenant as guests, the tenant id is EMIT's directory. If they sign in from their own Microsoft 365, set `AZURE_AD_TENANT_ID` to `organizations` and register the app as multi-tenant (accounts in any organizational directory).
+
+Google, in Select's Google Cloud project, OAuth consent screen set to **Internal** (goselect.com only):
+
+- OAuth client type: Web application.
+- Authorized redirect URI: `{PORTAL_PUBLIC_URL}/api/auth/google/callback`
+- Authorized JavaScript origin: the origin of `PORTAL_PUBLIC_URL` (scheme + host, no path).
+- Scopes: `openid`, `email`, `profile`
+- Client id and secret go in `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. `GOOGLE_HOSTED_DOMAIN` stays `goselect.com`.
+
+The portal also sends `hd=goselect.com` so the Google screen prefers the Select Workspace.
 
 ## Deploy
 
@@ -85,8 +107,10 @@ Turn off the on-screen demo hint with `NEXT_PUBLIC_DEMO_HINT=false` once real us
 | `AUTH_SECRET` | Select, generate a long random string | Session signing. Required in production. |
 | `PORTAL_PUBLIC_URL` | Whoever hosts the test site | Links in confirmation email and tracking. |
 | `AZURE_AD_TENANT_ID`, `AZURE_AD_CLIENT_ID`, `AZURE_AD_CLIENT_SECRET` | Mike, Entra app registration | Microsoft 365 sign-in. |
-| `SELECT_ADMIN_EMAILS` | Mike | Real addresses for Mike and Drew. |
-| `EMIT_EMAIL_DOMAINS` or `EMIT_ALLOWED_EMAILS` | Mike | Which Microsoft users count as EMIT. |
+| `SELECT_ADMIN_EMAILS` | Defaults to `mgray@goselect.com,dmartin@goselect.com`. Change only if those addresses change. |
+| `EMIT_EMAIL_DOMAINS` or `EMIT_ALLOWED_EMAILS` | Mike | Which Microsoft users are EMIT staff (all loads), not receivers. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Select Google Cloud, internal OAuth client | Select staff sign-in. |
+| `GOOGLE_HOSTED_DOMAIN` | Default `goselect.com` | Workspace domain check. |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Select email | Confirmation mail. Without these, the message is only in the outbox and on screen. |
 | `AI_API_KEY`, optional `AI_BASE_URL`, `AI_MODEL` | Select | OpenAI-compatible chat. Blank uses the built-in answerer. |
 | `SAM_API_BASE_URL`, `SAM_API_TOKEN`, `SAM_CUSTOMER_ID` | Mike, already requested | Live orders. Not connected until the HTTP contract is confirmed. |
@@ -102,7 +126,8 @@ Turn off the on-screen demo hint with `NEXT_PUBLIC_DEMO_HINT=false` once real us
 - Uploads are not virus-scanned. Max 8 MB and 25 pages.
 - A page the screener cannot read is held, including photos and Word files.
 - Cancelled loads stay on the dashboard and can be filtered.
-- Enchanted Rock is only a destination on demo loads. A later receiver spreadsheet can filter on destination company. The tracking link is the private-link direction, not that spreadsheet.
+- A receiver is a Microsoft user whose email or domain is in the receiver directory. They see loads whose destination company matches that entry, including released BOLs and PODs, and not EMIT's cost or rate-reason code. EMIT staff still see every load and the cost. The demo maps `enchantedrock.example` to Enchanted Rock LLC.
+- The public tracking link is still a per-load capability URL. It does not list other loads. It is not tied to the receiver's Microsoft session.
 - Demo tracking tokens are `sha256("emit-demo:" + loadNumber)` and are predictable. New orders use 24 random bytes.
 - Load numbers 900181–900204 and the carrier sentinels are fake.
 - Approving a blocked rate confirmation is allowed, with the excerpt in front of the admin, so a false positive can be released. That is a product choice, not a silent bypass.
@@ -110,15 +135,17 @@ Turn off the on-screen demo hint with `NEXT_PUBLIC_DEMO_HINT=false` once real us
 
 ## Open questions for Mike
 
-1. Entra tenant, app client id, and client secret, and which EMIT email domains may sign in.
-2. The real email addresses for Mike and Drew, and any other Select admin.
-3. SAM base URL, auth scheme, EMIT's customer id, and the real endpoints. Does creating a shipment create the order and the first load together, the way the portal does now?
-4. Confirm Cost is the sell rate EMIT should keep seeing, and that staff should not see carrier pay on the order itself, only inside a quarantined document.
-5. Should confirmation email go through SMTP, or through Microsoft Graph as a Select mailbox?
-6. Which model should answer questions once a key exists: Azure OpenAI in Select's tenant, or another OpenAI-compatible endpoint?
-7. Should a page the screener marks as a rate confirmation be impossible to release, or is one admin's approval enough?
-8. Is the PEN address Catersburg or Canonsburg, Pennsylvania?
-9. Do non-Microsoft users need password reset before go-live?
-10. When the 587 loads are migrated, should historical carrier documents be screened the same way, and who reviews the queue?
-11. For receivers later: is the tracking link enough for Enchanted Rock until the spreadsheet view, and should that link omit the customer cost as it does now?
-12. Where should the test host live, and who owns the DNS when a real hostname is wanted?
+Answered: EMIT staff and receivers sign in with Microsoft. Select staff sign in with Google. The only admins are Mike Gray (`mgray@goselect.com`) and Drew Martin (`dmartin@goselect.com`). There is no EMIT admin role.
+
+1. SAM base URL, auth scheme, EMIT's customer id, and the real endpoints. Does creating a shipment create the order and the first load together, the way the portal does now?
+2. Confirm Cost is the sell rate EMIT staff should keep seeing. Receivers do not see it. Carrier pay stays off the order for everyone and is visible to Select only inside a quarantined document.
+3. Should confirmation email go through SMTP, or through a Select mailbox? Google is Select's identity provider, so the Gmail API is a possible sender. Microsoft Graph would send as an EMIT mailbox.
+4. Which model should answer questions once a key exists?
+5. Should a page the screener marks as a rate confirmation be impossible to release, or is one Select admin's approval enough?
+6. Is the PEN address Catersburg or Canonsburg, Pennsylvania?
+7. Which receiver companies and email domains should be in the directory at launch? The demo only has Enchanted Rock LLC / `enchantedrock.example`. The company string has to match the destination on the load.
+8. Do receivers sign in as guests in EMIT's Entra tenant, or from their own Microsoft 365 tenants? That chooses EMIT's tenant id versus `organizations`.
+9. Enchanted Rock's spreadsheet view is still later. A signed-in receiver currently gets the filtered load list, not a separate grid.
+10. When the 587 loads are migrated, should historical documents be screened the same way, and who reviews that queue?
+11. Where should the test host live, and who owns DNS when a real hostname is wanted?
+12. Is demo password sign-in acceptable until the OAuth apps exist, and should it be removed after that?

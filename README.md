@@ -15,13 +15,16 @@ npm run dev
 
 Open http://localhost:3000. With `DEMO_SEED=true` (the default outside production) the first start creates demo users and 24 clearly fake shipments.
 
-| Who | Email | Password |
-| --- | --- | --- |
-| EMIT customer | m.gray@emit.example | Emit-Demo-2026 |
-| Select staff | mike@select.example | Emit-Demo-2026 |
-| Select staff | drew@select.example | Emit-Demo-2026 |
+| Who | Email | Password | Sign-in in production |
+| --- | --- | --- | --- |
+| EMIT staff | m.gray@emit.example | Emit-Demo-2026 | Microsoft |
+| Select admin | mgray@goselect.com | Emit-Demo-2026 | Google |
+| Select admin | dmartin@goselect.com | Emit-Demo-2026 | Google |
+| Receiver (Enchanted Rock) | ops@enchantedrock.example | Emit-Demo-2026 | Microsoft |
 
-There is no public signup. Microsoft sign-in appears on the login page and redirects back with an explanation until `AZURE_AD_TENANT_ID`, `AZURE_AD_CLIENT_ID`, and `AZURE_AD_CLIENT_SECRET` are set.
+EMIT staff and receivers use Microsoft. Select staff use Google (`mgray@goselect.com` and `dmartin@goselect.com` only). There is no EMIT admin role and no public signup. Password sign-in is for this demo. Production rejects it unless `DEMO_SEED=true` or `ALLOW_PASSWORD_LOGIN=true`.
+
+The Microsoft and Google buttons explain what is missing until `AZURE_AD_*` and `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` are set.
 
 ```bash
 npm test
@@ -36,7 +39,7 @@ npm run build && npm start
 - Status timeline (Submitted, Booked, At Pickup, In Transit, Delivered), latest ETA, and a public tracking link.
 - Ask about an SO. Answers come from the customer-safe shipment view. With no `AI_API_KEY`, a built-in answerer handles status, location, and "this week" questions.
 
-Select staff (emails in `SELECT_ADMIN_EMAILS`) also get the document review queue and the ship-from site list.
+Select admins also get the document review queue, the ship-from site list, and the receiver directory. A receiver sees only loads whose destination company matches their directory entry, and does not see EMIT's rate.
 
 ## Security boundary
 

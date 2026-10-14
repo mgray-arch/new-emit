@@ -172,7 +172,7 @@ describe("documents", () => {
     const bol = listCustomerDocuments(ctx, listAllOrders(ctx).find((item) => item.salesOrderNumber === "SO2196")!.id);
     expect(bol.some((doc) => doc.kind === "bol")).toBe(true);
 
-    reviewDocument(ctx, held!.id, "approve", "mike@select.example");
+    reviewDocument(ctx, held!.id, "approve", "mgray@goselect.com");
     const after = listCustomerDocuments(ctx, order.id);
     expect(after.length).toBeGreaterThan(docs.length);
   });

@@ -2,6 +2,7 @@ import { errorResponse, json } from "@/lib/http";
 import { isSession, requireSession } from "@/lib/guard";
 import { listOrders, orderStats, submitOrder } from "@/lib/orders";
 import { readyPortal } from "@/lib/portal";
+import { accessScope, assertCanChangeOrders, forViewer } from "@/lib/receivers";
 import type { PortalStatus } from "@/lib/types";
 import { PORTAL_STATUSES } from "@/lib/types";
 import { orderInputSchema } from "@/lib/validate";
@@ -14,6 +15,7 @@ export async function GET(req: Request) {
     const session = await requireSession(req);
     if (!isSession(session)) return session;
     const ctx = await readyPortal();
+    const scope = accessScope(ctx, session);
     const url = new URL(req.url);
     const status = url.searchParams.get("status");
     const page = Number(url.searchParams.get("page") || "1");
@@ -24,8 +26,13 @@ export async function GET(req: Request) {
       shipTo: url.searchParams.get("shipTo"),
       page: Number.isFinite(page) ? page : 1,
       pageSize: 8,
+      receiverCompany: scope.receiverCompany,
     });
-    return json({ ...orders, stats: orderStats(ctx) });
+    return json({
+      ...orders,
+      orders: orders.orders.map((order) => forViewer(order, scope)),
+      stats: orderStats(ctx, scope.receiverCompany),
+    });
   } catch (error) {
     return errorResponse(error);
   }
@@ -36,6 +43,7 @@ export async function POST(req: Request) {
     const session = await requireSession(req);
     if (!isSession(session)) return session;
     const ctx = await readyPortal();
+    assertCanChangeOrders(session);
     const input = orderInputSchema.parse(await req.json());
     const result = submitOrder(ctx, input, session);
     return json(result, 201);

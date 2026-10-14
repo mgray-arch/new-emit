@@ -173,11 +173,13 @@ export default function LoadForm({
   setDraft,
   order,
   sites,
+  hideCommercial = false,
 }: {
   draft: Draft;
   setDraft: (draft: Draft) => void;
   order?: CustomerOrder | null;
   sites: Site[];
+  hideCommercial?: boolean;
 }) {
   return (
     <>
@@ -240,26 +242,28 @@ export default function LoadForm({
           </select>
         </div>
       </div>
-      <div className="grid-2">
-        <div className="field">
-          <label>Cost (optional)</label>
-          <input
-            inputMode="decimal"
-            placeholder="e.g., 1500.00"
-            value={draft.customerCost}
-            onChange={(event) => setDraft({ ...draft, customerCost: event.target.value })}
-          />
+      {!hideCommercial && (
+        <div className="grid-2">
+          <div className="field">
+            <label>Cost (optional)</label>
+            <input
+              inputMode="decimal"
+              placeholder="e.g., 1500.00"
+              value={draft.customerCost}
+              onChange={(event) => setDraft({ ...draft, customerCost: event.target.value })}
+            />
+          </div>
+          <div className="field">
+            <label>Rate Reason Code (optional)</label>
+            <select value={draft.rateReason} onChange={(event) => setDraft({ ...draft, rateReason: event.target.value })}>
+              <option value="">Select reason code</option>
+              {RATE_REASONS.map((reason) => (
+                <option key={reason}>{reason}</option>
+              ))}
+            </select>
+          </div>
         </div>
-        <div className="field">
-          <label>Rate Reason Code (optional)</label>
-          <select value={draft.rateReason} onChange={(event) => setDraft({ ...draft, rateReason: event.target.value })}>
-            <option value="">Select reason code</option>
-            {RATE_REASONS.map((reason) => (
-              <option key={reason}>{reason}</option>
-            ))}
-          </select>
-        </div>
-      </div>
+      )}
       <div className="grid-2">
         <div className="field">
           <label>Expected Ship Date</label>

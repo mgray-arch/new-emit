@@ -4,7 +4,7 @@ import { useState } from "react";
 import Shell from "@/components/shell";
 import type { AssistantAnswer } from "@/lib/types";
 
-const SUGGESTIONS = ["Where is SO2196?", "What delivers this week?", "What's in transit to Cypress?"];
+const SUGGESTIONS = ["What delivers this week?", "What's in transit?", "What's booked?"];
 
 interface Turn {
   role: "user" | "assistant";
@@ -69,7 +69,7 @@ export default function AskPage() {
           >
             <input
               aria-label="Question"
-              placeholder="Where is SO2196?"
+              placeholder="Where is my sales order?"
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
             />

@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 interface Me {
   name: string;
   email: string;
-  role: "customer" | "admin";
+  role: "customer" | "admin" | "receiver";
 }
 
 export default function Shell({ children }: { children: React.ReactNode }) {
@@ -58,7 +58,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 Review
               </Link>
               <Link href="/admin/settings" className={pathname.startsWith("/admin/settings") ? "active" : ""}>
-                Sites
+                Settings
               </Link>
             </>
           )}

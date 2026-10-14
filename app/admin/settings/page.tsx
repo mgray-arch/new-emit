@@ -4,6 +4,12 @@ import { useEffect, useState } from "react";
 import Shell from "@/components/shell";
 import type { Site } from "@/lib/types";
 
+interface ReceiverRow {
+  id: string;
+  matchValue: string;
+  company: string;
+}
+
 const blank = (): Site => ({
   id: "",
   company: "",
@@ -18,12 +24,16 @@ const blank = (): Site => ({
 
 export default function SettingsPage() {
   const [sites, setSites] = useState<Site[]>([]);
+  const [receivers, setReceivers] = useState<ReceiverRow[]>([]);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
     fetch("/api/admin/sites")
       .then((response) => (response.ok ? response.json() : { sites: [] }))
       .then((body) => setSites(body.sites));
+    fetch("/api/admin/receivers")
+      .then((response) => (response.ok ? response.json() : { receivers: [] }))
+      .then((body) => setReceivers(body.receivers));
   }, []);
 
   async function save() {
@@ -69,9 +79,59 @@ export default function SettingsPage() {
             Save sites
           </button>
         </div>
+        <h2 style={{ marginTop: 28 }}>RECEIVERS</h2>
+        <p className="lede">
+          A receiver signs in with Microsoft and sees only loads whose destination company matches. Use a full email or a domain such as enchantedrock.com. The company text must match the destination on the load.
+        </p>
+        {receivers.map((row, index) => (
+          <div className="site-row" key={row.id || index}>
+            <input
+              aria-label="Receiver email or domain"
+              value={row.matchValue}
+              placeholder="email or domain"
+              onChange={(event) =>
+                setReceivers(receivers.map((item, itemIndex) => (itemIndex === index ? { ...item, matchValue: event.target.value } : item)))
+              }
+            />
+            <input
+              aria-label="Destination company"
+              value={row.company}
+              placeholder="Destination company"
+              onChange={(event) =>
+                setReceivers(receivers.map((item, itemIndex) => (itemIndex === index ? { ...item, company: event.target.value } : item)))
+              }
+            />
+            <button className="btn danger" type="button" onClick={() => setReceivers(receivers.filter((_, itemIndex) => itemIndex !== index))}>
+              Remove
+            </button>
+          </div>
+        ))}
+        <div className="actions" style={{ justifyContent: "flex-start" }}>
+          <button className="btn secondary" type="button" onClick={() => setReceivers([...receivers, { id: "", matchValue: "", company: "" }])}>
+            Add receiver
+          </button>
+          <button className="btn" type="button" onClick={saveReceivers}>
+            Save receivers
+          </button>
+        </div>
       </main>
     </Shell>
   );
+
+  async function saveReceivers() {
+    const response = await fetch("/api/admin/receivers", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ receivers }),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      setMessage(body.error || "Could not save receivers");
+      return;
+    }
+    setReceivers(body.receivers);
+    setMessage("Receivers saved.");
+  }
 
   function update(index: number, patch: Partial<Site>) {
     setSites(sites.map((site, item) => (item === index ? { ...site, ...patch } : site)));

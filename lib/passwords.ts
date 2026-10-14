@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import { randomUUID } from "node:crypto";
 import type { PortalContext } from "@/lib/db";
-import type { Session } from "@/lib/types";
+import type { PortalRole, Session } from "@/lib/types";
 
 let dummyHash: string | null = null;
 
@@ -14,7 +14,7 @@ interface UserRow {
   id: string;
   email: string;
   name: string;
-  role: "customer" | "admin";
+  role: PortalRole;
   password_hash: string | null;
 }
 
@@ -32,7 +32,13 @@ export function loginWithPassword(ctx: PortalContext, email: string, password: s
   return { userId: user.id, email: user.email, name: user.name, role: user.role };
 }
 
-export function upsertExternalUser(ctx: PortalContext, input: { email: string; name: string; role: "customer" | "admin" }): Session {
+export function passwordLoginAllowed(): boolean {
+  if (process.env.ALLOW_PASSWORD_LOGIN === "true") return true;
+  if (process.env.DEMO_SEED === "true") return true;
+  return process.env.NODE_ENV !== "production";
+}
+
+export function upsertExternalUser(ctx: PortalContext, input: { email: string; name: string; role: PortalRole }): Session {
   const email = input.email.trim().toLowerCase();
   const existing = findUser(ctx, email);
   if (existing) {

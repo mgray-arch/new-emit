@@ -1,12 +1,13 @@
+import { identityFromMicrosoft } from "@/lib/auth-policy";
 import { json } from "@/lib/http";
 import { upsertExternalUser } from "@/lib/passwords";
 import { readyPortal } from "@/lib/portal";
+import { receiverCompanyForEmail } from "@/lib/receivers";
 import {
   clearStateCookie,
   cookieValue,
   microsoftConfigured,
   redirectUriFrom,
-  roleForEmail,
   sessionCookie,
   signSession,
 } from "@/lib/session";
@@ -14,16 +15,25 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+function loginError(message: string): Response {
+  return new Response(null, {
+    status: 302,
+    headers: [
+      ["location", `/login?error=${encodeURIComponent(message)}`],
+      ["cache-control", "no-store"],
+      ["set-cookie", clearStateCookie()],
+    ],
+  });
+}
+
 export async function GET(req: Request) {
-  if (!microsoftConfigured()) return json({ error: "Microsoft sign-in is not configured" }, 503);
+  if (!microsoftConfigured()) return loginError("Microsoft sign-in is not configured.");
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
   const expected = cookieValue(req, "oauth_state");
-  if (!code || !state || !expected || state !== expected) {
-    return json({ error: "Microsoft sign-in could not be verified. Start it again from the login page." }, 400, {
-      "set-cookie": clearStateCookie(),
-    });
+  if (!code || !state || !expected || state !== expected || !state.startsWith("microsoft.")) {
+    return loginError("Microsoft sign-in could not be verified. Start it again from the login page.");
   }
   try {
     const tenant = process.env.AZURE_AD_TENANT_ID as string;
@@ -39,28 +49,27 @@ export async function GET(req: Request) {
         scope: "openid profile email",
       }),
     });
-    if (!tokenResponse.ok) return json({ error: "Microsoft did not accept the sign-in." }, 401);
+    if (!tokenResponse.ok) return loginError("Microsoft did not accept the sign-in.");
     const tokens = (await tokenResponse.json()) as { access_token?: string };
     const profileResponse = await fetch("https://graph.microsoft.com/oidc/userinfo", {
       headers: { authorization: `Bearer ${tokens.access_token}` },
     });
-    if (!profileResponse.ok) return json({ error: "Microsoft did not return a profile." }, 401);
+    if (!profileResponse.ok) return loginError("Microsoft did not return a profile.");
     const profile = (await profileResponse.json()) as { email?: string; preferred_username?: string; name?: string };
-    const email = (profile.email || profile.preferred_username || "").toLowerCase();
-    const role = roleForEmail(email);
-    if (!email || !role) {
-      return json({ error: "This Microsoft account is not authorized for the EMIT portal." }, 403, {
-        "set-cookie": clearStateCookie(),
-      });
-    }
+    const email = profile.email || profile.preferred_username || "";
     const ctx = await readyPortal();
-    const session = upsertExternalUser(ctx, { email, name: profile.name || email, role });
+    const decision = identityFromMicrosoft(email, receiverCompanyForEmail(ctx, email));
+    if (!decision.ok) return loginError(decision.error);
+    const session = upsertExternalUser(ctx, {
+      email: decision.email,
+      name: profile.name || decision.email,
+      role: decision.role,
+    });
     const token = await signSession(session);
-    const destination = role === "admin" ? "/admin" : "/";
     return new Response(null, {
       status: 302,
       headers: [
-        ["location", destination],
+        ["location", "/"],
         ["cache-control", "no-store"],
         ["set-cookie", sessionCookie(token)],
         ["set-cookie", clearStateCookie()],

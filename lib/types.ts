@@ -118,11 +118,13 @@ export interface PublicTracking {
   truckType: TruckType | null;
 }
 
+export type PortalRole = "customer" | "admin" | "receiver";
+
 export interface Session {
   userId: string;
   email: string;
   name: string;
-  role: "customer" | "admin";
+  role: PortalRole;
 }
 
 export interface OrderConfirmation {

@@ -570,8 +570,12 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
       `INSERT INTO users (id, email, name, role, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
     );
     insertUser.run(randomUUID(), "m.gray@emit.example", "M. Gray", "customer", hash, createdAt);
-    insertUser.run(randomUUID(), "mike@select.example", "Mike", "admin", hash, createdAt);
-    insertUser.run(randomUUID(), "drew@select.example", "Drew", "admin", hash, createdAt);
+    insertUser.run(randomUUID(), "mgray@goselect.com", "Mike Gray", "admin", hash, createdAt);
+    insertUser.run(randomUUID(), "dmartin@goselect.com", "Drew Martin", "admin", hash, createdAt);
+    insertUser.run(randomUUID(), "ops@enchantedrock.example", "Enchanted Rock", "receiver", hash, createdAt);
+    ctx.db
+      .prepare(`INSERT INTO receiver_access (id, match_value, company, created_at) VALUES (?, ?, ?, ?)`)
+      .run(randomUUID(), "enchantedrock.example", "Enchanted Rock LLC", createdAt);
 
     const insertSite = ctx.db.prepare(
       `INSERT INTO sites (id, company, address1, city, state, postal_code, country, active, sort_order)
