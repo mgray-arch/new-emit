@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import PhotoGallery from "@/components/photo-gallery";
 import Shell from "@/components/shell";
 import Timeline from "@/components/timeline";
 import { formatWhen } from "@/lib/dates";
@@ -11,6 +12,14 @@ export default function OrderPage() {
   const params = useParams<{ id: string }>();
   const [order, setOrder] = useState<CustomerOrder | null>(null);
   const [confirmation, setConfirmation] = useState<OrderConfirmation | null>(null);
+  const [canUpload, setCanUpload] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/me")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body) => setCanUpload(body?.role === "admin"))
+      .catch(() => setCanUpload(false));
+  }, []);
 
   useEffect(() => {
     if (!params.id) return;
@@ -49,6 +58,7 @@ export default function OrderPage() {
             <a className="track-link" href={order.trackingUrl}>
               Public tracking link
             </a>
+            <PhotoGallery orderId={order.id} loadNumber={order.loadNumber} canUpload={canUpload} />
             <ol className="stop-list">
               {order.stops.map((stop) => (
                 <li key={stop.id}>

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import LoadForm, { draftFromOrder, emptyDraft, payloadFromDraft, useSites, type Draft } from "@/components/load-form";
+import PhotoGallery from "@/components/photo-gallery";
 import { formatDay } from "@/lib/dates";
 import {
   STATUS_LABEL,
@@ -461,6 +462,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
             {editing && editing.pendingReviewCount > 0 && (
               <p className="hold">{editing.pendingReviewCount} page(s) are held for Select review and are not visible yet.</p>
             )}
+            {editing && <PhotoGallery orderId={editing.id} loadNumber={editing.loadNumber} canUpload={role === "admin"} />}
             <div className="actions">
               <button className="btn secondary" type="button" onClick={() => { setCreating(false); setEditing(null); }}>
                 Close

@@ -5,6 +5,7 @@ import { addDaysISO, denverDate, denverLocalToISO } from "@/lib/dates";
 import type { PortalContext } from "@/lib/db";
 import { withTransaction } from "@/lib/db";
 import { ingestDocument } from "@/lib/documents";
+import { ingestCarrierPhoto, solidPng } from "@/lib/photos";
 import { demoTrackingToken, timelineThrough } from "@/lib/orders";
 import type { Place, PortalStatus, RateReason, TrackingStage, TransitOption, TruckType } from "@/lib/types";
 
@@ -692,4 +693,32 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
     "base64",
   );
   await ingestDocument(ctx, { loadId: so4410.id, filename: "scan.png", bytes: new Uint8Array(png), slot: "attachment" });
+
+  const so4555 = ctx.db.prepare(`SELECT load_number FROM loads WHERE sales_order_number = ?`).get("SO4555") as {
+    load_number: string;
+  };
+  ingestCarrierPhoto(ctx, {
+    loadNumber: "900196-1",
+    filename: "dock.png",
+    bytes: solidPng(224, 138, 47),
+    source: "gmail",
+    receivedAt: "2026-10-14T16:10:00Z",
+    subject: "Driver at the Sheridan dock",
+  });
+  ingestCarrierPhoto(ctx, {
+    loadNumber: "900196-1",
+    filename: "rate-confirmation.png",
+    bytes: solidPng(30, 30, 30, "RATE CONFIRMATION carrier pay $8,765.43"),
+    source: "gmail",
+    receivedAt: "2026-10-14T16:12:00Z",
+    subject: "Rate confirmation for the carrier",
+  });
+  ingestCarrierPhoto(ctx, {
+    loadNumber: so4555.load_number,
+    filename: "cypress-arrival.png",
+    bytes: solidPng(60, 120, 90),
+    source: "gmail",
+    receivedAt: "2026-10-14T18:40:00Z",
+    subject: "Arrived at Enchanted Rock",
+  });
 }

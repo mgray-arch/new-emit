@@ -105,6 +105,24 @@ CREATE INDEX IF NOT EXISTS customer_docs_load ON customer_documents(load_id);
 CREATE INDEX IF NOT EXISTS internal_docs_load ON internal_documents(load_id);
 CREATE INDEX IF NOT EXISTS internal_docs_review ON internal_documents(review_status);
 
+CREATE TABLE IF NOT EXISTS carrier_photos (
+  id TEXT PRIMARY KEY,
+  load_id TEXT NOT NULL,
+  sha256 TEXT NOT NULL,
+  filename TEXT NOT NULL,
+  media_type TEXT NOT NULL,
+  source TEXT NOT NULL,
+  subject TEXT,
+  received_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  held INTEGER NOT NULL DEFAULT 0,
+  hold_reason TEXT,
+  bytes BLOB NOT NULL,
+  UNIQUE (load_id, sha256)
+);
+
+CREATE INDEX IF NOT EXISTS carrier_photos_load ON carrier_photos(load_id, received_at);
+
 CREATE TABLE IF NOT EXISTS receiver_access (
   id TEXT PRIMARY KEY,
   match_value TEXT NOT NULL UNIQUE,

@@ -86,6 +86,9 @@ export function isPublicPath(pathname: string): boolean {
   if (pathname === "/api/auth/google" || pathname.startsWith("/api/auth/google/")) return true;
   if (pathname.startsWith("/track/")) return true;
   if (pathname.startsWith("/api/track/")) return true;
+  // The Gmail assistant authenticates with a bearer token, not the session cookie.
+  // The handler rejects every request that lacks that token or an admin session.
+  if (pathname === "/api/ingest/carrier-photos") return true;
   return false;
 }
 

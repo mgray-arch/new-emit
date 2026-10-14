@@ -9,7 +9,7 @@ Test portal for EMIT Technologies. It runs against a seeded mock of Select's SAM
 3. **Ask about an SO.** "where is SO2196?" answers from shipment data. "what are you paying the truck?" is refused and does not include a dollar amount. With no AI key, the built-in answerer is used. If `AI_API_KEY` is set, the model receives only the customer-safe JSON.
 4. **Search, pagination, mobile.** Search matches SO or city. Page size is 8. Upcoming ship dates are listed first. Below 980px the table becomes stacked cards.
 
-`npm test` — 27 tests passed (18 security, 4 stops, 3 access, 2 boundary).
+`npm test` — 30 tests passed (18 security, 4 stops, 3 access, 3 carrier photos, 2 boundary).
 
 ## Security
 
@@ -57,6 +57,54 @@ They do not sync yet. The running app writes the ordered list to `stops_json` in
 - Reading a SAM order maps every stop back onto `stops`. The first pickup and the last delivery still fill origin and destination. Extra keys on a SAM stop, including a carrier rate, are dropped by the customer serializer.
 
 Those HTTP paths are still a placeholder. Wiring `submitOrder` and `updateOrder` to call the client is the change to make when Mike's API contract is confirmed. Until then, a saved edit is only in `portal.db`.
+
+## Carrier photos
+
+Each load has a photo gallery. Select admins, EMIT staff, and the receiver for that load can view it. The public tracking link does not. Photos are not customer documents: this path never accepts or displays a PDF or other document.
+
+The demo seeds an orange dock photo on SO2196 (Select load 900196-1) and a Cypress arrival photo on SO4555. A second SO2196 image is stored with rate-confirmation text in the file. EMIT and receivers do not see that image. An admin does, marked held.
+
+### Ingest API
+
+`POST /api/ingest/carrier-photos`
+
+Auth, either one:
+
+- `Authorization: Bearer <CARRIER_PHOTO_INGEST_TOKEN>` for the Gmail assistant. The token is at least 16 characters, compared in constant time, and stays in the server environment. This path is exempt from the session-cookie middleware so a token-only caller gets JSON instead of a login redirect. A wrong or missing token is 401.
+- An admin session cookie, which is what the upload control on a load uses. EMIT and receiver sessions are 403.
+
+JSON body:
+
+```json
+{
+  "loadNumber": "900196-1",
+  "source": "gmail:18f3c0ab12e",
+  "receivedAt": "2026-10-14T16:10:00Z",
+  "filename": "dock.png",
+  "contentType": "image/png",
+  "subject": "Driver at the Sheridan dock",
+  "dataBase64": "<raw or data-URL base64>"
+}
+```
+
+`loadNumber` is the SAM load number (`900196-1`), not the EMIT sales order. `source` is where the assistant found it (Gmail message id is a good value). `receivedAt` is the email's timestamp, ISO-8601 with a timezone. `subject` is optional and is screened with the filename and any text embedded in the file.
+
+Multipart form fields are `file`, `loadNumber`, `source`, `receivedAt`, and optional `subject`. Same auth.
+
+Responses:
+
+- `201` the image was stored. `200` the same bytes were already on that load (`duplicate: true`); the first copy is kept.
+- `404` no load with that number. `415` the bytes are a PDF, another document, or not jpg/png/heic/webp. Contents are sniffed; a PDF renamed `.jpg` is rejected.
+- `visibleToCustomer: false` and `heldReason` mean the image was stored for Select only.
+
+The same SHA-256 on one load is one row. A later retry does not create a second photo.
+
+Filename, source, subject, and printable strings inside the file (PNG text, EXIF, and similar) go through the same rate-confirmation checks as documents. A hit is stored with `held = 1`. EMIT and receivers get neither the row nor the bytes (404). Admins still see it in the gallery, labeled held. There is no release action on this path, so a rate-confirmation lookalike cannot be pushed to EMIT. The check does not OCR pixels. A photograph of a paper rate confirmation with no embedded text can still be shown; the assistant should pass the email subject so that signal is screened.
+
+Gallery reads, all session-authenticated and scoped like the load:
+
+- `GET /api/orders/{id}/photos` returns id, filename, type, source, subject, and received time. Held rows are included only for admins.
+- `GET /api/carrier-photos/{id}` returns the image bytes. Held bytes are admin-only.
 
 ## Data layer and SAM
 
