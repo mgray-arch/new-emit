@@ -87,7 +87,7 @@ export async function POST(req: Request) {
     if (denied) return denied;
     const input = await readInput(req);
     const ctx = await readyPortal();
-    const result = ingestCarrierPhoto(ctx, input);
+    const result = await ingestCarrierPhoto(ctx, input);
     return json(
       {
         id: result.id,

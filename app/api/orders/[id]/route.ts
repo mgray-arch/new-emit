@@ -14,9 +14,9 @@ export async function GET(req: Request, context: { params: Promise<{ id: string 
     if (!isSession(session)) return session;
     const { id } = await context.params;
     const ctx = await readyPortal();
-    const order = getOrder(ctx, id);
+    const order = await getOrder(ctx, id);
     if (!order) return json({ error: "Order not found" }, 404);
-    return json({ order, confirmation: latestConfirmation(ctx, id) });
+    return json({ order, confirmation: await latestConfirmation(ctx, id) });
   } catch (error) {
     return errorResponse(error);
   }
@@ -29,7 +29,7 @@ export async function PATCH(req: Request, context: { params: Promise<{ id: strin
     const { id } = await context.params;
     const ctx = await readyPortal();
     const patch = orderPatchSchema.parse(await req.json());
-    const order = updateOrder(ctx, id, patch, session);
+    const order = await updateOrder(ctx, id, patch, session);
     return json({ order });
   } catch (error) {
     return errorResponse(error);

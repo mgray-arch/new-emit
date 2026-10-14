@@ -13,10 +13,10 @@ export async function GET(req: Request, context: { params: Promise<{ id: string 
     if (!isSession(session)) return session;
     const { id } = await context.params;
     const ctx = await readyPortal();
-    const order = getOrder(ctx, id);
+    const order = await getOrder(ctx, id);
     if (!order) return json({ error: "Order not found" }, 404);
     const includeHeld = session.role === "admin";
-    const photos = listCarrierPhotos(ctx, id, includeHeld).map((photo) => ({
+    const photos = (await listCarrierPhotos(ctx, id, includeHeld)).map((photo) => ({
       id: photo.id,
       filename: photo.filename,
       mediaType: photo.mediaType,

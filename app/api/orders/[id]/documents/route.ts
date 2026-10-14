@@ -13,14 +13,14 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
     if (!isSession(session)) return session;
     const { id } = await context.params;
     const ctx = await readyPortal();
-    if (!getOrder(ctx, id)) return json({ error: "Order not found" }, 404);
+    if (!(await getOrder(ctx, id))) return json({ error: "Order not found" }, 404);
     const form = await req.formData();
     const file = form.get("file");
     const slot = form.get("slot") === "bol" ? "bol" : "attachment";
     if (!(file instanceof File)) throw new PortalError("Choose a file to upload");
     const bytes = new Uint8Array(await file.arrayBuffer());
     const result = await ingestDocument(ctx, { loadId: id, filename: file.name, bytes, slot });
-    const order = getOrder(ctx, id);
+    const order = await getOrder(ctx, id);
     return json({
       released: result.releasedIds.length,
       heldForReview: result.heldIds.length,

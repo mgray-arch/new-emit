@@ -12,7 +12,7 @@ export async function GET(req: Request) {
     const session = await requireAdmin(req);
     if (!isSession(session)) return session;
     const ctx = await readyPortal();
-    return json({ sites: listSites(ctx, true) });
+    return json({ sites: await listSites(ctx, true) });
   } catch (error) {
     return errorResponse(error);
   }
@@ -24,7 +24,7 @@ export async function PUT(req: Request) {
     if (!isSession(session)) return session;
     const ctx = await readyPortal();
     const body = sitesSchema.parse(await req.json());
-    return json({ sites: replaceSites(ctx, body.sites) });
+    return json({ sites: await replaceSites(ctx, body.sites) });
   } catch (error) {
     return errorResponse(error);
   }

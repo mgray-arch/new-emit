@@ -130,7 +130,7 @@ describe("stop sequence", () => {
     expect(order.destination.company).toBe("Kodiak Gas Services");
 
     const token = (
-      ctx.db.prepare(`SELECT access_token FROM receivers WHERE company = ?`).get("Enchanted Rock LLC") as {
+      (await ctx.db.prepare(`SELECT access_token FROM receivers WHERE company = ?`).get("Enchanted Rock LLC")) as {
         access_token: string;
       }
     ).access_token;
@@ -143,7 +143,7 @@ describe("stop sequence", () => {
     expect(match).toBeTruthy();
     expect(match.customerCost).toBeUndefined();
     expect(match.stops.map((stop: { kind: string }) => stop.kind)).toEqual(["pickup", "drop", "drop"]);
-    expect(listOrders(ctx, { q: "Casper", receiverCompany: "Enchanted Rock LLC" }).total).toBe(0);
+    expect((await listOrders(ctx, { q: "Casper", receiverCompany: "Enchanted Rock LLC" })).total).toBe(0);
   });
 
   it("sends the full stop sequence to SAM and drops carrier fields on the way back", () => {

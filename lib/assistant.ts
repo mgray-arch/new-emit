@@ -181,7 +181,7 @@ export async function answerQuestion(ctx: PortalContext, question: string): Prom
     return { text: "Ask a question about an EMIT sales order.", references: [], refused: false };
   }
   if (isDisallowedQuestion(trimmed)) return refusal();
-  const orders = listAllOrders(ctx).map((order) => serializeCustomerOrder(order));
+  const orders = (await listAllOrders(ctx)).map((order) => serializeCustomerOrder(order));
   if (process.env.AI_API_KEY) {
     try {
       return await answerWithModel(trimmed, orders);

@@ -56,7 +56,7 @@ They do not sync yet. The running app writes the ordered list to `stops_json` in
 - A later edit sends that same full list again via `SamTmsClient.replaceStops`, a PUT to `/v1/loads/{loadNumber}/stops`. SAM is expected to replace the load's stops in that order. The portal does not send a diff, so a removed stop disappears and a reordered stop keeps its new index.
 - Reading a SAM order maps every stop back onto `stops`. The first pickup and the last delivery still fill origin and destination. Extra keys on a SAM stop, including a carrier rate, are dropped by the customer serializer.
 
-Those HTTP paths are still a placeholder. Wiring `submitOrder` and `updateOrder` to call the client is the change to make when Mike's API contract is confirmed. Until then, a saved edit is only in `portal.db`.
+Those HTTP paths are still a placeholder. Wiring `submitOrder` and `updateOrder` to call the client is the change to make when Mike's API contract is confirmed. Until then, a saved edit is only in the portal database (local SQLite, or Turso when `TURSO_DATABASE_URL` is set).
 
 ## Carrier photos
 
@@ -110,9 +110,9 @@ Gallery reads, all session-authenticated and scoped like the load:
 
 `lib/orders.ts` is the store the app uses today: list, get, submit, update, stats, all returning the customer-safe shape. Submit writes the order there and sends the confirmation. There is no Slack step.
 
-`lib/sam.ts` is the drop-in HTTP client. `pickCustomerRate` reads `customerRate` or `customerCharges.lineHaul` / `customerCharges.customerTotal` and never falls back to `carrierCost`. `toSamCreatePayload` does not include carrier fields. The paths (`/v1/customers/{id}/orders`) are a placeholder. The client is unit-tested with a fixture that includes carrier cost 8765.43 and customer rate 1500. It is not called by the running routes. Wiring it is the change to make when Mike's credentials and the real paths arrive. Until then, orders "in SAM" means rows in `data/portal.db`.
+`lib/sam.ts` is the drop-in HTTP client. `pickCustomerRate` reads `customerRate` or `customerCharges.lineHaul` / `customerCharges.customerTotal` and never falls back to `carrierCost`. `toSamCreatePayload` does not include carrier fields. The paths (`/v1/customers/{id}/orders`) are a placeholder. The client is unit-tested with a fixture that includes carrier cost 8765.43 and customer rate 1500. It is not called by the running routes. Wiring it is the change to make when Mike's credentials and the real paths arrive. Until then, orders "in SAM" means rows in the portal database.
 
-Documents, users, the review queue, and the outbox stay in that database even after orders move to SAM.
+Documents, users, the review queue, and the outbox stay in that database even after orders move to SAM. Document and photo bytes are not in the database. They live in Vercel Blob when `BLOB_READ_WRITE_TOKEN` is set, and in `data/blobs` (or memory, during tests) otherwise. The database stores a locator.
 
 ## Ship-from sites
 
@@ -190,11 +190,15 @@ The portal refreshes an access token and calls `gmail.users.messages.send` as th
 
 ## Hosting
 
-Vercel, connected to this GitHub repo with a preview per pull request and production from `main`, is the target. It is blocked today.
+Vercel, connected to this GitHub repo, is ready. Previews come from pull requests. Production follows `main`. `vercel.json` sets the Next.js framework, region `iad1`, and a 60 second function limit so the first preview request can finish the demo seed.
 
-The app stores users, loads, the review queue, documents, carrier photos, receiver tokens, and the outbox in a SQLite file (`data/portal.db`, gitignored) through Node's `node:sqlite`. Vercel serverless functions have an ephemeral disk, so that file would not survive from one request to the next, and `node:sqlite` is still experimental. A Vercel project pointed at this repo would build and then lose data. No `vercel.json` is added, so a connect-and-deploy does not look ready.
+The database is Turso (hosted libSQL). The schema, `PRAGMA` checks, and `json_extract` / `json_each` queries stay SQLite, so the sentinel tests still run unchanged against local SQLite. Postgres would have been a second dialect and a local Postgres install. Turso is two environment variables and a database created in the browser.
 
-What works now is a long-lived Node 22 process and a persistent disk:
+Document and photo bytes go to Vercel Blob (private). The database stores a locator, not the file. With no Blob token, local dev writes `data/blobs`. Tests keep bytes in memory. With no Turso URL, local dev and tests use `node:sqlite` (`data/portal.db` or `:memory:`). On Vercel those two variables are required; the app throws if either is missing so a preview cannot silently write to an ephemeral disk.
+
+`DEMO_SEED=true` on a Preview loads the fake shipments, the three demo logins, and the Enchanted Rock LLC receiver link the first time the database is empty. A second cold start that loses the race on the demo emails leaves the first seed in place. Production should set `DEMO_SEED=false`.
+
+Click-by-click steps for Mike are in the README. Docker still runs the local-disk mode if Turso and Blob are unset:
 
 ```bash
 docker build -t emit-portal .
@@ -207,21 +211,7 @@ docker run --rm -p 3000:3000 \
   emit-portal
 ```
 
-Set `DEMO_SEED=false` before any real EMIT user can sign in. In production the seed stays off unless `DEMO_SEED=true` is explicit. `AUTH_SECRET` shorter than 16 characters throws on startup in production. Turn off the on-screen demo hint with `NEXT_PUBLIC_DEMO_HINT=false` once real users arrive.
-
-To unblock Vercel:
-
-1. Move the database to a hosted SQL service (Turso/libSQL or Postgres).
-2. Move document and photo bytes to object storage (Vercel Blob or S3). The SQLite file holds those blobs today.
-3. Then connect the repo. Until those two exist, skip the Vercel project.
-
-After that, Mike's steps:
-
-1. Vercel → Add New → Project → Import GitHub `mgray-arch/new-emit`.
-2. Framework preset Next.js. Production branch `main`. Leave preview deployments on, so each pull request gets its own URL.
-3. Set environment variables for both Production and Preview: `AUTH_SECRET`, `PORTAL_PUBLIC_URL`, the hosted database URL, the blob token, `AZURE_AD_*`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GMAIL_*`, `EMAIL_FROM`, `CARRIER_PHOTO_INGEST_TOKEN`, `SELECT_ADMIN_EMAILS`, and the EMIT domain list. Production gets `DEMO_SEED=false`.
-4. Deploy. Production follows `main`.
-5. After the first deploy, set `PORTAL_PUBLIC_URL` to the real origin and add that origin's callback URLs to the Microsoft app and the Google sign-in client.
+Set `DEMO_SEED=false` before any real EMIT user can sign in. `AUTH_SECRET` shorter than 16 characters throws on startup in production. Turn off the on-screen demo hint with `NEXT_PUBLIC_DEMO_HINT=false` once real users arrive. If `PORTAL_PUBLIC_URL` is blank on Vercel, links use `https://$VERCEL_URL`.
 
 There is no public test URL in this environment.
 
@@ -230,7 +220,10 @@ There is no public test URL in this environment.
 | Variable | Who provides it | Used for |
 | --- | --- | --- |
 | `AUTH_SECRET` | Select, generate a long random string | Session signing. Required in production. |
-| `PORTAL_PUBLIC_URL` | Whoever hosts the test site | Links in confirmation email, tracking, and receiver links. |
+| `TURSO_DATABASE_URL` | Turso, the `libsql://` URL | Hosted database on Vercel. Leave unset locally. |
+| `TURSO_AUTH_TOKEN` | Turso, full-access token | Auth for that database. Leave unset locally. |
+| `BLOB_READ_WRITE_TOKEN` | Vercel, added when the Blob store is connected | Private document and photo bytes. Leave unset locally. |
+| `PORTAL_PUBLIC_URL` | Whoever hosts the test site | Links in confirmation email, tracking, and receiver links. Optional on Vercel; the deployment URL is used when this is blank. |
 | `AZURE_AD_TENANT_ID`, `AZURE_AD_CLIENT_ID`, `AZURE_AD_CLIENT_SECRET` | Mike, Entra app registration | EMIT staff Microsoft sign-in. |
 | `SELECT_ADMIN_EMAILS` | Defaults to `mgray@goselect.com,dmartin@goselect.com`. Change only if those addresses change. | |
 | `EMIT_EMAIL_DOMAINS` or `EMIT_ALLOWED_EMAILS` | Mike | Which Microsoft users are EMIT staff. |
@@ -242,7 +235,7 @@ There is no public test URL in this environment.
 | `CARRIER_PHOTO_INGEST_TOKEN` | Select | Bearer token for the photo ingest API. At least 16 characters. |
 | `SAM_API_BASE_URL`, `SAM_API_TOKEN`, `SAM_CUSTOMER_ID` | Mike, already requested | Live orders. Not connected until the HTTP contract is confirmed. |
 
-`PORTAL_DB_PATH` defaults to `./data/portal.db`.
+`PORTAL_DB_PATH` defaults to `./data/portal.db` and is used only when `TURSO_DATABASE_URL` is unset. `PORTAL_BLOB_DIR` defaults to `./data/blobs` when Blob is unset.
 
 ## Assumptions
 
@@ -263,12 +256,12 @@ There is no public test URL in this environment.
 
 ## Open questions
 
-Answered and in this build: a Select admin may release a flagged rate confirmation after an explicit confirm, and the portal logs who and when. EMIT keeps seeing customer cost. Carrier pay is not stored. Confirmations send from a configurable Select Gmail address. Receiver companies and contact emails are edited in admin, with nothing hard-coded for launch. Receivers use a private link and do not sign in. Ship-from sites are EMIT ALLEN, EMIT NORTH, EMIT PA (Canonsburg), and VECTIS LOVELAND. The 587 loads do not need historical document screening. Vercel is the hosting plan and is blocked until the database and file blobs leave the local disk.
+Answered and in this build: a Select admin may release a flagged rate confirmation after an explicit confirm, and the portal logs who and when. EMIT keeps seeing customer cost. Carrier pay is not stored. Confirmations send from a configurable Select Gmail address. Receiver companies and contact emails are edited in admin, with nothing hard-coded for launch. Receivers use a private link and do not sign in. Ship-from sites are EMIT ALLEN, EMIT NORTH, EMIT PA (Canonsburg), and VECTIS LOVELAND. The 587 loads do not need historical document screening. Vercel hosting uses Turso for the database and Vercel Blob for document and photo bytes. Local dev still uses SQLite and files.
 
 Still open:
 
 1. SAM base URL, auth scheme, EMIT's customer id, and the real endpoints. Does creating a shipment create the order and the first load together, the way the portal does now?
 2. Which model should answer questions once `AI_API_KEY` exists?
-3. Where should the Node host live until the database and blobs are external, and who owns DNS when a real hostname is wanted?
+3. Who owns DNS when a real hostname is wanted?
 4. Is demo password sign-in acceptable until Microsoft and Google sign-in exist, and should it be removed after that?
 5. Which Select mailbox is `EMAIL_FROM`, and who will mint the Gmail refresh token?

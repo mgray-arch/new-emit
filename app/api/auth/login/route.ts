@@ -20,7 +20,7 @@ export async function POST(req: Request) {
     }
     const body = bodySchema.parse(await req.json());
     const ctx = await readyPortal();
-    const session = loginWithPassword(ctx, body.email, body.password);
+    const session = await loginWithPassword(ctx, body.email, body.password);
     if (!session) return json({ error: "Invalid email or password" }, 401);
     const token = await signSession(session);
     return json(

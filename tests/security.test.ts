@@ -107,23 +107,28 @@ describe("carrier pay never reaches EMIT", () => {
     expect(payload.customerRate).toBe(1500);
   });
 
-  it("stores no carrier-pay field on any table, and EMIT still sees customer cost", () => {
-    const tables = ctx.db.prepare(`SELECT name, sql FROM sqlite_master WHERE type = 'table'`).all() as Array<{
+  it("stores no carrier-pay field on any table, and EMIT still sees customer cost", async () => {
+    const tables = (await ctx.db.prepare(`SELECT name, sql FROM sqlite_master WHERE type = 'table'`).all()) as Array<{
       name: string;
       sql: string | null;
     }>;
     for (const table of tables) {
-      const columns = ctx.db.prepare(`PRAGMA table_info(${table.name})`).all() as Array<{ name: string }>;
+      const columns = (await ctx.db.prepare(`PRAGMA table_info(${table.name})`).all()) as Array<{ name: string }>;
       for (const column of columns) {
         expect(column.name.toLowerCase()).not.toMatch(/carrier_pay|carrier_name|carrier_mc|staff_notes|carrier_cost|carrier_rate/);
       }
       expect((table.sql || "").toLowerCase()).not.toMatch(/carrier_pay|carrier_name|carrier_mc|staff_notes/);
+      if (table.name === "customer_documents" || table.name === "internal_documents" || table.name === "carrier_photos") {
+        const names = columns.map((column) => column.name);
+        expect(names).toContain("storage_key");
+        expect(names).not.toContain("bytes");
+      }
     }
     const sources = ["lib/orders.ts", "lib/types.ts", "lib/seed.ts", "lib/sam.ts"]
       .map((file) => readFileSync(file, "utf8"))
       .join("\n");
     expect(sources).not.toMatch(/carrier_pay_cents|carrier_name|carrier_mc|staff_notes|carrierPayCents|staffNotes/);
-    const orders = listAllOrders(ctx);
+    const orders = await listAllOrders(ctx);
     expect(orders.length).toBeGreaterThan(20);
     expectNoSecrets(orders);
     const hero = orders.find((order) => order.salesOrderNumber === "SO2196");
@@ -184,22 +189,22 @@ describe("documents", () => {
   });
 
   it("splits a packet and keeps the rate-con page out of EMIT's documents", async () => {
-    const order = listAllOrders(ctx).find((item) => item.salesOrderNumber === "SO2981")!;
-    const docs = listCustomerDocuments(ctx, order.id);
+    const order = (await listAllOrders(ctx)).find((item) => item.salesOrderNumber === "SO2981")!;
+    const docs = await listCustomerDocuments(ctx, order.id);
     const visible = JSON.stringify(docs);
     expect(visible.toLowerCase()).not.toContain("rate confirmation");
     expectNoSecrets(docs);
-    const queue = listReviewQueue(ctx);
+    const queue = await listReviewQueue(ctx);
     const held = queue.find((item) => item.salesOrderNumber === "SO2981");
     expect(held?.screenResult).toBe("block");
     expect(held?.textExcerpt).toContain("BLACKHAWK");
-    expect(readCustomerDocument(ctx, held!.id)).toBeNull();
+    expect(await readCustomerDocument(ctx, held!.id)).toBeNull();
 
-    const bol = listCustomerDocuments(ctx, listAllOrders(ctx).find((item) => item.salesOrderNumber === "SO2196")!.id);
+    const bol = await listCustomerDocuments(ctx, (await listAllOrders(ctx)).find((item) => item.salesOrderNumber === "SO2196")!.id);
     expect(bol.some((doc) => doc.kind === "bol")).toBe(true);
 
-    expect(() => reviewDocument(ctx, held!.id, "approve", "mgray@goselect.com")).toThrow(/explicit confirmation/);
-    expect(listCustomerDocuments(ctx, order.id)).toHaveLength(docs.length);
+    await expect(reviewDocument(ctx, held!.id, "approve", "mgray@goselect.com")).rejects.toThrow(/explicit confirmation/);
+    expect(await listCustomerDocuments(ctx, order.id)).toHaveLength(docs.length);
     const cookie = await sessionCookie(adminSession());
     const denied = await reviewDecision(
       new Request(`http://portal.test/api/admin/review/${held!.id}`, {
@@ -222,23 +227,23 @@ describe("documents", () => {
     const audit = await released.json();
     expect(audit.reviewedBy).toBe("mgray@goselect.com");
     expect(audit.reviewedAt).toContain("2026-10-14");
-    const stored = ctx.db
+    const stored = (await ctx.db
       .prepare(`SELECT review_status, reviewed_by, reviewed_at FROM internal_documents WHERE id = ?`)
-      .get(held!.id) as { review_status: string; reviewed_by: string; reviewed_at: string };
+      .get(held!.id)) as { review_status: string; reviewed_by: string; reviewed_at: string };
     expect(stored.review_status).toBe("approved");
     expect(stored.reviewed_by).toBe("mgray@goselect.com");
     expect(stored.reviewed_at).toBe(audit.reviewedAt);
-    const after = listCustomerDocuments(ctx, order.id);
+    const after = await listCustomerDocuments(ctx, order.id);
     expect(after.length).toBeGreaterThan(docs.length);
   });
 
   it("holds a text rate confirmation and an image", async () => {
-    const order = listAllOrders(ctx).find((item) => item.salesOrderNumber === "SO4533")!;
+    const order = (await listAllOrders(ctx)).find((item) => item.salesOrderNumber === "SO4533")!;
     const text = new TextEncoder().encode("RATE CONFIRMATION\nCarrier Pay: $8,765.43\nCarrier BLACKHAWK HAULING LLC MC 998877\n");
     const textResult = await ingestDocument(ctx, { loadId: order.id, filename: "rate.txt", bytes: text, slot: "attachment" });
     expect(textResult.releasedIds).toHaveLength(0);
     expect(textResult.heldIds).toHaveLength(1);
-    expect(readCustomerDocument(ctx, textResult.heldIds[0])).toBeNull();
+    expect(await readCustomerDocument(ctx, textResult.heldIds[0])).toBeNull();
 
     const png = Buffer.from(
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
@@ -246,7 +251,7 @@ describe("documents", () => {
     );
     const image = await ingestDocument(ctx, { loadId: order.id, filename: "photo.png", bytes: new Uint8Array(png), slot: "attachment" });
     expect(image.releasedIds).toHaveLength(0);
-    expect(listReviewQueue(ctx).some((item) => item.id === image.heldIds[0] && item.screenResult === "uncertain")).toBe(true);
+    expect((await listReviewQueue(ctx)).some((item) => item.id === image.heldIds[0] && item.screenResult === "uncertain")).toBe(true);
   });
 });
 
@@ -297,7 +302,7 @@ describe("authenticated API", () => {
   });
 
   it("does not download a quarantined page for a customer", async () => {
-    const held = listReviewQueue(ctx)[0];
+    const held = (await listReviewQueue(ctx))[0];
     const cookie = await sessionCookie(customerSession());
     const response = await downloadDoc(new Request(`http://portal.test/api/documents/${held.id}`, { headers: { cookie } }), {
       params: Promise.resolve({ id: held.id }),
@@ -334,13 +339,13 @@ describe("authenticated API", () => {
     expect(body.order.customerCost).toBe(1100);
     expect(body.confirmation.delivered).toBe(false);
     expect(body.confirmation.sender).toBeNull();
-    const columns = ctx.db.prepare(`PRAGMA table_info(loads)`).all() as Array<{ name: string }>;
+    const columns = (await ctx.db.prepare(`PRAGMA table_info(loads)`).all()) as Array<{ name: string }>;
     expect(columns.map((column) => column.name)).not.toContain("carrier_pay_cents");
     expect(body.order.trackingUrl.length).toBeGreaterThan(20);
   });
 
   it("serves a public tracking link without cost or secrets", async () => {
-    const order = getOrder(ctx, listAllOrders(ctx).find((item) => item.salesOrderNumber === "SO2196")!.id)!;
+    const order = (await getOrder(ctx, (await listAllOrders(ctx)).find((item) => item.salesOrderNumber === "SO2196")!.id))!;
     const token = order.trackingUrl.split("/track/")[1];
     const response = await track(new Request(`http://portal.test/api/track/${token}`), {
       params: Promise.resolve({ token }),
@@ -383,18 +388,18 @@ describe("assistant answers from shipment data", () => {
 });
 
 describe("search and pagination", () => {
-  it("searches by SO or city and pages the list", () => {
-    const bySo = listOrders(ctx, { q: "SO2196" });
+  it("searches by SO or city and pages the list", async () => {
+    const bySo = await listOrders(ctx, { q: "SO2196" });
     expect(bySo.total).toBe(1);
     expect(bySo.orders[0].loadNumber).toBe("900196-1");
-    const byCity = listOrders(ctx, { q: "Oklahoma" });
+    const byCity = await listOrders(ctx, { q: "Oklahoma" });
     expect(byCity.total).toBeGreaterThan(0);
     expect(byCity.orders.every((order) => JSON.stringify(order).includes("Oklahoma"))).toBe(true);
-    const wildcard = listOrders(ctx, { q: "%" });
+    const wildcard = await listOrders(ctx, { q: "%" });
     expect(wildcard.total).toBe(0);
-    const injection = listOrders(ctx, { q: "' OR 1=1 --" });
+    const injection = await listOrders(ctx, { q: "' OR 1=1 --" });
     expect(injection.total).toBe(0);
-    const page = listOrders(ctx, { page: 2, pageSize: 8 });
+    const page = await listOrders(ctx, { page: 2, pageSize: 8 });
     expect(page.orders).toHaveLength(8);
     expect(page.total).toBeGreaterThanOrEqual(24);
   });

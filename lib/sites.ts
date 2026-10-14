@@ -7,11 +7,11 @@ import type { siteSchema } from "@/lib/validate";
 
 type SiteInput = z.infer<typeof siteSchema>;
 
-export function listSites(ctx: PortalContext, includeInactive = false): Site[] {
+export async function listSites(ctx: PortalContext, includeInactive = false): Promise<Site[]> {
   const sql = includeInactive
     ? `SELECT id, company, address1, city, state, postal_code, country, active, sort_order FROM sites ORDER BY sort_order, company`
     : `SELECT id, company, address1, city, state, postal_code, country, active, sort_order FROM sites WHERE active = 1 ORDER BY sort_order, company`;
-  const rows = ctx.db.prepare(sql).all() as Array<Record<string, unknown>>;
+  const rows = await ctx.db.prepare(sql).all();
   return rows.map(mapSite);
 }
 
@@ -29,15 +29,15 @@ function mapSite(row: Record<string, unknown>): Site {
   };
 }
 
-export function replaceSites(ctx: PortalContext, sites: SiteInput[]): Site[] {
-  withTransaction(ctx.db, () => {
-    ctx.db.prepare(`DELETE FROM sites`).run();
+export async function replaceSites(ctx: PortalContext, sites: SiteInput[]): Promise<Site[]> {
+  await withTransaction(ctx.db, async () => {
+    await ctx.db.prepare(`DELETE FROM sites`).run();
     const insert = ctx.db.prepare(
       `INSERT INTO sites (id, company, address1, city, state, postal_code, country, active, sort_order)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
-    sites.forEach((site, index) => {
-      insert.run(
+    for (const [index, site] of sites.entries()) {
+      await insert.run(
         site.id || randomUUID(),
         site.company,
         site.address1,
@@ -48,7 +48,7 @@ export function replaceSites(ctx: PortalContext, sites: SiteInput[]): Site[] {
         site.active === false ? 0 : 1,
         index,
       );
-    });
+    }
   });
-  return listSites(ctx, true);
+  return await listSites(ctx, true);
 }

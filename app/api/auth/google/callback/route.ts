@@ -65,7 +65,7 @@ export async function GET(req: Request) {
     });
     if (!decision.ok) return loginError(decision.error);
     const ctx = await readyPortal();
-    const session = upsertExternalUser(ctx, {
+    const session = await upsertExternalUser(ctx, {
       email: decision.email,
       name: profile.name || decision.email,
       role: decision.role,

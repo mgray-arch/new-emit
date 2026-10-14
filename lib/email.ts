@@ -47,14 +47,14 @@ export async function sendOrderConfirmation(
   const id = randomUUID();
   const createdAt = ctx.now().toISOString();
   const sender = emailSender();
-  ctx.db
+  await ctx.db
     .prepare(
       `INSERT INTO outbox (id, to_email, subject, body, load_id, created_at, delivered, from_email)
        VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
     )
     .run(id, to, message.subject, message.body, order.id, createdAt, sender);
   const delivered = await sendViaGmail(to, message.subject, message.body);
-  if (delivered) ctx.db.prepare(`UPDATE outbox SET delivered = 1 WHERE id = ?`).run(id);
+  if (delivered) await ctx.db.prepare(`UPDATE outbox SET delivered = 1 WHERE id = ?`).run(id);
   return {
     salesOrderNumber: order.salesOrderNumber,
     loadNumber: order.loadNumber,
@@ -121,10 +121,13 @@ async function sendViaGmail(to: string, subject: string, body: string): Promise<
   }
 }
 
-export function latestConfirmation(ctx: PortalContext, loadId: string): { subject: string; body: string; to: string } | null {
-  const row = ctx.db
+export async function latestConfirmation(
+  ctx: PortalContext,
+  loadId: string,
+): Promise<{ subject: string; body: string; to: string } | null> {
+  const row = await ctx.db
     .prepare(`SELECT to_email, subject, body FROM outbox WHERE load_id = ? ORDER BY created_at DESC LIMIT 1`)
-    .get(loadId) as { to_email: string; subject: string; body: string } | undefined;
+    .get(loadId);
   if (!row) return null;
-  return { to: row.to_email, subject: row.subject, body: row.body };
+  return { to: String(row.to_email), subject: String(row.subject), body: String(row.body) };
 }

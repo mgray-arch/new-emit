@@ -12,11 +12,11 @@ export async function GET(_req: Request, context: { params: Promise<{ token: str
   try {
     const { token, photoId } = await context.params;
     const ctx = await readyPortal();
-    const receiver = receiverCompanyForToken(ctx, token);
+    const receiver = await receiverCompanyForToken(ctx, token);
     if (!receiver) return json({ error: "This link is not valid." }, 404);
-    const photo = readCarrierPhoto(ctx, photoId);
+    const photo = await readCarrierPhoto(ctx, photoId);
     if (!photo || photo.held) return json({ error: "Photo not found" }, 404);
-    if (!getOrder(ctx, photo.loadId, receiver.company)) return json({ error: "Photo not found" }, 404);
+    if (!(await getOrder(ctx, photo.loadId, receiver.company))) return json({ error: "Photo not found" }, 404);
     return new Response(Buffer.from(photo.bytes), {
       headers: {
         "content-type": photo.mediaType,

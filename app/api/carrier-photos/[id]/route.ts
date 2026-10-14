@@ -14,9 +14,9 @@ export async function GET(req: Request, context: { params: Promise<{ id: string 
     if (!isSession(session)) return session;
     const { id } = await context.params;
     const ctx = await readyPortal();
-    const photo = readCarrierPhoto(ctx, id);
+    const photo = await readCarrierPhoto(ctx, id);
     if (!photo) return json({ error: "Photo not found" }, 404);
-    if (!getOrder(ctx, photo.loadId)) return json({ error: "Photo not found" }, 404);
+    if (!(await getOrder(ctx, photo.loadId))) return json({ error: "Photo not found" }, 404);
     if (photo.held && session.role !== "admin") return json({ error: "Photo not found" }, 404);
     return new Response(Buffer.from(photo.bytes), {
       headers: {

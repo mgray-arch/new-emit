@@ -19,15 +19,15 @@ beforeAll(async () => {
   ctx = await seededPortal();
 });
 
-function enchantedToken(): string {
-  const row = ctx.db.prepare(`SELECT access_token FROM receivers WHERE company = ?`).get("Enchanted Rock LLC") as {
+async function enchantedToken(): Promise<string> {
+  const row = (await ctx.db.prepare(`SELECT access_token FROM receivers WHERE company = ?`).get("Enchanted Rock LLC")) as {
     access_token: string;
   };
   return row.access_token;
 }
 
-function loadId(salesOrder: string): string {
-  const row = ctx.db.prepare(`SELECT id FROM loads WHERE sales_order_number = ?`).get(salesOrder) as { id: string };
+async function loadId(salesOrder: string): Promise<string> {
+  const row = (await ctx.db.prepare(`SELECT id FROM loads WHERE sales_order_number = ?`).get(salesOrder)) as { id: string };
   return row.id;
 }
 
@@ -157,7 +157,7 @@ describe("carrier photos", () => {
     expect(held.heldReason).toMatch(/rate confirmation/i);
     expectNoSecrets(held);
 
-    const so2196 = loadId("SO2196");
+    const so2196 = await loadId("SO2196");
     const customerList = await listPhotos(await asSession(customerSession(), `http://portal.test/api/orders/${so2196}/photos`), {
       params: Promise.resolve({ id: so2196 }),
     });
@@ -188,22 +188,22 @@ describe("carrier photos", () => {
     expect(adminBytes.status).toBe(200);
     expect(adminBytes.headers.get("content-type")).toBe("image/png");
 
-    const docs = ctx.db.prepare(`SELECT COUNT(*) AS n FROM customer_documents`).get() as { n: number };
+    const docs = (await ctx.db.prepare(`SELECT COUNT(*) AS n FROM customer_documents`).get()) as { n: number };
     const before = docs.n;
-    ingestCarrierPhoto(ctx, {
+    await ingestCarrierPhoto(ctx, {
       loadNumber: "900196-1",
       filename: "extra.png",
       bytes: solidPng(4, 5, 6),
       source: "gmail",
       receivedAt: "2026-10-14T17:09:00Z",
     });
-    const after = ctx.db.prepare(`SELECT COUNT(*) AS n FROM customer_documents`).get() as { n: number };
+    const after = (await ctx.db.prepare(`SELECT COUNT(*) AS n FROM customer_documents`).get()) as { n: number };
     expect(after.n).toBe(before);
   });
 
   it("shows a receiver link only photos on their own loads, and requires the ingest token or an admin", async () => {
-    const so2196 = loadId("SO2196");
-    const token = enchantedToken();
+    const so2196 = await loadId("SO2196");
+    const token = await enchantedToken();
     const portal = await receiverPortal(new Request(`http://portal.test/api/r/${token}`), {
       params: Promise.resolve({ token }),
     });
@@ -219,19 +219,23 @@ describe("carrier photos", () => {
     });
     expect(locked.status).toBe(401);
 
-    const dock = ctx.db.prepare(`SELECT id FROM carrier_photos WHERE filename = ?`).get("dock.png") as { id: string };
+    const dock = (await ctx.db.prepare(`SELECT id FROM carrier_photos WHERE filename = ?`).get("dock.png")) as { id: string };
     const stolen = await receiverPhoto(new Request(`http://portal.test/api/r/${token}/photos/${dock.id}`), {
       params: Promise.resolve({ token, photoId: dock.id }),
     });
     expect(stolen.status).toBe(404);
 
-    const held = ctx.db.prepare(`SELECT id FROM carrier_photos WHERE filename = ?`).get("rate-confirmation.png") as { id: string };
+    const held = (await ctx.db.prepare(`SELECT id FROM carrier_photos WHERE filename = ?`).get("rate-confirmation.png")) as {
+      id: string;
+    };
     const hidden = await receiverPhoto(new Request(`http://portal.test/api/r/${token}/photos/${held.id}`), {
       params: Promise.resolve({ token, photoId: held.id }),
     });
     expect(hidden.status).toBe(404);
 
-    const cypress = ctx.db.prepare(`SELECT id FROM carrier_photos WHERE filename = ?`).get("cypress-arrival.png") as { id: string };
+    const cypress = (await ctx.db.prepare(`SELECT id FROM carrier_photos WHERE filename = ?`).get("cypress-arrival.png")) as {
+      id: string;
+    };
     const allowed = await receiverPhoto(new Request(`http://portal.test/api/r/${token}/photos/${cypress.id}`), {
       params: Promise.resolve({ token, photoId: cypress.id }),
     });
@@ -282,7 +286,7 @@ describe("carrier photos", () => {
     );
     expect(customerPost.status).toBe(403);
 
-    const trackingRow = ctx.db.prepare(`SELECT tracking_token FROM loads WHERE id = ?`).get(so2196) as {
+    const trackingRow = (await ctx.db.prepare(`SELECT tracking_token FROM loads WHERE id = ?`).get(so2196)) as {
       tracking_token: string;
     };
     const tracking = await track(new Request(`http://portal.test/api/track/${trackingRow.tracking_token}`), {

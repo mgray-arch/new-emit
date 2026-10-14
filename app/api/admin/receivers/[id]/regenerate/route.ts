@@ -12,7 +12,7 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
     if (!isSession(session)) return session;
     const { id } = await context.params;
     const ctx = await readyPortal();
-    return json({ receiver: regenerateReceiverLink(ctx, id) });
+    return json({ receiver: await regenerateReceiverLink(ctx, id) });
   } catch (error) {
     return errorResponse(error);
   }

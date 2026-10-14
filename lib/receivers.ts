@@ -3,6 +3,7 @@ import type { PortalContext } from "@/lib/db";
 import { PortalError } from "@/lib/http";
 import { listOrders } from "@/lib/orders";
 import { listCarrierPhotos } from "@/lib/photos";
+import { portalPublicUrl } from "@/lib/public-url";
 import type { PortalStatus, StopKind, TimelineEvent, TrackingStage } from "@/lib/types";
 
 export interface ReceiverRecord {
@@ -47,8 +48,7 @@ function newToken(): string {
 }
 
 export function receiverUrl(token: string): string {
-  const base = (process.env.PORTAL_PUBLIC_URL || "").replace(/\/$/, "");
-  return `${base}/r/${token}`;
+  return `${portalPublicUrl()}/r/${token}`;
 }
 
 function parseEmails(value: string): string[] {
@@ -75,94 +75,98 @@ function toRecord(row: ReceiverRow): ReceiverRecord {
   };
 }
 
-function readRow(ctx: PortalContext, id: string): ReceiverRow | null {
-  const row = ctx.db
+async function readRow(ctx: PortalContext, id: string): Promise<ReceiverRow | null> {
+  const row = (await ctx.db
     .prepare(
       `SELECT id, company, contact_emails, access_token, enabled, created_at, updated_at
        FROM receivers WHERE id = ?`,
     )
-    .get(id) as ReceiverRow | undefined;
+    .get(id)) as ReceiverRow | undefined;
   return row ?? null;
 }
 
-export function listReceivers(ctx: PortalContext): ReceiverRecord[] {
-  const rows = ctx.db
+export async function listReceivers(ctx: PortalContext): Promise<ReceiverRecord[]> {
+  const rows = (await ctx.db
     .prepare(
       `SELECT id, company, contact_emails, access_token, enabled, created_at, updated_at
        FROM receivers ORDER BY company`,
     )
-    .all() as unknown as ReceiverRow[];
+    .all()) as unknown as ReceiverRow[];
   return rows.map(toRecord);
 }
 
-export function createReceiver(ctx: PortalContext, input: { company: string; contactEmails: string[] }): ReceiverRecord {
+export async function createReceiver(
+  ctx: PortalContext,
+  input: { company: string; contactEmails: string[] },
+): Promise<ReceiverRecord> {
   const id = randomUUID();
   const now = ctx.now().toISOString();
   const token = newToken();
-  ctx.db
+  await ctx.db
     .prepare(
       `INSERT INTO receivers (id, company, contact_emails, access_token, enabled, created_at, updated_at)
        VALUES (?, ?, ?, ?, 1, ?, ?)`,
     )
     .run(id, input.company.trim(), JSON.stringify(input.contactEmails), token, now, now);
-  const row = readRow(ctx, id);
+  const row = await readRow(ctx, id);
   if (!row) throw new PortalError("The receiver could not be saved", 500);
   return toRecord(row);
 }
 
-export function updateReceiver(
+export async function updateReceiver(
   ctx: PortalContext,
   id: string,
   patch: { company?: string; contactEmails?: string[]; enabled?: boolean },
-): ReceiverRecord {
-  const existing = readRow(ctx, id);
+): Promise<ReceiverRecord> {
+  const existing = await readRow(ctx, id);
   if (!existing) throw new PortalError("Receiver not found", 404);
   const company = patch.company?.trim() || existing.company;
   const emails = patch.contactEmails ?? parseEmails(existing.contact_emails);
   const enabled = patch.enabled === undefined ? existing.enabled : patch.enabled ? 1 : 0;
-  ctx.db
+  await ctx.db
     .prepare(`UPDATE receivers SET company = ?, contact_emails = ?, enabled = ?, updated_at = ? WHERE id = ?`)
     .run(company, JSON.stringify(emails), enabled, ctx.now().toISOString(), id);
-  const row = readRow(ctx, id);
+  const row = await readRow(ctx, id);
   if (!row) throw new PortalError("Receiver not found", 404);
   return toRecord(row);
 }
 
-export function deleteReceiver(ctx: PortalContext, id: string): void {
-  const result = ctx.db.prepare(`DELETE FROM receivers WHERE id = ?`).run(id);
+export async function deleteReceiver(ctx: PortalContext, id: string): Promise<void> {
+  const result = await ctx.db.prepare(`DELETE FROM receivers WHERE id = ?`).run(id);
   if (result.changes === 0) throw new PortalError("Receiver not found", 404);
 }
 
 /** Replaces the token. The previous URL stops working. */
-export function regenerateReceiverLink(ctx: PortalContext, id: string): ReceiverRecord {
-  const existing = readRow(ctx, id);
+export async function regenerateReceiverLink(ctx: PortalContext, id: string): Promise<ReceiverRecord> {
+  const existing = await readRow(ctx, id);
   if (!existing) throw new PortalError("Receiver not found", 404);
   const token = newToken();
-  ctx.db
-    .prepare(`UPDATE receivers SET access_token = ?, updated_at = ? WHERE id = ?`)
-    .run(token, ctx.now().toISOString(), id);
-  const row = readRow(ctx, id);
+  await ctx.db.prepare(`UPDATE receivers SET access_token = ?, updated_at = ? WHERE id = ?`).run(token, ctx.now().toISOString(), id);
+  const row = await readRow(ctx, id);
   if (!row) throw new PortalError("Receiver not found", 404);
   return toRecord(row);
 }
 
-export function receiverCompanyForToken(ctx: PortalContext, token: string): { id: string; company: string } | null {
+export async function receiverCompanyForToken(
+  ctx: PortalContext,
+  token: string,
+): Promise<{ id: string; company: string } | null> {
   if (!token || token.length < 20) return null;
-  const row = ctx.db
+  const row = (await ctx.db
     .prepare(`SELECT id, company FROM receivers WHERE access_token = ? AND enabled = 1`)
-    .get(token) as { id: string; company: string } | undefined;
+    .get(token)) as { id: string; company: string } | undefined;
   return row ?? null;
 }
 
 /** Loads, tracking, and photos for one receiver. No cost, documents, or comments. */
-export function shipmentsForReceiver(ctx: PortalContext, company: string): ReceiverShipment[] {
-  const first = listOrders(ctx, { receiverCompany: company, page: 1, pageSize: 50 });
+export async function shipmentsForReceiver(ctx: PortalContext, company: string): Promise<ReceiverShipment[]> {
+  const first = await listOrders(ctx, { receiverCompany: company, page: 1, pageSize: 50 });
   const orders = [...first.orders];
   const pageSize = 50;
   for (let page = 2; page <= Math.ceil(first.total / pageSize); page += 1) {
-    orders.push(...listOrders(ctx, { receiverCompany: company, page, pageSize }).orders);
+    orders.push(...(await listOrders(ctx, { receiverCompany: company, page, pageSize })).orders);
   }
-  return orders.map((order) => ({
+  return Promise.all(orders.map(async (order) => ({
     id: order.id,
     salesOrderNumber: order.salesOrderNumber,
     loadNumber: order.loadNumber,
@@ -180,11 +184,11 @@ export function shipmentsForReceiver(ctx: PortalContext, company: string): Recei
     latestEta: order.latestEta,
     truckType: order.truckType,
     trackingUrl: order.trackingUrl,
-    photos: listCarrierPhotos(ctx, order.id, false).map((photo) => ({
+    photos: (await listCarrierPhotos(ctx, order.id, false)).map((photo) => ({
       id: photo.id,
       filename: photo.filename,
       mediaType: photo.mediaType,
       receivedAt: photo.receivedAt,
     })),
-  }));
+  })));
 }

@@ -11,7 +11,7 @@ export async function GET(req: Request) {
     const session = await requireAdmin(req);
     if (!isSession(session)) return session;
     const ctx = await readyPortal();
-    return json({ items: listReviewQueue(ctx) });
+    return json({ items: await listReviewQueue(ctx) });
   } catch (error) {
     return errorResponse(error);
   }

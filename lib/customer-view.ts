@@ -19,6 +19,7 @@ import {
   TRANSIT_OPTIONS,
   TRUCK_TYPES,
 } from "@/lib/types";
+import { portalPublicUrl } from "@/lib/public-url";
 import { redactSensitiveText } from "@/lib/sensitive";
 
 /**
@@ -180,8 +181,7 @@ export function toPublicTracking(order: CustomerOrder): PublicTracking {
 }
 
 export function trackingUrlFor(token: string): string {
-  const base = (process.env.PORTAL_PUBLIC_URL || "").replace(/\/$/, "");
-  return `${base}/track/${token}`;
+  return `${portalPublicUrl()}/track/${token}`;
 }
 
 export function assertNoCarrierFields(value: unknown): void {

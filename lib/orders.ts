@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import type { SQLInputValue } from "node:sqlite";
+import type { SqlArg } from "@/lib/db";
 import type { PortalContext } from "@/lib/db";
 import { CUSTOMER_LOAD_COLUMNS, withTransaction } from "@/lib/db";
 import { serializeCustomerOrder, trackingUrlFor } from "@/lib/customer-view";
@@ -78,7 +78,7 @@ export function likeContains(query: string): string {
   return `%${query.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
 }
 
-function rowToOrder(ctx: PortalContext, row: LoadRow, withDocuments: boolean): CustomerOrder {
+async function rowToOrder(ctx: PortalContext, row: LoadRow, withDocuments: boolean): Promise<CustomerOrder> {
   return serializeCustomerOrder({
     id: row.id,
     salesOrderNumber: row.sales_order_number,
@@ -106,7 +106,7 @@ function rowToOrder(ctx: PortalContext, row: LoadRow, withDocuments: boolean): C
     attachmentCount: row.attachment_count ?? 0,
     bolCount: row.bol_count ?? 0,
     pendingReviewCount: row.pending_review_count ?? 0,
-    documents: withDocuments ? listCustomerDocuments(ctx, row.id) : [],
+    documents: withDocuments ? await listCustomerDocuments(ctx, row.id) : [],
   });
 }
 
@@ -143,9 +143,9 @@ function deliversTo(row: { destination_json: string; stops_json: string | null }
   }
 }
 
-function buildWhere(filter: OrderFilter): { sql: string; params: SQLInputValue[] } {
+function buildWhere(filter: OrderFilter): { sql: string; params: SqlArg[] } {
   const clauses: string[] = [];
-  const params: SQLInputValue[] = [];
+  const params: SqlArg[] = [];
   if (filter.status) {
     clauses.push("portal_status = ?");
     params.push(filter.status);
@@ -179,13 +179,13 @@ function buildWhere(filter: OrderFilter): { sql: string; params: SQLInputValue[]
   return { sql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
 }
 
-export function listOrders(ctx: PortalContext, filter: OrderFilter = {}): OrderPage {
+export async function listOrders(ctx: PortalContext, filter: OrderFilter = {}): Promise<OrderPage> {
   const pageSize = Math.min(50, Math.max(1, filter.pageSize ?? 8));
   const page = Math.max(1, filter.page ?? 1);
   const where = buildWhere(filter);
-  const totalRow = ctx.db.prepare(`SELECT COUNT(*) AS n FROM loads ${where.sql}`).get(...where.params) as { n: number };
+  const totalRow = await ctx.db.prepare(`SELECT COUNT(*) AS n FROM loads ${where.sql}`).get(...where.params);
   const today = denverDate(ctx.now());
-  const rows = ctx.db
+  const rows = (await ctx.db
     .prepare(
       `${LIST_SQL_HEAD} ${where.sql}
        ORDER BY ship_date IS NULL,
@@ -195,16 +195,16 @@ export function listOrders(ctx: PortalContext, filter: OrderFilter = {}): OrderP
          sales_order_number ASC
        LIMIT ? OFFSET ?`,
     )
-    .all(...where.params, today, today, pageSize, (page - 1) * pageSize) as unknown as LoadRow[];
+    .all(...where.params, today, today, pageSize, (page - 1) * pageSize)) as unknown as LoadRow[];
   return {
-    orders: rows.map((row) => rowToOrder(ctx, row, false)),
-    total: totalRow.n,
+    orders: await Promise.all(rows.map((row) => rowToOrder(ctx, row, false))),
+    total: Number(totalRow?.n ?? 0),
     page,
     pageSize,
   };
 }
 
-export function listAllOrders(ctx: PortalContext, receiverCompany?: string | null): CustomerOrder[] {
+export async function listAllOrders(ctx: PortalContext, receiverCompany?: string | null): Promise<CustomerOrder[]> {
   const where = receiverCompany
     ? `WHERE (
         LOWER(json_extract(destination_json, '$.company')) = LOWER(?)
@@ -215,26 +215,26 @@ export function listAllOrders(ctx: PortalContext, receiverCompany?: string | nul
         )
       )`
     : "";
-  const rows = ctx.db
+  const rows = (await ctx.db
     .prepare(`${LIST_SQL_HEAD} ${where} ORDER BY ship_date IS NULL, ship_date ASC`)
-    .all(...(receiverCompany ? [receiverCompany, receiverCompany] : [])) as unknown as LoadRow[];
-  return rows.map((row) => rowToOrder(ctx, row, false));
+    .all(...(receiverCompany ? [receiverCompany, receiverCompany] : []))) as unknown as LoadRow[];
+  return Promise.all(rows.map((row) => rowToOrder(ctx, row, false)));
 }
 
-export function getOrder(ctx: PortalContext, id: string, receiverCompany?: string | null): CustomerOrder | null {
-  const row = ctx.db.prepare(`${LIST_SQL_HEAD} WHERE id = ?`).get(id) as LoadRow | undefined;
+export async function getOrder(ctx: PortalContext, id: string, receiverCompany?: string | null): Promise<CustomerOrder | null> {
+  const row = (await ctx.db.prepare(`${LIST_SQL_HEAD} WHERE id = ?`).get(id)) as LoadRow | undefined;
   if (!row) return null;
   if (receiverCompany && !deliversTo(row, receiverCompany)) return null;
   return rowToOrder(ctx, row, true);
 }
 
-export function getOrderByToken(ctx: PortalContext, token: string): CustomerOrder | null {
-  const row = ctx.db.prepare(`${LIST_SQL_HEAD} WHERE tracking_token = ?`).get(token) as LoadRow | undefined;
+export async function getOrderByToken(ctx: PortalContext, token: string): Promise<CustomerOrder | null> {
+  const row = (await ctx.db.prepare(`${LIST_SQL_HEAD} WHERE tracking_token = ?`).get(token)) as LoadRow | undefined;
   if (!row) return null;
   return rowToOrder(ctx, row, false);
 }
 
-export function orderStats(ctx: PortalContext, receiverCompany?: string | null): OrderStats {
+export async function orderStats(ctx: PortalContext, receiverCompany?: string | null): Promise<OrderStats> {
   const where = receiverCompany
     ? `WHERE (
         LOWER(json_extract(destination_json, '$.company')) = LOWER(?)
@@ -245,28 +245,24 @@ export function orderStats(ctx: PortalContext, receiverCompany?: string | null):
         )
       )`
     : "";
-  const rows = ctx.db
+  const rows = await ctx.db
     .prepare(`SELECT portal_status, COUNT(*) AS n FROM loads ${where} GROUP BY portal_status`)
-    .all(...(receiverCompany ? [receiverCompany, receiverCompany] : [])) as Array<{
-    portal_status: string;
-    n: number;
-  }>;
+    .all(...(receiverCompany ? [receiverCompany, receiverCompany] : []));
   const stats: OrderStats = { total: 0, being_prepared: 0, ready_to_ship: 0, shipped: 0, cancelled: 0 };
   for (const row of rows) {
     const count = Number(row.n);
     stats.total += count;
-    if (row.portal_status in stats) {
-      stats[row.portal_status as PortalStatus] = count;
-    }
+    const status = String(row.portal_status);
+    if (status in stats) stats[status as PortalStatus] = count;
   }
   return stats;
 }
 
-function nextLoadNumber(ctx: PortalContext): string {
-  const rows = ctx.db.prepare(`SELECT load_number FROM loads`).all() as Array<{ load_number: string }>;
+async function nextLoadNumber(ctx: PortalContext): Promise<string> {
+  const rows = await ctx.db.prepare(`SELECT load_number FROM loads`).all();
   let max = 900100;
   for (const row of rows) {
-    const value = Number(row.load_number.split("-")[0]);
+    const value = Number(String(row.load_number).split("-")[0]);
     if (Number.isFinite(value) && value > max) max = value;
   }
   return `${max + 1}-1`;
@@ -309,14 +305,14 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
 }> {
   const now = ctx.now().toISOString();
   const id = randomUUID();
-  const loadNumber = nextLoadNumber(ctx);
+  const loadNumber = await nextLoadNumber(ctx);
   const token = randomBytes(24).toString("base64url");
   const portalStatus = input.portalStatus ?? "being_prepared";
   const trackingStage = advanceStage("submitted", portalStatus);
   const timeline = timelineThrough(trackingStage, now);
   const route = routeFrom(input);
-  withTransaction(ctx.db, () => {
-    ctx.db
+  await withTransaction(ctx.db, async () => {
+    await ctx.db
       .prepare(
         `INSERT INTO loads (
            id, sales_order_number, load_number, portal_status, tracking_stage, timeline_json,
@@ -352,16 +348,16 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
         now,
       );
   });
-  const order = getOrder(ctx, id);
+  const order = await getOrder(ctx, id);
   if (!order) throw new PortalError("The order could not be saved", 500);
   const confirmation = await sendOrderConfirmation(ctx, order, actor.email);
   return { order, confirmation };
 }
 
-export function updateOrder(ctx: PortalContext, id: string, patch: OrderPatch, actor: Session): CustomerOrder {
-  const existing = ctx.db.prepare(`${LIST_SQL_HEAD} WHERE id = ?`).get(id) as LoadRow | undefined;
+export async function updateOrder(ctx: PortalContext, id: string, patch: OrderPatch, actor: Session): Promise<CustomerOrder> {
+  const existing = (await ctx.db.prepare(`${LIST_SQL_HEAD} WHERE id = ?`).get(id)) as LoadRow | undefined;
   if (!existing) throw new PortalError("Order not found", 404);
-  const current = rowToOrder(ctx, existing, false);
+  const current = await rowToOrder(ctx, existing, false);
   const portalStatus = patch.portalStatus ?? current.portalStatus;
   const trackingStage = advanceStage(current.trackingStage, portalStatus);
   const timeline =
@@ -381,7 +377,7 @@ export function updateOrder(ctx: PortalContext, id: string, patch: OrderPatch, a
         }),
       });
   const now = ctx.now().toISOString();
-  ctx.db
+  await ctx.db
     .prepare(
       `UPDATE loads SET
          sales_order_number = ?, portal_status = ?, tracking_stage = ?, timeline_json = ?,
@@ -415,7 +411,7 @@ export function updateOrder(ctx: PortalContext, id: string, patch: OrderPatch, a
       id,
     );
   void actor;
-  const updated = getOrder(ctx, id);
+  const updated = await getOrder(ctx, id);
   if (!updated) throw new PortalError("Order not found", 404);
   return updated;
 }

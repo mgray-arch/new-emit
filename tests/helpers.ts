@@ -30,7 +30,7 @@ export function expectNoSecrets(value: unknown) {
 
 export async function seededPortal(): Promise<PortalContext> {
   const ctx: PortalContext = {
-    db: openDatabase(":memory:"),
+    db: await openDatabase(":memory:"),
     now: () => new Date("2026-10-14T18:00:00Z"),
   };
   await seedDemo(ctx);

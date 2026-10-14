@@ -12,7 +12,7 @@ export async function GET(req: Request) {
     const session = await requireAdmin(req);
     if (!isSession(session)) return session;
     const ctx = await readyPortal();
-    return json({ receivers: listReceivers(ctx) });
+    return json({ receivers: await listReceivers(ctx) });
   } catch (error) {
     return errorResponse(error);
   }
@@ -24,7 +24,7 @@ export async function POST(req: Request) {
     if (!isSession(session)) return session;
     const ctx = await readyPortal();
     const body = receiverCreateSchema.parse(await req.json());
-    return json({ receiver: createReceiver(ctx, body) }, 201);
+    return json({ receiver: await createReceiver(ctx, body) }, 201);
   } catch (error) {
     return errorResponse(error);
   }

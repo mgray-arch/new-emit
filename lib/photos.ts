@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { crc32, deflateSync } from "node:zlib";
 import type { PortalContext } from "@/lib/db";
-import { withTransaction } from "@/lib/db";
 import { safeFilename } from "@/lib/documents";
 import { PortalError } from "@/lib/http";
 import { sensitiveReason } from "@/lib/sensitive";
+import { readStoredBytes, writeStoredBytes } from "@/lib/storage";
 
 const MAX_BYTES = 12 * 1024 * 1024;
 
@@ -185,7 +185,7 @@ function toPhoto(row: PhotoRow): CarrierPhoto {
   };
 }
 
-export function ingestCarrierPhoto(ctx: PortalContext, input: IngestPhotoInput): IngestPhotoResult {
+export async function ingestCarrierPhoto(ctx: PortalContext, input: IngestPhotoInput): Promise<IngestPhotoResult> {
   const loadNumber = input.loadNumber.trim();
   if (!loadNumber) throw new PortalError("SAM load number is required");
   const source = input.source.trim();
@@ -198,77 +198,64 @@ export function ingestCarrierPhoto(ctx: PortalContext, input: IngestPhotoInput):
   const mediaType = MEDIA[kind];
   const heldReason = photoHoldReason({ filename, source, subject, bytes: input.bytes });
   const sha256 = createHash("sha256").update(input.bytes).digest("hex");
-  const load = ctx.db.prepare(`SELECT id, load_number FROM loads WHERE load_number = ?`).get(loadNumber) as
-    | { id: string; load_number: string }
-    | undefined;
+  const load = await ctx.db.prepare(`SELECT id, load_number FROM loads WHERE load_number = ?`).get(loadNumber);
   if (!load) throw new PortalError(`No load with SAM load number ${loadNumber}.`, 404);
 
-  return withTransaction(ctx.db, () => {
-    const existing = ctx.db
-      .prepare(
-        `SELECT id, sha256, media_type, source, received_at, held, hold_reason
-         FROM carrier_photos WHERE load_id = ? AND sha256 = ?`,
-      )
-      .get(load.id, sha256) as
-      | {
-          id: string;
-          sha256: string;
-          media_type: string;
-          source: string;
-          received_at: string;
-          held: number;
-          hold_reason: string | null;
-        }
-      | undefined;
-    if (existing) {
-      return {
-        id: existing.id,
-        loadId: load.id,
-        loadNumber: load.load_number,
-        sha256: existing.sha256,
-        mediaType: existing.media_type,
-        source: existing.source,
-        receivedAt: existing.received_at,
-        duplicate: true,
-        visibleToCustomer: existing.held !== 1,
-        heldReason: existing.hold_reason,
-      };
-    }
-    const id = randomUUID();
-    const createdAt = ctx.now().toISOString();
-    ctx.db
-      .prepare(
-        `INSERT INTO carrier_photos (
-           id, load_id, sha256, filename, media_type, source, subject, received_at, created_at, held, hold_reason, bytes
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        id,
-        load.id,
-        sha256,
-        filename,
-        mediaType,
-        source,
-        subject,
-        received.toISOString(),
-        createdAt,
-        heldReason ? 1 : 0,
-        heldReason,
-        input.bytes,
-      );
+  const existing = await ctx.db
+    .prepare(
+      `SELECT id, sha256, media_type, source, received_at, held, hold_reason
+       FROM carrier_photos WHERE load_id = ? AND sha256 = ?`,
+    )
+    .get(String(load.id), sha256);
+  if (existing) {
     return {
+      id: String(existing.id),
+      loadId: String(load.id),
+      loadNumber: String(load.load_number),
+      sha256: String(existing.sha256),
+      mediaType: String(existing.media_type),
+      source: String(existing.source),
+      receivedAt: String(existing.received_at),
+      duplicate: true,
+      visibleToCustomer: existing.held !== 1,
+      heldReason: existing.hold_reason == null ? null : String(existing.hold_reason),
+    };
+  }
+  const id = randomUUID();
+  const createdAt = ctx.now().toISOString();
+  const storageKey = await writeStoredBytes(`carrier-photos/${id}`, input.bytes, mediaType);
+  await ctx.db
+    .prepare(
+      `INSERT INTO carrier_photos (
+         id, load_id, sha256, filename, media_type, source, subject, received_at, created_at, held, hold_reason, storage_key
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
       id,
-      loadId: load.id,
-      loadNumber: load.load_number,
+      String(load.id),
       sha256,
+      filename,
       mediaType,
       source,
-      receivedAt: received.toISOString(),
-      duplicate: false,
-      visibleToCustomer: !heldReason,
+      subject,
+      received.toISOString(),
+      createdAt,
+      heldReason ? 1 : 0,
       heldReason,
-    };
-  });
+      storageKey,
+    );
+  return {
+    id,
+    loadId: String(load.id),
+    loadNumber: String(load.load_number),
+    sha256,
+    mediaType,
+    source,
+    receivedAt: received.toISOString(),
+    duplicate: false,
+    visibleToCustomer: !heldReason,
+    heldReason,
+  };
 }
 
 const LIST_SQL = `
@@ -276,22 +263,21 @@ SELECT id, load_id, sha256, filename, media_type, source, subject, received_at, 
 FROM carrier_photos
 `;
 
-export function listCarrierPhotos(ctx: PortalContext, loadId: string, includeHeld: boolean): CarrierPhoto[] {
+export async function listCarrierPhotos(ctx: PortalContext, loadId: string, includeHeld: boolean): Promise<CarrierPhoto[]> {
   const where = includeHeld ? "WHERE load_id = ?" : "WHERE load_id = ? AND held = 0";
-  const rows = ctx.db
-    .prepare(`${LIST_SQL} ${where} ORDER BY received_at ASC, created_at ASC`)
-    .all(loadId) as unknown as PhotoRow[];
-  return rows.map(toPhoto);
+  const rows = await ctx.db.prepare(`${LIST_SQL} ${where} ORDER BY received_at ASC, created_at ASC`).all(loadId);
+  return rows.map((row) => toPhoto(row as unknown as PhotoRow));
 }
 
-export function readCarrierPhoto(ctx: PortalContext, id: string): (CarrierPhoto & { bytes: Uint8Array }) | null {
-  const row = ctx.db
+export async function readCarrierPhoto(ctx: PortalContext, id: string): Promise<(CarrierPhoto & { bytes: Uint8Array }) | null> {
+  const row = await ctx.db
     .prepare(
-      `SELECT id, load_id, sha256, filename, media_type, source, subject, received_at, created_at, held, hold_reason, bytes
+      `SELECT id, load_id, sha256, filename, media_type, source, subject, received_at, created_at, held, hold_reason, storage_key
        FROM carrier_photos WHERE id = ?`,
     )
-    .get(id) as (PhotoRow & { bytes: Uint8Array }) | undefined;
+    .get(id);
   if (!row) return null;
-  if (!Object.values(MEDIA).includes(row.media_type)) return null;
-  return { ...toPhoto(row), bytes: row.bytes };
+  if (!Object.values(MEDIA).includes(String(row.media_type))) return null;
+  const photo = toPhoto(row as unknown as PhotoRow);
+  return { ...photo, bytes: await readStoredBytes(String(row.storage_key)) };
 }

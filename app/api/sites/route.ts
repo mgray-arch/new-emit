@@ -11,7 +11,7 @@ export async function GET(req: Request) {
     const session = await requireSession(req);
     if (!isSession(session)) return session;
     const ctx = await readyPortal();
-    return json({ sites: listSites(ctx) });
+    return json({ sites: await listSites(ctx) });
   } catch (error) {
     return errorResponse(error);
   }

@@ -16,7 +16,7 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
       .object({ action: z.enum(["approve", "reject"]), confirm: z.boolean().optional() })
       .parse(await req.json());
     const ctx = await readyPortal();
-    const result = reviewDocument(ctx, id, body.action, session.email, { confirm: body.confirm });
+    const result = await reviewDocument(ctx, id, body.action, session.email, { confirm: body.confirm });
     return json({ ok: true, ...result });
   } catch (error) {
     return errorResponse(error);
@@ -29,7 +29,7 @@ export async function GET(req: Request, context: { params: Promise<{ id: string 
     if (!isSession(session)) return session;
     const { id } = await context.params;
     const ctx = await readyPortal();
-    const file = readInternalDocumentFile(ctx, id);
+    const file = await readInternalDocumentFile(ctx, id);
     if (!file) return json({ error: "Document not found" }, 404);
     return new Response(Buffer.from(file.bytes), {
       headers: {

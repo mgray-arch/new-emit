@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { PDFDocument } from "pdf-lib";
-import type { DatabaseSync } from "node:sqlite";
-import type { PortalContext } from "@/lib/db";
+import type { PortalContext, SqlDatabase } from "@/lib/db";
 import { withTransaction } from "@/lib/db";
 import { sensitiveReason } from "@/lib/sensitive";
+import { readStoredBytes, writeStoredBytes } from "@/lib/storage";
 import type { CustomerDocument, ReviewItem } from "@/lib/types";
 import { PortalError } from "@/lib/http";
 
@@ -109,11 +109,11 @@ function mediaTypeFor(kind: "pdf" | "png" | "jpeg" | "text" | "other"): string {
   }
 }
 
-function refreshPending(db: DatabaseSync, loadId: string): void {
-  const row = db.prepare(
-    `SELECT COUNT(*) AS n FROM internal_documents WHERE load_id = ? AND review_status = 'pending'`,
-  ).get(loadId) as { n: number } | undefined;
-  db.prepare(`UPDATE loads SET pending_review_count = ? WHERE id = ?`).run(row?.n ?? 0, loadId);
+async function refreshPending(db: SqlDatabase, loadId: string): Promise<void> {
+  const row = await db
+    .prepare(`SELECT COUNT(*) AS n FROM internal_documents WHERE load_id = ? AND review_status = 'pending'`)
+    .get(loadId);
+  await db.prepare(`UPDATE loads SET pending_review_count = ? WHERE id = ?`).run(Number(row?.n ?? 0), loadId);
 }
 
 export interface IngestResult {
@@ -152,85 +152,95 @@ export async function ingestDocument(
 
   const releasedIds: string[] = [];
   const heldIds: string[] = [];
-  withTransaction(ctx.db, () => {
-    pages.forEach((page, index) => {
-      const screened = screenPageText(page.text);
-      const id = randomUUID();
-      if (screened.decision === "pass") {
-        ctx.db
+  const stored: Array<{
+    id: string;
+    index: number;
+    page: Page;
+    screened: { decision: ScreenDecision; reason: string };
+    storageKey: string;
+  }> = [];
+  for (const [index, page] of pages.entries()) {
+    const screened = screenPageText(page.text);
+    const id = randomUUID();
+    const prefix = screened.decision === "pass" ? "customer-documents" : "internal-documents";
+    const storageKey = await writeStoredBytes(`${prefix}/${id}`, page.bytes, page.mediaType);
+    stored.push({ id, index, page, screened, storageKey });
+  }
+  await withTransaction(ctx.db, async () => {
+    for (const item of stored) {
+      if (item.screened.decision === "pass") {
+        await ctx.db
           .prepare(
-            `INSERT INTO customer_documents (id, load_id, kind, filename, media_type, bytes, created_at)
+            `INSERT INTO customer_documents (id, load_id, kind, filename, media_type, storage_key, created_at)
              VALUES (?, ?, ?, ?, ?, ?, ?)`,
           )
-          .run(id, input.loadId, slot, filename, page.mediaType, page.bytes, createdAt);
-        releasedIds.push(id);
-        return;
+          .run(item.id, input.loadId, slot, filename, item.page.mediaType, item.storageKey, createdAt);
+        releasedIds.push(item.id);
+        continue;
       }
-      const storedKind = screened.decision === "block" ? "rate_confirmation" : "uncertain";
-      ctx.db
+      const storedKind = item.screened.decision === "block" ? "rate_confirmation" : "uncertain";
+      await ctx.db
         .prepare(
           `INSERT INTO internal_documents (
              id, load_id, kind, screen_result, screen_reason, review_status, filename, media_type,
-             page_index, page_count, text_excerpt, bytes, created_at
+             page_index, page_count, text_excerpt, storage_key, created_at
            ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
-          id,
+          item.id,
           input.loadId,
           storedKind,
-          screened.decision,
-          screened.reason,
+          item.screened.decision,
+          item.screened.reason,
           filename,
-          page.mediaType,
-          index + 1,
+          item.page.mediaType,
+          item.index + 1,
           pages.length,
-          page.text ? page.text.slice(0, 600) : null,
-          page.bytes,
+          item.page.text ? item.page.text.slice(0, 600) : null,
+          item.storageKey,
           createdAt,
         );
-      heldIds.push(id);
-    });
-    refreshPending(ctx.db, input.loadId);
+      heldIds.push(item.id);
+    }
+    await refreshPending(ctx.db, input.loadId);
   });
   return { releasedIds, heldIds };
 }
 
 export const CUSTOMER_DOCUMENT_READ_SQL = `
-SELECT id, load_id, kind, filename, media_type, bytes, created_at
+SELECT id, load_id, kind, filename, media_type, storage_key, created_at
 FROM customer_documents
 WHERE id = ?
 `;
 
-export function listCustomerDocuments(ctx: PortalContext, loadId: string): CustomerDocument[] {
-  const rows = ctx.db
+export async function listCustomerDocuments(ctx: PortalContext, loadId: string): Promise<CustomerDocument[]> {
+  const rows = await ctx.db
     .prepare(
       `SELECT id, kind, filename, media_type, created_at
        FROM customer_documents WHERE load_id = ? ORDER BY created_at ASC`,
     )
-    .all(loadId) as Array<{ id: string; kind: string; filename: string; media_type: string; created_at: string }>;
+    .all(loadId);
   return rows.map((row) => ({
-    id: row.id,
+    id: String(row.id),
     kind: row.kind === "bol" ? "bol" : "attachment",
-    filename: row.filename,
-    mediaType: row.media_type,
-    createdAt: row.created_at,
+    filename: String(row.filename),
+    mediaType: String(row.media_type),
+    createdAt: String(row.created_at),
   }));
 }
 
-export function readCustomerDocument(
+export async function readCustomerDocument(
   ctx: PortalContext,
   id: string,
-): { id: string; loadId: string; filename: string; mediaType: string; bytes: Uint8Array } | null {
-  const row = ctx.db.prepare(CUSTOMER_DOCUMENT_READ_SQL).get(id) as
-    | { id: string; load_id: string; filename: string; media_type: string; bytes: Uint8Array }
-    | undefined;
+): Promise<{ id: string; loadId: string; filename: string; mediaType: string; bytes: Uint8Array } | null> {
+  const row = await ctx.db.prepare(CUSTOMER_DOCUMENT_READ_SQL).get(id);
   if (!row) return null;
   return {
-    id: row.id,
-    loadId: row.load_id,
-    filename: row.filename,
-    mediaType: allowedMedia(row.media_type),
-    bytes: row.bytes,
+    id: String(row.id),
+    loadId: String(row.load_id),
+    filename: String(row.filename),
+    mediaType: allowedMedia(String(row.media_type)),
+    bytes: await readStoredBytes(String(row.storage_key)),
   };
 }
 
@@ -241,8 +251,8 @@ function allowedMedia(value: string): string {
   return "application/octet-stream";
 }
 
-export function listReviewQueue(ctx: PortalContext): ReviewItem[] {
-  const rows = ctx.db
+export async function listReviewQueue(ctx: PortalContext): Promise<ReviewItem[]> {
+  const rows = await ctx.db
     .prepare(
       `SELECT d.id, d.load_id, d.kind, d.screen_result, d.screen_reason, d.review_status, d.filename,
               d.media_type, d.page_index, d.page_count, d.text_excerpt, d.created_at,
@@ -252,7 +262,7 @@ export function listReviewQueue(ctx: PortalContext): ReviewItem[] {
        WHERE d.review_status = 'pending'
        ORDER BY d.created_at DESC`,
     )
-    .all() as Array<Record<string, unknown>>;
+    .all();
   return rows.map((row) => ({
     id: String(row.id),
     loadId: String(row.load_id),
@@ -271,30 +281,19 @@ export function listReviewQueue(ctx: PortalContext): ReviewItem[] {
   }));
 }
 
-export function reviewDocument(
+export async function reviewDocument(
   ctx: PortalContext,
   id: string,
   action: "approve" | "reject",
   reviewer: string,
   options?: { confirm?: boolean },
-): { reviewedBy: string; reviewedAt: string; reviewStatus: "approved" | "rejected" } {
-  const row = ctx.db
+): Promise<{ reviewedBy: string; reviewedAt: string; reviewStatus: "approved" | "rejected" }> {
+  const row = await ctx.db
     .prepare(
-      `SELECT id, load_id, review_status, filename, media_type, bytes, kind, screen_result
+      `SELECT id, load_id, review_status, filename, media_type, storage_key, kind, screen_result
        FROM internal_documents WHERE id = ?`,
     )
-    .get(id) as
-    | {
-        id: string;
-        load_id: string;
-        review_status: string;
-        filename: string;
-        media_type: string;
-        bytes: Uint8Array;
-        kind: string;
-        screen_result: string;
-      }
-    | undefined;
+    .get(id);
   if (!row || row.review_status !== "pending") throw new PortalError("That page is not waiting for review", 404);
   if (action === "approve" && row.screen_result === "block" && !options?.confirm) {
     throw new PortalError(
@@ -303,24 +302,33 @@ export function reviewDocument(
     );
   }
   const now = ctx.now().toISOString();
-  withTransaction(ctx.db, () => {
-    if (action === "approve") {
+  const customerId = randomUUID();
+  const customerKey =
+    action === "approve"
+      ? await writeStoredBytes(
+          `customer-documents/${customerId}`,
+          await readStoredBytes(String(row.storage_key)),
+          String(row.media_type),
+        )
+      : null;
+  await withTransaction(ctx.db, async () => {
+    if (action === "approve" && customerKey) {
       const customerKind = row.kind === "bol" ? "bol" : "attachment";
-      ctx.db
+      await ctx.db
         .prepare(
-          `INSERT INTO customer_documents (id, load_id, kind, filename, media_type, bytes, created_at)
+          `INSERT INTO customer_documents (id, load_id, kind, filename, media_type, storage_key, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(randomUUID(), row.load_id, customerKind, row.filename, row.media_type, row.bytes, now);
+        .run(customerId, String(row.load_id), customerKind, String(row.filename), String(row.media_type), customerKey, now);
     }
-    ctx.db
+    await ctx.db
       .prepare(
         `UPDATE internal_documents
          SET review_status = ?, reviewed_at = ?, reviewed_by = ?
          WHERE id = ?`,
       )
       .run(action === "approve" ? "approved" : "rejected", now, reviewer, id);
-    refreshPending(ctx.db, row.load_id);
+    await refreshPending(ctx.db, String(row.load_id));
   });
   return {
     reviewedBy: reviewer,
@@ -329,13 +337,17 @@ export function reviewDocument(
   };
 }
 
-export function readInternalDocumentFile(
+export async function readInternalDocumentFile(
   ctx: PortalContext,
   id: string,
-): { filename: string; mediaType: string; bytes: Uint8Array } | null {
-  const row = ctx.db
-    .prepare(`SELECT filename, media_type, bytes FROM internal_documents WHERE id = ?`)
-    .get(id) as { filename: string; media_type: string; bytes: Uint8Array } | undefined;
+): Promise<{ filename: string; mediaType: string; bytes: Uint8Array } | null> {
+  const row = await ctx.db
+    .prepare(`SELECT filename, media_type, storage_key FROM internal_documents WHERE id = ?`)
+    .get(id);
   if (!row) return null;
-  return { filename: row.filename, mediaType: allowedMedia(row.media_type), bytes: row.bytes };
+  return {
+    filename: String(row.filename),
+    mediaType: allowedMedia(String(row.media_type)),
+    bytes: await readStoredBytes(String(row.storage_key)),
+  };
 }

@@ -2,7 +2,7 @@
 
 Customer portal for EMIT Technologies, a shipper of Select Transport Partners. This replaces the Lovable portal at emit-select.com. It is a test deployment only: no custom domain, and the 587 existing loads are not migrated.
 
-The app is a Next.js server. Orders, the document review queue, users, and the email outbox live in a SQLite file. A SAM TMS client is included and unit-tested, but the running app still reads and writes the mock store. SAM credentials are not available yet.
+The app is a Next.js server. Orders, the document review queue, users, and the email outbox live in Turso on Vercel, or in a local SQLite file when `TURSO_DATABASE_URL` is unset. Document and photo bytes live in Vercel Blob, or in `data/blobs` locally. A SAM TMS client is included and unit-tested, but the running app still reads and writes this store. SAM credentials are not available yet.
 
 ## Run locally
 
@@ -49,4 +49,38 @@ Every upload is split into pages and screened. A clean page is stored as a custo
 
 Unauthenticated routes are the tracking link (`/track/[token]`) and a receiver's private link (`/r/[token]`). Tracking returns cities, status, timeline, and ETA. It does not return cost, comments, documents, street address, or carrier data. Demo tracking tokens are derived from the load number and are not secrets. New orders get a random token. Receiver tokens are 32 random bytes.
 
-See [docs/REPORT.md](docs/REPORT.md) for branding notes, deploy steps, credentials still needed, and open questions.
+See [docs/REPORT.md](docs/REPORT.md) for branding notes, credentials still needed, and open questions.
+
+## Put a preview on Vercel
+
+Turso is the database. It is hosted SQLite, so the portal keeps the same schema and the same tests. Local `npm test` and `npm run dev` do not need a Turso or Vercel account.
+
+1. Create the database.
+   - Open [https://turso.tech/app](https://turso.tech/app) and sign in with GitHub.
+   - Click **Create Database**.
+   - Name it `emit-portal`. Pick location **Washington, D.C. (iad)**. Create it.
+   - Copy the database URL. It starts with `libsql://`.
+   - On the database, create a token with full access. Copy the token. Turso shows it once.
+
+2. Import the repo.
+   - In Vercel, **Add New → Project**.
+   - Import GitHub `mgray-arch/new-emit`.
+   - Framework preset **Next.js**. Production branch `main`. Leave preview deployments on.
+
+3. Create the Blob store.
+   - Open the new project's **Storage** tab. **Create → Blob**.
+   - Name it `emit-portal` and connect it to this project.
+   - Vercel fills in `BLOB_READ_WRITE_TOKEN` for Production and Preview.
+
+4. Set environment variables. Add each one for **Preview** and **Production**.
+   - `TURSO_DATABASE_URL` = the `libsql://` URL
+   - `TURSO_AUTH_TOKEN` = the token from step 1
+   - `AUTH_SECRET` = a long random string, at least 16 characters
+   - `DEMO_SEED` = `true` on Preview, `false` on Production
+   - `BLOB_READ_WRITE_TOKEN` is already set if the store is connected
+
+5. Deploy, then open the preview URL from the deployment page.
+   - Sign in as `mgray@goselect.com` / `Emit-Demo-2026`.
+   - Settings shows the Enchanted Rock LLC receiver link.
+
+Leave `PORTAL_PUBLIC_URL` blank and links use that deployment's URL. Set it after you have a stable hostname, then add that origin to the Microsoft and Google callback URLs. The other variables in `.env.example` (Google, Microsoft, Gmail, the photo ingest token) can wait until those features are turned on.

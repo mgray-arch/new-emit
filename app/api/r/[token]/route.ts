@@ -10,9 +10,9 @@ export async function GET(_req: Request, context: { params: Promise<{ token: str
   try {
     const { token } = await context.params;
     const ctx = await readyPortal();
-    const receiver = receiverCompanyForToken(ctx, token);
+    const receiver = await receiverCompanyForToken(ctx, token);
     if (!receiver) return json({ error: "This link is not valid." }, 404);
-    const body = { company: receiver.company, loads: shipmentsForReceiver(ctx, receiver.company) };
+    const body = { company: receiver.company, loads: await shipmentsForReceiver(ctx, receiver.company) };
     assertNoCarrierFields(body);
     return json(body);
   } catch (error) {

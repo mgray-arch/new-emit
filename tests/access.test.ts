@@ -18,8 +18,8 @@ beforeAll(async () => {
   ctx = await seededPortal();
 });
 
-function enchantedToken(): string {
-  const row = ctx.db.prepare(`SELECT access_token FROM receivers WHERE company = ?`).get("Enchanted Rock LLC") as {
+async function enchantedToken(): Promise<string> {
+  const row = (await ctx.db.prepare(`SELECT access_token FROM receivers WHERE company = ?`).get("Enchanted Rock LLC")) as {
     access_token: string;
   };
   return row.access_token;
@@ -67,7 +67,7 @@ describe("sign-in providers", () => {
 
 describe("receiver private links", () => {
   it("shows only that company's loads, tracking, and photos", async () => {
-    const token = enchantedToken();
+    const token = await enchantedToken();
     const response = await receiverPortal(new Request(`http://portal.test/api/r/${token}`), {
       params: Promise.resolve({ token }),
     });
@@ -93,10 +93,10 @@ describe("receiver private links", () => {
     });
     expect(missing.status).toBe(404);
 
-    const kodiak = listAllOrders(ctx).find((order) => order.salesOrderNumber === "SO2196")!;
+    const kodiak = (await listAllOrders(ctx)).find((order) => order.salesOrderNumber === "SO2196")!;
     expect(kodiak.customerCost).not.toBeNull();
-    expect(getOrder(ctx, kodiak.id, "Enchanted Rock LLC")).toBeNull();
-    const bol = listCustomerDocuments(ctx, kodiak.id)[0];
+    expect(await getOrder(ctx, kodiak.id, "Enchanted Rock LLC")).toBeNull();
+    const bol = (await listCustomerDocuments(ctx, kodiak.id))[0];
     const download = await downloadDoc(new Request(`http://portal.test/api/documents/${bol.id}`), {
       params: Promise.resolve({ id: bol.id }),
     });

@@ -13,8 +13,8 @@ export async function GET(req: Request, context: { params: Promise<{ id: string 
     if (!isSession(session)) return session;
     const { id } = await context.params;
     const ctx = await readyPortal();
-    const doc = readCustomerDocument(ctx, id);
-    if (!doc || !getOrder(ctx, doc.loadId)) return json({ error: "Document not found" }, 404);
+    const doc = await readCustomerDocument(ctx, id);
+    if (!doc || !(await getOrder(ctx, doc.loadId))) return json({ error: "Document not found" }, 404);
     return new Response(Buffer.from(doc.bytes), {
       headers: {
         "content-type": doc.mediaType,

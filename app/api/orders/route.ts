@@ -17,7 +17,7 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const status = url.searchParams.get("status");
     const page = Number(url.searchParams.get("page") || "1");
-    const orders = listOrders(ctx, {
+    const orders = await listOrders(ctx, {
       q: url.searchParams.get("q") || undefined,
       status: status && (PORTAL_STATUSES as readonly string[]).includes(status) ? (status as PortalStatus) : null,
       shipFrom: url.searchParams.get("shipFrom"),
@@ -27,7 +27,7 @@ export async function GET(req: Request) {
     });
     return json({
       ...orders,
-      stats: orderStats(ctx),
+      stats: await orderStats(ctx),
     });
   } catch (error) {
     return errorResponse(error);

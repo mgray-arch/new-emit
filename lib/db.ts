@@ -1,10 +1,24 @@
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { Client, ResultSet, Row, Transaction, Value } from "@libsql/client";
+import { writeStoredBytes } from "@/lib/storage";
+
+export type SqlArg = string | number | bigint | Uint8Array | null;
+
+export interface SqlStatement {
+  get(...params: SqlArg[]): Promise<Record<string, unknown> | undefined>;
+  all(...params: SqlArg[]): Promise<Record<string, unknown>[]>;
+  run(...params: SqlArg[]): Promise<{ changes: number }>;
+}
+
+export interface SqlDatabase {
+  exec(sql: string): Promise<void>;
+  prepare(sql: string): SqlStatement;
+}
 
 export interface PortalContext {
-  db: DatabaseSync;
+  db: SqlDatabase;
   now: () => Date;
 }
 
@@ -63,7 +77,7 @@ CREATE TABLE IF NOT EXISTS customer_documents (
   kind TEXT NOT NULL,
   filename TEXT NOT NULL,
   media_type TEXT NOT NULL,
-  bytes BLOB NOT NULL,
+  storage_key TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
 
@@ -79,7 +93,7 @@ CREATE TABLE IF NOT EXISTS internal_documents (
   page_index INTEGER NOT NULL,
   page_count INTEGER NOT NULL,
   text_excerpt TEXT,
-  bytes BLOB NOT NULL,
+  storage_key TEXT NOT NULL,
   created_at TEXT NOT NULL,
   reviewed_at TEXT,
   reviewed_by TEXT
@@ -115,7 +129,7 @@ CREATE TABLE IF NOT EXISTS carrier_photos (
   created_at TEXT NOT NULL,
   held INTEGER NOT NULL DEFAULT 0,
   hold_reason TEXT,
-  bytes BLOB NOT NULL,
+  storage_key TEXT NOT NULL,
   UNIQUE (load_id, sha256)
 );
 
@@ -144,27 +158,156 @@ export const CUSTOMER_LOAD_COLUMNS = `
   rate_reason, comments, created_by, created_at, updated_at, pending_review_count
 `;
 
-export function openDatabase(file: string): DatabaseSync {
-  if (file !== ":memory:") {
-    fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
+function coerce(value: unknown): unknown {
+  if (typeof value === "bigint") return Number(value);
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  return value;
+}
+
+function coerceRecord(row: Record<string, unknown>): Record<string, unknown> {
+  const record: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) record[key] = coerce(value);
+  return record;
+}
+
+class NodeSqliteDatabase implements SqlDatabase {
+  constructor(private db: import("node:sqlite").DatabaseSync) {}
+
+  async exec(sql: string): Promise<void> {
+    this.db.exec(sql);
   }
-  const db = new DatabaseSync(file);
-  db.exec("PRAGMA foreign_keys = ON");
-  db.exec(SCHEMA);
-  migrateUserRoles(db);
-  migrateStops(db);
-  migrateDropCarrierColumns(db);
-  migrateOutboxSender(db);
-  migrateReceivers(db);
+
+  prepare(sql: string): SqlStatement {
+    const stmt = this.db.prepare(sql);
+    return {
+      get: async (...params) => {
+        const row = stmt.get(...(params as import("node:sqlite").SQLInputValue[])) as
+          | Record<string, unknown>
+          | undefined;
+        return row ? coerceRecord(row) : undefined;
+      },
+      all: async (...params) => {
+        const rows = stmt.all(...(params as import("node:sqlite").SQLInputValue[])) as Record<string, unknown>[];
+        return rows.map(coerceRecord);
+      },
+      run: async (...params) => {
+        const result = stmt.run(...(params as import("node:sqlite").SQLInputValue[]));
+        return { changes: Number(result.changes) };
+      },
+    };
+  }
+}
+
+function libsqlRecords(result: ResultSet): Record<string, unknown>[] {
+  return result.rows.map((row: Row) => {
+    const record: Record<string, unknown> = {};
+    result.columns.forEach((name, index) => {
+      record[name] = coerce(row[index] as Value);
+    });
+    return record;
+  });
+}
+
+class LibsqlDatabase implements SqlDatabase {
+  private tx: Transaction | null = null;
+
+  constructor(private client: Client) {}
+
+  async exec(sql: string): Promise<void> {
+    for (const statement of splitSql(sql)) {
+      const normalized = statement.replace(/\s+/g, " ").trim().toUpperCase();
+      if (normalized === "BEGIN" || normalized === "BEGIN IMMEDIATE" || normalized === "BEGIN TRANSACTION") {
+        if (this.tx) throw new Error("Nested transactions are not supported");
+        this.tx = await this.client.transaction("write");
+        continue;
+      }
+      if (normalized === "COMMIT") {
+        if (!this.tx) throw new Error("No transaction is open");
+        const tx = this.tx;
+        this.tx = null;
+        await tx.commit();
+        tx.close();
+        continue;
+      }
+      if (normalized === "ROLLBACK") {
+        if (!this.tx) return;
+        const tx = this.tx;
+        this.tx = null;
+        await tx.rollback();
+        tx.close();
+        continue;
+      }
+      await (this.tx ?? this.client).execute(statement);
+    }
+  }
+
+  prepare(sql: string): SqlStatement {
+    const run = async (...params: SqlArg[]) => {
+      const runner = this.tx ?? this.client;
+      return runner.execute({ sql, args: params });
+    };
+    return {
+      get: async (...params) => {
+        const result = await run(...params);
+        return libsqlRecords(result)[0];
+      },
+      all: async (...params) => libsqlRecords(await run(...params)),
+      run: async (...params) => ({ changes: Number((await run(...params)).rowsAffected) }),
+    };
+  }
+}
+
+function splitSql(sql: string): string[] {
+  return sql
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
+
+async function openNodeSqlite(file: string): Promise<SqlDatabase> {
+  if (file !== ":memory:") fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
+  const { DatabaseSync } = await import("node:sqlite");
+  return new NodeSqliteDatabase(new DatabaseSync(file));
+}
+
+async function openLibsql(url: string, authToken: string | undefined): Promise<SqlDatabase> {
+  const { createClient } = await import("@libsql/client");
+  return new LibsqlDatabase(createClient({ url, authToken }));
+}
+
+/**
+ * `:memory:` and file paths use node:sqlite so tests and local dev need no account.
+ * TURSO_DATABASE_URL switches the process to hosted libSQL. A memory database ignores that URL.
+ */
+export async function openDatabase(file?: string): Promise<SqlDatabase> {
+  const turso = process.env.TURSO_DATABASE_URL?.trim();
+  const useFile = file === ":memory:" || (!turso && !process.env.VERCEL);
+  if (process.env.VERCEL && file !== ":memory:" && !turso) {
+    throw new Error("TURSO_DATABASE_URL is required on Vercel");
+  }
+  const db = useFile
+    ? await openNodeSqlite(file ?? (process.env.PORTAL_DB_PATH || path.join(process.cwd(), "data", "portal.db")))
+    : await openLibsql(turso!, process.env.TURSO_AUTH_TOKEN);
+  await db.exec("PRAGMA foreign_keys = ON");
+  await db.exec(SCHEMA);
+  await migrateUserRoles(db);
+  await migrateStops(db);
+  await migrateDropCarrierColumns(db);
+  await migrateOutboxSender(db);
+  await migrateReceivers(db);
+  await migrateStoredBytes(db);
   return db;
 }
 
-function migrateStops(db: DatabaseSync): void {
-  const columns = db.prepare(`PRAGMA table_info(loads)`).all() as Array<{ name: string }>;
-  if (!columns.some((column) => column.name === "stops_json")) {
-    db.exec(`ALTER TABLE loads ADD COLUMN stops_json TEXT`);
-  }
-  db.exec(`
+async function columnNames(db: SqlDatabase, table: string): Promise<string[]> {
+  const columns = await db.prepare(`PRAGMA table_info(${table})`).all();
+  return columns.map((column) => String(column.name));
+}
+
+async function migrateStops(db: SqlDatabase): Promise<void> {
+  const columns = await columnNames(db, "loads");
+  if (!columns.includes("stops_json")) await db.exec(`ALTER TABLE loads ADD COLUMN stops_json TEXT`);
+  await db.exec(`
     UPDATE loads
     SET stops_json = json_array(
       json_object('id', 'stop-1', 'kind', 'pickup', 'place', json(origin_json)),
@@ -177,19 +320,40 @@ function migrateStops(db: DatabaseSync): void {
 const CARRIER_COLUMNS = ["carrier_pay_cents", "carrier_name", "carrier_mc", "staff_notes"];
 
 /** Carrier pay is not stored. Drop the columns from databases created before that decision. */
-function migrateDropCarrierColumns(db: DatabaseSync): void {
-  const columns = db.prepare(`PRAGMA table_info(loads)`).all() as Array<{ name: string }>;
+async function migrateDropCarrierColumns(db: SqlDatabase): Promise<void> {
+  const columns = await columnNames(db, "loads");
   for (const name of CARRIER_COLUMNS) {
-    if (columns.some((column) => column.name === name)) {
-      db.exec(`ALTER TABLE loads DROP COLUMN ${name}`);
-    }
+    if (columns.includes(name)) await db.exec(`ALTER TABLE loads DROP COLUMN ${name}`);
   }
 }
 
-function migrateOutboxSender(db: DatabaseSync): void {
-  const columns = db.prepare(`PRAGMA table_info(outbox)`).all() as Array<{ name: string }>;
-  if (!columns.some((column) => column.name === "from_email")) {
-    db.exec(`ALTER TABLE outbox ADD COLUMN from_email TEXT`);
+async function migrateOutboxSender(db: SqlDatabase): Promise<void> {
+  const columns = await columnNames(db, "outbox");
+  if (!columns.includes("from_email")) await db.exec(`ALTER TABLE outbox ADD COLUMN from_email TEXT`);
+}
+
+const BYTE_TABLES = [
+  ["customer_documents", "customer-documents"],
+  ["internal_documents", "internal-documents"],
+  ["carrier_photos", "carrier-photos"],
+] as const;
+
+/** Older databases kept file bytes in SQLite. Copy them out, then drop the column. */
+async function migrateStoredBytes(db: SqlDatabase): Promise<void> {
+  for (const [table, prefix] of BYTE_TABLES) {
+    const columns = await columnNames(db, table);
+    if (!columns.includes("bytes")) continue;
+    if (!columns.includes("storage_key")) await db.exec(`ALTER TABLE ${table} ADD COLUMN storage_key TEXT`);
+    const rows = await db.prepare(`SELECT id, bytes, storage_key FROM ${table}`).all();
+    for (const row of rows) {
+      if (row.storage_key) continue;
+      const id = String(row.id);
+      const raw = row.bytes;
+      const bytes = raw instanceof Uint8Array ? raw : new Uint8Array();
+      const locator = await writeStoredBytes(`${prefix}/${id}`, bytes, "application/octet-stream", { overwrite: true });
+      await db.prepare(`UPDATE ${table} SET storage_key = ? WHERE id = ?`).run(locator, id);
+    }
+    await db.exec(`ALTER TABLE ${table} DROP COLUMN bytes`);
   }
 }
 
@@ -197,48 +361,47 @@ function migrateOutboxSender(db: DatabaseSync): void {
  * Receiver login rows become companies with a private link.
  * Contact values that are email addresses are kept. Domain-only rows are not emails.
  */
-function migrateReceivers(db: DatabaseSync): void {
-  const legacy = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'receiver_access'`).get() as
-    | { name: string }
-    | undefined;
+async function migrateReceivers(db: SqlDatabase): Promise<void> {
+  const legacy = await db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'receiver_access'`).get();
   if (!legacy) return;
-  const rows = db.prepare(`SELECT match_value, company, created_at FROM receiver_access`).all() as Array<{
-    match_value: string;
-    company: string;
-    created_at: string;
-  }>;
+  const rows = await db.prepare(`SELECT match_value, company, created_at FROM receiver_access`).all();
   const grouped = new Map<string, { emails: string[]; createdAt: string }>();
   for (const row of rows) {
-    const company = row.company.trim();
-    const current = grouped.get(company) ?? { emails: [], createdAt: row.created_at };
-    if (row.match_value.includes("@")) current.emails.push(row.match_value.trim().toLowerCase());
-    if (row.created_at < current.createdAt) current.createdAt = row.created_at;
+    const company = String(row.company).trim();
+    const createdAt = String(row.created_at);
+    const current = grouped.get(company) ?? { emails: [], createdAt };
+    const match = String(row.match_value);
+    if (match.includes("@")) current.emails.push(match.trim().toLowerCase());
+    if (createdAt < current.createdAt) current.createdAt = createdAt;
     grouped.set(company, current);
   }
-  const existing = db.prepare(`SELECT id FROM receivers WHERE LOWER(company) = LOWER(?)`);
-  const insert = db.prepare(
-    `INSERT INTO receivers (id, company, contact_emails, access_token, enabled, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 1, ?, ?)`,
-  );
   for (const [company, info] of grouped) {
-    if (existing.get(company)) continue;
+    const existing = await db.prepare(`SELECT id FROM receivers WHERE LOWER(company) = LOWER(?)`).get(company);
+    if (existing) continue;
     const now = info.createdAt || new Date().toISOString();
-    insert.run(cryptoId(), company, JSON.stringify([...new Set(info.emails)]), randomBytes(32).toString("base64url"), now, now);
+    await db
+      .prepare(
+        `INSERT INTO receivers (id, company, contact_emails, access_token, enabled, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 1, ?, ?)`,
+      )
+      .run(
+        randomBytes(16).toString("hex"),
+        company,
+        JSON.stringify([...new Set(info.emails)]),
+        randomBytes(32).toString("base64url"),
+        now,
+        now,
+      );
   }
-  db.exec(`DROP TABLE receiver_access`);
-}
-
-function cryptoId(): string {
-  return randomBytes(16).toString("hex");
+  await db.exec(`DROP TABLE receiver_access`);
 }
 
 /** Databases that allowed a receiver login role drop those users. */
-function migrateUserRoles(db: DatabaseSync): void {
-  const row = db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'`).get() as
-    | { sql: string }
-    | undefined;
-  if (!row?.sql.includes("'receiver'")) return;
-  db.exec(`
+async function migrateUserRoles(db: SqlDatabase): Promise<void> {
+  const row = await db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'`).get();
+  const sql = String(row?.sql ?? "");
+  if (!sql.includes("'receiver'")) return;
+  await db.exec(`
     CREATE TABLE users_migrated (
       id TEXT PRIMARY KEY,
       email TEXT NOT NULL UNIQUE,
@@ -255,15 +418,15 @@ function migrateUserRoles(db: DatabaseSync): void {
   `);
 }
 
-export function withTransaction<T>(db: DatabaseSync, fn: () => T): T {
-  db.exec("BEGIN IMMEDIATE");
+export async function withTransaction<T>(db: SqlDatabase, fn: () => Promise<T>): Promise<T> {
+  await db.exec("BEGIN IMMEDIATE");
   try {
-    const result = fn();
-    db.exec("COMMIT");
+    const result = await fn();
+    await db.exec("COMMIT");
     return result;
   } catch (error) {
     try {
-      db.exec("ROLLBACK");
+      await db.exec("ROLLBACK");
     } catch {
       /* already closed */
     }
@@ -272,9 +435,8 @@ export function withTransaction<T>(db: DatabaseSync, fn: () => T): T {
 }
 
 type GlobalPortal = typeof globalThis & {
-  __portal?: PortalContext;
+  __portalPromise?: Promise<PortalContext>;
   __portalTest?: PortalContext;
-  __portalSeed?: Promise<void>;
 };
 
 function globals(): GlobalPortal {
@@ -290,16 +452,15 @@ export function useTestPortal(ctx: PortalContext | null): void {
   else delete g.__portalTest;
 }
 
-export function getPortalContext(): PortalContext {
+export async function getPortalContext(): Promise<PortalContext> {
   const g = globals();
   if (process.env.PORTAL_TEST_MODE === "1" && process.env.NODE_ENV !== "production" && g.__portalTest) {
     return g.__portalTest;
   }
-  if (!g.__portal) {
-    const file = process.env.PORTAL_DB_PATH || path.join(process.cwd(), "data", "portal.db");
-    g.__portal = { db: openDatabase(file), now: () => new Date() };
+  if (!g.__portalPromise) {
+    g.__portalPromise = openDatabase().then((db) => ({ db, now: () => new Date() }));
   }
-  return g.__portal;
+  return g.__portalPromise;
 }
 
 export function demoSeedEnabled(): boolean {

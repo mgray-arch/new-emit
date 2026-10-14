@@ -573,14 +573,17 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
   const today = denverDate(now);
   const createdAt = now.toISOString();
 
-  withTransaction(ctx.db, () => {
+  const existing = await ctx.db.prepare(`SELECT COUNT(*) AS n FROM users`).get();
+  if (Number(existing?.n ?? 0) > 0) return;
+
+  await withTransaction(ctx.db, async () => {
     const insertUser = ctx.db.prepare(
       `INSERT INTO users (id, email, name, role, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
     );
-    insertUser.run(randomUUID(), "m.gray@emit.example", "M. Gray", "customer", hash, createdAt);
-    insertUser.run(randomUUID(), "mgray@goselect.com", "Mike Gray", "admin", hash, createdAt);
-    insertUser.run(randomUUID(), "dmartin@goselect.com", "Drew Martin", "admin", hash, createdAt);
-    ctx.db
+    await insertUser.run(randomUUID(), "m.gray@emit.example", "M. Gray", "customer", hash, createdAt);
+    await insertUser.run(randomUUID(), "mgray@goselect.com", "Mike Gray", "admin", hash, createdAt);
+    await insertUser.run(randomUUID(), "dmartin@goselect.com", "Drew Martin", "admin", hash, createdAt);
+    await ctx.db
       .prepare(
         `INSERT INTO receivers (id, company, contact_emails, access_token, enabled, created_at, updated_at)
          VALUES (?, ?, ?, ?, 1, ?, ?)`,
@@ -598,9 +601,9 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
       `INSERT INTO sites (id, company, address1, city, state, postal_code, country, active, sort_order)
        VALUES (?, ?, ?, ?, ?, ?, 'US', 1, ?)`,
     );
-    SITES.forEach((site, index) => {
-      insertSite.run(randomUUID(), site.company, site.address1, site.city, site.state, site.postalCode, index);
-    });
+    for (const [index, site] of SITES.entries()) {
+      await insertSite.run(randomUUID(), site.company, site.address1, site.city, site.state, site.postalCode, index);
+    }
 
     const insertLoad = ctx.db.prepare(
       `INSERT INTO loads (
@@ -617,7 +620,7 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
       const latestEta =
         load.etaOffset == null ? null : denverLocalToISO(addDaysISO(today, load.etaOffset), "15:00");
       const anchor = latestEta ?? denverLocalToISO(shipDate, load.shipTime);
-      insertLoad.run(
+      await insertLoad.run(
         randomUUID(),
         load.salesOrderNumber,
         load.loadNumber,
@@ -645,9 +648,9 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
     }
   });
 
-  const so2196 = ctx.db.prepare(`SELECT id FROM loads WHERE sales_order_number = ?`).get("SO2196") as { id: string };
-  const so2981 = ctx.db.prepare(`SELECT id FROM loads WHERE sales_order_number = ?`).get("SO2981") as { id: string };
-  const so4410 = ctx.db.prepare(`SELECT id FROM loads WHERE sales_order_number = ?`).get("SO4410") as { id: string };
+  const so2196 = (await ctx.db.prepare(`SELECT id FROM loads WHERE sales_order_number = ?`).get("SO2196")) as { id: string };
+  const so2981 = (await ctx.db.prepare(`SELECT id FROM loads WHERE sales_order_number = ?`).get("SO2981")) as { id: string };
+  const so4410 = (await ctx.db.prepare(`SELECT id FROM loads WHERE sales_order_number = ?`).get("SO4410")) as { id: string };
 
   const bol = await pdfFromLines([
     [
@@ -691,10 +694,10 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
   );
   await ingestDocument(ctx, { loadId: so4410.id, filename: "scan.png", bytes: new Uint8Array(png), slot: "attachment" });
 
-  const so4555 = ctx.db.prepare(`SELECT load_number FROM loads WHERE sales_order_number = ?`).get("SO4555") as {
+  const so4555 = (await ctx.db.prepare(`SELECT load_number FROM loads WHERE sales_order_number = ?`).get("SO4555")) as {
     load_number: string;
   };
-  ingestCarrierPhoto(ctx, {
+  await ingestCarrierPhoto(ctx, {
     loadNumber: "900196-1",
     filename: "dock.png",
     bytes: solidPng(224, 138, 47),
@@ -702,7 +705,7 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
     receivedAt: "2026-10-14T16:10:00Z",
     subject: "Driver at the Sheridan dock",
   });
-  ingestCarrierPhoto(ctx, {
+  await ingestCarrierPhoto(ctx, {
     loadNumber: "900196-1",
     filename: "rate-confirmation.png",
     bytes: solidPng(30, 30, 30, "RATE CONFIRMATION carrier pay $8,765.43"),
@@ -710,7 +713,7 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
     receivedAt: "2026-10-14T16:12:00Z",
     subject: "Rate confirmation for the carrier",
   });
-  ingestCarrierPhoto(ctx, {
+  await ingestCarrierPhoto(ctx, {
     loadNumber: so4555.load_number,
     filename: "cypress-arrival.png",
     bytes: solidPng(60, 120, 90),

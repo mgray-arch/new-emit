@@ -18,15 +18,15 @@ interface UserRow {
   password_hash: string | null;
 }
 
-export function findUser(ctx: PortalContext, email: string): UserRow | null {
-  const row = ctx.db.prepare(`SELECT id, email, name, role, password_hash FROM users WHERE email = ?`).get(
+export async function findUser(ctx: PortalContext, email: string): Promise<UserRow | null> {
+  const row = (await ctx.db.prepare(`SELECT id, email, name, role, password_hash FROM users WHERE email = ?`).get(
     email.trim().toLowerCase(),
-  ) as UserRow | undefined;
+  )) as UserRow | undefined;
   return row ?? null;
 }
 
-export function loginWithPassword(ctx: PortalContext, email: string, password: string): Session | null {
-  const user = findUser(ctx, email);
+export async function loginWithPassword(ctx: PortalContext, email: string, password: string): Promise<Session | null> {
+  const user = await findUser(ctx, email);
   const ok = bcrypt.compareSync(password, user?.password_hash || dummy());
   if (!user?.password_hash || !ok) return null;
   return { userId: user.id, email: user.email, name: user.name, role: user.role };
@@ -38,15 +38,20 @@ export function passwordLoginAllowed(): boolean {
   return process.env.NODE_ENV !== "production";
 }
 
-export function upsertExternalUser(ctx: PortalContext, input: { email: string; name: string; role: PortalRole }): Session {
+export async function upsertExternalUser(
+  ctx: PortalContext,
+  input: { email: string; name: string; role: PortalRole },
+): Promise<Session> {
   const email = input.email.trim().toLowerCase();
-  const existing = findUser(ctx, email);
+  const existing = await findUser(ctx, email);
   if (existing) {
-    ctx.db.prepare(`UPDATE users SET name = ?, role = ? WHERE id = ?`).run(input.name || existing.name, input.role, existing.id);
+    await ctx.db
+      .prepare(`UPDATE users SET name = ?, role = ? WHERE id = ?`)
+      .run(input.name || existing.name, input.role, existing.id);
     return { userId: existing.id, email, name: input.name || existing.name, role: input.role };
   }
   const id = randomUUID();
-  ctx.db
+  await ctx.db
     .prepare(`INSERT INTO users (id, email, name, role, password_hash, created_at) VALUES (?, ?, ?, ?, NULL, ?)`)
     .run(id, email, input.name || email, input.role, new Date().toISOString());
   return { userId: id, email, name: input.name || email, role: input.role };
