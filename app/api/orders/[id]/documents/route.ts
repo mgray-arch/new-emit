@@ -22,10 +22,12 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
     const bytes = new Uint8Array(await file.arrayBuffer());
     const result = await ingestDocument(ctx, { loadId: id, filename: file.name, bytes, slot });
     const order = await getOrder(ctx, id);
+    const presented = order ? presentCustomerOrder(order, session.role) : null;
+    if (session.role !== "admin") return json({ order: presented });
     return json({
       released: result.releasedIds.length,
       heldForReview: result.heldIds.length,
-      order: order ? presentCustomerOrder(order, session.role) : null,
+      order: presented,
     });
   } catch (error) {
     return errorResponse(error);

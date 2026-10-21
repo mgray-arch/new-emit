@@ -124,7 +124,8 @@ export interface CustomerOrder {
   updatedAt: string;
   attachmentCount: number;
   bolCount: number;
-  pendingReviewCount: number;
+  /** Pages held for Select. Omitted for every EMIT user, including EMIT admins. */
+  pendingReviewCount?: number;
   documents: CustomerDocument[];
 }
 

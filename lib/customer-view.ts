@@ -119,11 +119,14 @@ function money(value: unknown): number | null {
 export interface CustomerViewOptions {
   /** False omits customerCost and rateReason. Default true keeps stored orders intact for internal callers. */
   includePricing?: boolean;
+  /** False omits pendingReviewCount. Default true keeps stored orders intact for internal callers. */
+  includeReview?: boolean;
 }
 
 export function serializeCustomerOrder(value: unknown, options?: CustomerViewOptions): CustomerOrder {
   const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const includePricing = options?.includePricing !== false;
+  const includeReview = options?.includeReview !== false;
   const portalStatus = oneOf(raw.portalStatus, PORTAL_STATUSES) ?? "being_prepared";
   const trackingStage = oneOf(raw.trackingStage, TRACKING_STAGES) ?? "submitted";
   const documents = Array.isArray(raw.documents)
@@ -157,9 +160,9 @@ export function serializeCustomerOrder(value: unknown, options?: CustomerViewOpt
     updatedAt: str(raw.updatedAt),
     attachmentCount: numberOrZero(raw.attachmentCount),
     bolCount: numberOrZero(raw.bolCount),
-    pendingReviewCount: numberOrZero(raw.pendingReviewCount),
     documents,
   };
+  if (includeReview) order.pendingReviewCount = numberOrZero(raw.pendingReviewCount);
   if (includePricing) {
     order.customerCost = money(raw.customerCost);
     order.rateReason = oneOf(raw.rateReason, RATE_REASONS);
@@ -167,9 +170,12 @@ export function serializeCustomerOrder(value: unknown, options?: CustomerViewOpt
   return order;
 }
 
-/** The order shape that may be sent to this viewer. Regular EMIT users get no pricing keys at all. */
+/** The order shape that may be sent to this viewer. Regular EMIT users get no pricing keys. No EMIT user gets the review count. */
 export function presentCustomerOrder(order: CustomerOrder, role: string | null | undefined): CustomerOrder {
-  return serializeCustomerOrder(order, { includePricing: canSeePricing(role) });
+  return serializeCustomerOrder(order, {
+    includePricing: canSeePricing(role),
+    includeReview: role === "admin",
+  });
 }
 
 function numberOrZero(value: unknown): number {

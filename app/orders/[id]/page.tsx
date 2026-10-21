@@ -121,8 +121,10 @@ export default function OrderPage() {
 
             <section className="detail-section">
               <h2>Documents and photos</h2>
-              <p className="mini">{fileSummary(order)}</p>
-              {order.pendingReviewCount > 0 && <p className="hold">Select reviews those pages before they show up.</p>}
+              <p className="mini">
+                {fileSummary({ ...order, pendingReviewCount: role === "admin" ? order.pendingReviewCount : 0 })}
+              </p>
+              {role === "admin" && (order.pendingReviewCount ?? 0) > 0 && <p className="hold">{order.pendingReviewCount} in review</p>}
               {order.documents.length === 0 ? (
                 <p className="empty">No documents yet. Add a BOL or another file from Edit load.</p>
               ) : (

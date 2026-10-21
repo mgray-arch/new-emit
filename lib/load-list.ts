@@ -44,7 +44,7 @@ export function attentionReasons(
   if (order.portalStatus === "cancelled") return [];
   const reasons: string[] = [];
   if (!order.loadNumber) reasons.push("Pending Select load number");
-  if (order.pendingReviewCount > 0) reasons.push("Files in review");
+  if ((order.pendingReviewCount ?? 0) > 0) reasons.push("Files in review");
   if ((order.trackingStage === "at_pickup" || order.trackingStage === "in_transit") && !order.trackingLink) {
     reasons.push("Missing tracking");
   }
@@ -84,8 +84,9 @@ export function displayStatus(
 export function fileSummary(order: Pick<CustomerOrder, "attachmentCount" | "bolCount" | "pendingReviewCount">): string {
   const files = order.attachmentCount + order.bolCount;
   const filePart = files === 0 ? "" : files === 1 ? "1 file" : `${files} files`;
-  if (order.pendingReviewCount <= 0) return filePart || "No files yet";
-  const review = order.pendingReviewCount === 1 ? "1 awaiting review" : `${order.pendingReviewCount} awaiting review`;
+  const pending = order.pendingReviewCount ?? 0;
+  if (pending <= 0) return filePart || "No files yet";
+  const review = pending === 1 ? "1 awaiting review" : `${pending} awaiting review`;
   return filePart ? `${filePart}, ${review}` : review.charAt(0).toUpperCase() + review.slice(1);
 }
 

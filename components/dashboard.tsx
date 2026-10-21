@@ -255,11 +255,8 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       return;
     }
     setEditing(body.order);
-    setFormError(
-      body.heldForReview
-        ? `${body.heldForReview} page${body.heldForReview === 1 ? "" : "s"} held for Select review. ${body.released} released.`
-        : "",
-    );
+    setFormError("");
+    toast(role === "admin" && body.heldForReview ? `${body.heldForReview} in review` : "Uploaded");
   }
 
   const counts = data?.counts ?? { attention: 0, active: 0, delivered: 0, history: 0 };
@@ -311,7 +308,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       {showTips && (
         <aside className="tips">
           <strong>A few tips</strong>
-          <p>Needs Attention is the short list: a missing Select load number, files in review, or a truck with no tracking link.</p>
+          <p>Needs Attention is the short list: a missing Select load number, or a truck with no tracking link.</p>
           <p>Search finds a load in any tab. Click a card to open it.</p>
           <button
             className="btn secondary"
@@ -420,7 +417,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
               {PICKUP_GROUP_LABEL[group.id]}
             </div>
             {group.orders.map((order) => {
-              const reasons = data ? attentionReasons(order, data.today) : [];
+              const reasons = (data ? attentionReasons(order, data.today) : []).filter((reason) => reason !== "Files in review");
               const today = data?.today ?? "";
               return (
                 <article
@@ -455,9 +452,12 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                   </div>
                   <div className="load-meta">
                     {order.salesOrderNumber} · Select load {formatLoadNumber(order.loadNumber)}
-                    {order.stops.length > 2 ? ` · ${order.stops.length} stops` : ""} · {fileSummary(order)}
+                    {order.stops.length > 2 ? ` · ${order.stops.length} stops` : ""} · {fileSummary({ ...order, pendingReviewCount: 0 })}
                   </div>
                   {reasons.length > 0 && <div className="hold">{reasons.join(" · ")}</div>}
+                  {role === "admin" && (order.pendingReviewCount ?? 0) > 0 ? (
+                    <div className="hold">{order.pendingReviewCount} in review</div>
+                  ) : null}
                   {order.comments ? <Note text={order.comments} /> : null}
                   <div className="load-row-actions">
                     <TrackLink href={order.trackingLink} />
@@ -553,8 +553,8 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                 </div>
               </div>
             )}
-            {editing && editing.pendingReviewCount > 0 && (
-              <p className="hold">{fileSummary(editing)}. Select reviews those pages before they show up.</p>
+            {role === "admin" && editing && (editing.pendingReviewCount ?? 0) > 0 && (
+              <p className="hold">{editing.pendingReviewCount} in review</p>
             )}
             {editing && <PhotoGallery orderId={editing.id} loadNumber={editing.loadNumber} canUpload={role === "admin"} />}
             <div className="actions">

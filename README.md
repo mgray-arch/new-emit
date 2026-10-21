@@ -139,6 +139,8 @@ There are three roles. **Select admin** (`admin`) signs in with Google and can o
 
 EMIT's cost and the rate reason are included only for Select admins and EMIT admins. A regular EMIT user does not receive those fields from the list, the load detail, a document upload, or the assistant, and a save from that user leaves the stored cost alone. Carrier pay is hidden from EMIT admins too.
 
+Pages held for Select review are hidden from every EMIT user, including EMIT admins. The list and the load page do not include the review count, and an upload just says it was uploaded.
+
 ## Locations
 
 Delivery stops search a saved list of drops. One field matches company, city, or street, with the most-used docks first. Picking a result fills the stop. Add new location opens the address on that same stop, and saving the load adds it to the list.

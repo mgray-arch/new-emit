@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { buildModelRequest, isDisallowedQuestion } from "@/lib/assistant";
 import { answerQuestion } from "@/lib/assistant";
-import { serializeCustomerOrder, toPublicTracking } from "@/lib/customer-view";
+import { presentCustomerOrder, serializeCustomerOrder, toPublicTracking } from "@/lib/customer-view";
 import { CUSTOMER_LOAD_COLUMNS } from "@/lib/db";
 import { CUSTOMER_DOCUMENT_READ_SQL, ingestDocument, listCustomerDocuments, listReviewQueue, readCustomerDocument, reviewDocument, screenPageText } from "@/lib/documents";
 import { getOrder, listAllOrders, listOrders } from "@/lib/orders";
@@ -9,6 +9,8 @@ import { mapSamDetailToCustomer, pickCustomerRate, toSamCreatePayload } from "@/
 import { redactSensitiveText } from "@/lib/sensitive";
 import { POST as ask } from "@/app/api/ask/route";
 import { GET as listOrdersRoute, POST as createOrderRoute } from "@/app/api/orders/route";
+import { GET as getOrderRoute } from "@/app/api/orders/[id]/route";
+import { POST as uploadDocument } from "@/app/api/orders/[id]/documents/route";
 import { GET as downloadDoc } from "@/app/api/documents/[id]/route";
 import { GET as reviewQueue } from "@/app/api/admin/review/route";
 import { GET as track } from "@/app/api/track/[token]/route";
@@ -299,6 +301,66 @@ describe("authenticated API", () => {
     expect(queue.status).toBe(200);
     const queueBody = await queue.json();
     expect(queueBody.items.some((item: { textExcerpt?: string }) => item.textExcerpt?.includes("BLACKHAWK"))).toBe(true);
+  });
+
+  it("never sends the held-document count to an EMIT user or an EMIT admin", async () => {
+    const stored = serializeCustomerOrder({ id: "x", salesOrderNumber: "SO1", pendingReviewCount: 4 });
+    expect(stored.pendingReviewCount).toBe(4);
+    for (const role of ["customer", "emit_admin"]) {
+      const view = presentCustomerOrder(stored, role);
+      expect(view).not.toHaveProperty("pendingReviewCount");
+      expect(JSON.stringify(view)).not.toMatch(/pendingReviewCount|pending_review/);
+    }
+    expect(presentCustomerOrder(stored, "admin").pendingReviewCount).toBe(4);
+
+    await ctx.db.prepare(`UPDATE loads SET pending_review_count = 3 WHERE sales_order_number = ?`).run("SO2196");
+
+    const customer = await sessionCookie(customerSession());
+    const emitAdmin = await sessionCookie({
+      userId: "emit-admin-1",
+      email: "lead@emit.example",
+      name: "Emit Lead",
+      role: "emit_admin",
+    });
+    const admin = await sessionCookie(adminSession());
+    const headers = (cookie: string) => ({ cookie, host: "portal.test" });
+
+    async function assertHidden(cookie: string) {
+      const list = await listOrdersRoute(new Request("http://portal.test/api/orders?q=SO2196&pageSize=50", { headers: headers(cookie) }));
+      expect(list.status).toBe(200);
+      const body = await list.json();
+      expect(JSON.stringify(body)).not.toMatch(/pendingReviewCount|pending_review_count|heldForReview/);
+      const id = body.orders[0].id as string;
+      const detail = await getOrderRoute(new Request(`http://portal.test/api/orders/${id}`, { headers: headers(cookie) }), {
+        params: Promise.resolve({ id }),
+      });
+      expect(detail.status).toBe(200);
+      expect(JSON.stringify(await detail.json())).not.toMatch(/pendingReviewCount|pending_review_count|heldForReview/);
+      return id;
+    }
+
+    const id = await assertHidden(customer);
+    await assertHidden(emitAdmin);
+
+    const adminList = await listOrdersRoute(
+      new Request("http://portal.test/api/orders?q=SO2196", { headers: headers(admin) }),
+    );
+    const adminBody = await adminList.json();
+    expect(adminBody.orders[0].salesOrderNumber).toBe("SO2196");
+    expect(adminBody.orders[0].pendingReviewCount).toBe(3);
+
+    const form = new FormData();
+    form.set("slot", "attachment");
+    form.set("file", new File([new Uint8Array([1, 2, 3])], "note.txt", { type: "text/plain" }));
+    const uploaded = await uploadDocument(
+      new Request(`http://portal.test/api/orders/${id}/documents`, { method: "POST", headers: headers(customer), body: form }),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(uploaded.status).toBe(200);
+    const uploadedBody = await uploaded.json();
+    expect(uploadedBody).not.toHaveProperty("heldForReview");
+    expect(uploadedBody).not.toHaveProperty("released");
+    expect(JSON.stringify(uploadedBody)).not.toMatch(/pendingReviewCount|pending_review_count|heldForReview/);
   });
 
   it("does not download a quarantined page for a customer", async () => {

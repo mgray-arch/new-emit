@@ -13,7 +13,7 @@ The notes below also describe the demo seed and the screening rules. Demo load n
 
 Saved delivery locations are searched from the drop stop. Pickup yards stay the one-tap list. A one-off pickup is not added to that list. Duplicate docks are caught in the form and again on the server. A drop whose company matches a receiver is linked to that receiver.
 
-`npm test` — 56 tests passed, including location duplicate detection, the load-list tabs, and the plain-language status labels.
+`npm test` — 57 tests passed, including location duplicate detection, the load-list tabs, and the rule that EMIT never receives the held-document count.
 
 ## Security
 
