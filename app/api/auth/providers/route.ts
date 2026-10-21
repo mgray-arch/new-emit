@@ -1,5 +1,6 @@
 import { demoSeedEnabled } from "@/lib/db";
 import { json } from "@/lib/http";
+import { setupNotices } from "@/lib/runtime-config";
 import { googleConfigured, microsoftConfigured } from "@/lib/session";
 
 export const runtime = "nodejs";
@@ -11,6 +12,7 @@ export async function GET(_req: Request) {
     password: true,
     google: googleConfigured(),
     microsoft: microsoftConfigured(),
+    setup: setupNotices(),
     demoHint: showDemo
       ? {
           emit: "m.gray@emit.example",

@@ -13,7 +13,7 @@ The notes below also describe the demo seed and the screening rules. Demo load n
 
 Saved delivery locations are searched from the drop stop. Pickup yards stay the one-tap list. A one-off pickup is not added to that list. Duplicate docks are caught in the form and again on the server. A drop whose company matches a receiver is linked to that receiver.
 
-`npm test` — 61 tests passed, including location duplicate detection, the load-list tabs, the rule that EMIT never receives the held-document count, and the SAM bot upload.
+`npm test` — 63 tests passed, including location duplicate detection, the load-list tabs, the rule that EMIT never receives the held-document count, the SAM bot upload, and a preview that says which env var is missing.
 
 ## Security
 
@@ -29,7 +29,7 @@ Staff can still read the text excerpt of a quarantined page. Releasing a page th
 
 ## Branding
 
-The wordmark is the official two-color EMIT logo from emittechnologies.com (`EMIT_TwoColor_WEB.webp`), with the white background removed. The arc is orange, about `#B75D27`. It is served from `public/brand/emit-logo.png`.
+The wordmark is the official two-color EMIT logo from emittechnologies.com (`EMIT_TwoColor_WEB.webp`), with the white background removed. The arc is orange, about `#B75D27`. `public/brand/emit-logo.png` keeps the white lettering for dark surfaces. `public/brand/emit-logo-ink.png` is the same mark with dark lettering for light surfaces. The page swaps them with the theme, so the wordmark stays visible on the cream sign-in card, the light sidebar, and the dark sidebar.
 
 The attached portal screenshots were not on disk in this environment, so the chrome colors were matched by eye to the images in the request:
 
@@ -206,7 +206,8 @@ There is no public test URL in this environment.
 
 | Variable | Who provides it | Used for |
 | --- | --- | --- |
-| `AUTH_SECRET` | Select, generate a long random string | Session signing. Required in production. |
+| `AUTH_SECRET` | Select, generate a long random string | Session signing. Required on Production and on Preview. At least 16 characters. |
+| Preview Turso + `DEMO_SEED=true` | Select | A separate database from production. The click-by-click Preview list is in the README. Without it, `m.gray@emit.example` does not exist on the preview. |
 | `TURSO_DATABASE_URL` | Turso, the `libsql://` URL | Hosted database on Vercel. Leave unset locally. |
 | `TURSO_AUTH_TOKEN` | Turso, full-access token | Auth for that database. Leave unset locally. |
 | `BLOB_READ_WRITE_TOKEN` | Vercel, added when the Blob store is connected | Private document and photo bytes. Leave unset locally. |

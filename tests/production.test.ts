@@ -85,6 +85,66 @@ describe("production sign-in and an empty database", () => {
     expect((await hint.json()).demoHint).toBeNull();
   });
 
+  it("does not seed production, and an empty preview says how to turn the test account on", async () => {
+    process.env.DEMO_SEED = "true";
+    process.env.VERCEL_ENV = "production";
+    const empty: PortalContext = { db: await openDatabase(":memory:"), now: () => new Date() };
+    await seedIfEmpty(empty);
+    expect(Number((await empty.db.prepare(`SELECT COUNT(*) AS n FROM users`).get())?.n)).toBe(0);
+
+    process.env.VERCEL_ENV = "preview";
+    process.env.DEMO_SEED = "false";
+    useTestPortal(empty);
+    try {
+      const response = await login(
+        new Request("http://portal.test/api/auth/login", {
+          method: "POST",
+          headers: { "content-type": "application/json", host: "portal.test", origin: "http://portal.test" },
+          body: JSON.stringify({ email: "m.gray@emit.example", password: "Emit-Demo-2026" }),
+        }),
+      );
+      expect(response.status).toBe(503);
+      expect((await response.json()).error).toMatch(/no accounts/);
+      const listed = await providers(new Request("http://portal.test/api/auth/providers"));
+      const payload = await listed.json();
+      expect(payload.google).toBe(false);
+      expect(payload.setup.join(" ")).toMatch(/DEMO_SEED/);
+    } finally {
+      useTestPortal(ctx);
+    }
+  });
+
+  it("names a missing AUTH_SECRET or Turso URL instead of a generic failure", async () => {
+    const previousSecret = process.env.AUTH_SECRET;
+    delete process.env.AUTH_SECRET;
+    try {
+      const response = await login(
+        new Request("http://portal.test/api/auth/login", {
+          method: "POST",
+          headers: { "content-type": "application/json", host: "portal.test", origin: "http://portal.test" },
+          body: JSON.stringify({ email: "m.gray@emit.example", password: "Emit-Demo-2026" }),
+        }),
+      );
+      expect(response.status).toBe(503);
+      expect((await response.json()).error).toMatch(/AUTH_SECRET/);
+    } finally {
+      if (previousSecret === undefined) delete process.env.AUTH_SECRET;
+      else process.env.AUTH_SECRET = previousSecret;
+    }
+
+    process.env.VERCEL = "1";
+    delete process.env.TURSO_DATABASE_URL;
+    delete process.env.TURSO_AUTH_TOKEN;
+    try {
+      const listed = await providers(new Request("http://portal.test/api/auth/providers"));
+      expect((await listed.json()).setup.join(" ")).toMatch(/TURSO_DATABASE_URL/);
+      const page = readFileSync("app/login/page.tsx", "utf8");
+      expect(page).toMatch(/Google sign-in isn't set up/);
+    } finally {
+      delete process.env.VERCEL;
+    }
+  });
+
   it("keeps password sign-in on with no break-glass flag and no Gmail sender", async () => {
     expect(existsSync("lib/email.ts")).toBe(false);
     const loginSource = readFileSync("app/api/auth/login/route.ts", "utf8");

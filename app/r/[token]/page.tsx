@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { BrandLogo } from "@/components/brand-logo";
 import Timeline from "@/components/timeline";
 import TrackLink from "@/components/track-link";
 import { formatDay, formatWhen } from "@/lib/dates";
@@ -54,7 +55,7 @@ export default function ReceiverLinkPage() {
   return (
     <main className="public">
       <header>
-        <img src="/brand/emit-logo.png" alt="EMIT" style={{ height: 36 }} />
+        <BrandLogo />
         <div>
           <div className="brand-name">YOUR DELIVERIES</div>
           <div className="brand-sub">{company || "Select Transport Partners"}</div>

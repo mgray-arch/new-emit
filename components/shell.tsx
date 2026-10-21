@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { BrandLogo } from "@/components/brand-logo";
 
 interface Me {
   name: string;
@@ -95,7 +96,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       {menu ? <button className="nav-scrim" type="button" aria-label="Close menu" onClick={() => setMenu(false)} /> : null}
       <aside className={menu ? "sidenav open" : "sidenav"}>
         <Link href="/" className="brand">
-          <img src="/brand/emit-logo.png" alt="EMIT" />
+          <BrandLogo />
           <div>
             <div className="brand-name">EMIT</div>
             <div className="brand-sub">Load portal</div>
@@ -134,7 +135,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             Menu
           </button>
           <Link href="/" className="brand">
-            <img src="/brand/emit-logo.png" alt="EMIT" />
+            <BrandLogo />
             <span className="brand-name">Loads</span>
           </Link>
         </header>

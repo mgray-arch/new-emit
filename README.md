@@ -70,6 +70,30 @@ Set these on the Vercel project for **Production**. Preview can keep `DEMO_SEED=
 | `GOOGLE_CLIENT_SECRET` | That client's secret. |
 | `GOOGLE_HOSTED_DOMAIN` | `goselect.com` |
 
+## Preview environment variables
+
+Vercel Preview builds with `NODE_ENV=production`. An unset `DEMO_SEED` does **not** create `m.gray@emit.example`. Variables checked only for Production are invisible to the preview, so email sign-in fails and the page cannot open a database. Google stays off until `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` exist. That part is expected.
+
+Sign-in does not use Blob. A missing `BLOB_READ_WRITE_TOKEN` only blocks file uploads, and the upload error names that variable.
+
+Use a **second Turso database** for Preview. If Preview points at the production database and `DEMO_SEED=true`, a preview deploy writes the demo company into production when that database has no users yet.
+
+1. Open the Vercel project [new-emit](https://vercel.com/mgray-arch/new-emit) → **Settings** → **Environment Variables**.
+2. Add each row below with **Preview** checked. Leave **Production** alone. If a name already exists for Production only, add a separate Preview value. Do not flip the Production `DEMO_SEED=false` onto Preview.
+3. `AUTH_SECRET` — any new random string, at least 16 characters. Preview can use its own.
+4. In the Turso dashboard, create a database named `emit-preview`. Copy its `libsql://` URL and a full-access token.
+5. `TURSO_DATABASE_URL` — that preview URL. Not the production URL.
+6. `TURSO_AUTH_TOKEN` — the token for that same preview database.
+7. `DEMO_SEED` — `true` for Preview. Production stays `false`.
+8. `NEXT_PUBLIC_DEMO_HINT` — `true` for Preview, so the sign-in page shows the test password. Production stays `false`.
+9. Leave `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` empty until the Workspace OAuth client exists. The Google button stays hidden, with a note to use email and password.
+10. Leave `PORTAL_PUBLIC_URL` unset on Preview so links use the preview host. Production stays `https://emit-select.com`.
+11. `BLOB_READ_WRITE_TOKEN` — optional for clicking around. Add a Preview token only when you want uploads to work. Connect the Blob store to Preview, or paste a token and check Preview.
+12. **Deployments** → the latest Preview deployment → **Redeploy**. Environment changes do not apply to a deployment that is already built.
+13. Open the preview URL. Sign in as `m.gray@emit.example` / `Emit-Demo-2026`.
+
+If a name is still missing, the sign-in page lists it. Redeploy after you save the variable.
+
 Leave these blank unless you are turning that feature on:
 
 | Variable | When |

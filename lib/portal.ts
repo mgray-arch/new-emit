@@ -5,6 +5,9 @@ import { seedDemo } from "@/lib/seed";
 type GlobalSeed = typeof globalThis & { __portalSeed?: Promise<void>; __portalTest?: PortalContext };
 
 export async function seedIfEmpty(ctx: PortalContext): Promise<void> {
+  // Production stays empty even if DEMO_SEED was copied onto that environment.
+  // Preview may seed, but only the database its own TURSO_DATABASE_URL points at.
+  if (process.env.VERCEL_ENV === "production") return;
   const row = await ctx.db.prepare(`SELECT COUNT(*) AS n FROM users`).get();
   if (Number(row?.n ?? 0) > 0 || !demoSeedEnabled()) return;
   try {

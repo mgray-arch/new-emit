@@ -2,6 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
+import { BrandLogo } from "@/components/brand-logo";
 import { safeNextPath } from "@/lib/paths";
 
 interface DemoHint {
@@ -19,8 +20,9 @@ function LoginForm() {
   const [pending, setPending] = useState(false);
   const [demoHint, setDemoHint] = useState<DemoHint | null>(null);
   const [microsoft, setMicrosoft] = useState(false);
+  const [google, setGoogle] = useState(false);
+  const [setup, setSetup] = useState<string[]>([]);
   const microsoftError = params.get("microsoft");
-  const googleError = params.get("google");
   const queryError = params.get("error");
 
   useEffect(() => {
@@ -29,10 +31,14 @@ function LoginForm() {
       .then((body) => {
         setDemoHint(body?.demoHint ?? null);
         setMicrosoft(Boolean(body?.microsoft));
+        setGoogle(Boolean(body?.google));
+        setSetup(Array.isArray(body?.setup) ? body.setup.filter((item: unknown) => typeof item === "string") : []);
       })
       .catch(() => {
         setDemoHint(null);
         setMicrosoft(false);
+        setGoogle(false);
+        setSetup([]);
       });
   }, []);
 
@@ -59,10 +65,10 @@ function LoginForm() {
   return (
     <div className="login-wrap">
       <form className="login-card" onSubmit={submit}>
-        <img src="/brand/emit-logo.png" alt="EMIT" style={{ height: 42 }} />
+        <BrandLogo height={42} />
         <h1>Sign in</h1>
         <p className="lede">
-          EMIT uses the email and password from Select. Select staff use Google. Receivers open a private link and do not sign in here.
+          EMIT uses the email and password from Select.{google ? " Select staff use Google." : ""} Receivers open a private link and do not sign in here.
         </p>
         {demoHint && (
           <div className="demo-hint">
@@ -72,13 +78,19 @@ function LoginForm() {
             <p>Password: {demoHint.password}</p>
           </div>
         )}
-        {(error || queryError || microsoftError || googleError) && (
+        {setup.length > 0 && (
+          <div className="demo-hint">
+            <strong>This deployment is not ready for sign-in</strong>
+            {setup.map((item) => (
+              <p key={item}>{item}</p>
+            ))}
+          </div>
+        )}
+        {(error || queryError || microsoftError) && (
           <p className="error">
             {error ||
               queryError ||
-              (microsoftError
-                ? "Microsoft sign-in is optional and is not configured. EMIT staff use email and password."
-                : "Google sign-in needs a Workspace OAuth client. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.")}
+              "Microsoft sign-in is optional and is not configured. EMIT staff use email and password."}
           </p>
         )}
         <div className="field">
@@ -99,16 +111,20 @@ function LoginForm() {
         <button className="btn" type="submit" disabled={pending} style={{ width: "100%" }}>
           {pending ? "Signing in…" : "Sign in"}
         </button>
-        <button
-          className="btn secondary"
-          type="button"
-          style={{ width: "100%", marginTop: 8 }}
-          onClick={() => {
-            window.location.href = "/api/auth/google";
-          }}
-        >
-          Select staff — Google
-        </button>
+        {google ? (
+          <button
+            className="btn secondary"
+            type="button"
+            style={{ width: "100%", marginTop: 8 }}
+            onClick={() => {
+              window.location.href = "/api/auth/google";
+            }}
+          >
+            Select staff — Google
+          </button>
+        ) : (
+          <p className="lede">Google sign-in isn't set up on this site yet. Use email and password.</p>
+        )}
         {microsoft && (
           <button
             className="btn secondary"
