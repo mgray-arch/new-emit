@@ -7,6 +7,8 @@ import { safeNextPath } from "@/lib/paths";
 
 interface DemoHint {
   emit: string;
+  emitViewer?: string;
+  emitFull?: string;
   select: string[];
   password: string;
 }
@@ -67,15 +69,15 @@ function LoginForm() {
       <form className="login-card" onSubmit={submit}>
         <BrandLogo height={42} />
         <h1>Sign in</h1>
-        <p className="lede">
-          EMIT uses the email and password from Select.{google ? " Select staff use Google." : ""} Receivers open a private link and do not sign in here.
-        </p>
+        <p className="lede">Two different sign-ins. EMIT staff use email and password. Select staff use Google. Receivers open a private link and do not sign in here.</p>
         {demoHint && (
           <div className="demo-hint">
             <strong>Test sign-in</strong>
-            <p>EMIT: {demoHint.emit}</p>
+            <p>EMIT add loads: {demoHint.emit}</p>
+            {demoHint.emitViewer ? <p>EMIT view only: {demoHint.emitViewer}</p> : null}
+            {demoHint.emitFull ? <p>EMIT full access: {demoHint.emitFull}</p> : null}
             <p>Select: {demoHint.select.join(", ")}</p>
-            <p>Password: {demoHint.password}</p>
+            <p>Password for every test account: {demoHint.password}</p>
           </div>
         )}
         {setup.length > 0 && (
@@ -93,50 +95,61 @@ function LoginForm() {
               "Microsoft sign-in is optional and is not configured. EMIT staff use email and password."}
           </p>
         )}
-        <div className="field">
-          <label htmlFor="email">Email</label>
-          <input id="email" type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required />
-        </div>
-        <div className="field">
-          <label htmlFor="password">Password</label>
-          <input
-            id="password"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            required
-          />
-        </div>
-        <button className="btn" type="submit" disabled={pending} style={{ width: "100%" }}>
-          {pending ? "Signing in…" : "Sign in"}
-        </button>
-        {google ? (
-          <button
-            className="btn secondary"
-            type="button"
-            style={{ width: "100%", marginTop: 8 }}
-            onClick={() => {
-              window.location.href = "/api/auth/google";
-            }}
-          >
-            Select staff — Google
+        <section className="login-section" aria-labelledby="emit-sign-in">
+          <h2 id="emit-sign-in">EMIT staff</h2>
+          <p className="lede">For EMIT people Select has already added: view only, add loads, and full access. Use the email and password from Select.</p>
+          <div className="field">
+            <label htmlFor="email">EMIT email</label>
+            <input id="email" type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required />
+          </div>
+          <div className="field">
+            <label htmlFor="password">Password</label>
+            <input
+              id="password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+            />
+          </div>
+          <button className="btn" type="submit" disabled={pending} style={{ width: "100%" }}>
+            {pending ? "Signing in…" : "Sign in as EMIT"}
           </button>
-        ) : (
-          <p className="lede">Google sign-in isn't set up on this site yet. Use email and password.</p>
-        )}
-        {microsoft && (
-          <button
-            className="btn secondary"
-            type="button"
-            style={{ width: "100%", marginTop: 8 }}
-            onClick={() => {
-              window.location.href = "/api/auth/microsoft";
-            }}
-          >
-            EMIT staff — Microsoft (optional)
-          </button>
-        )}
+          {microsoft && (
+            <button
+              className="btn secondary"
+              type="button"
+              style={{ width: "100%", marginTop: 8 }}
+              onClick={() => {
+                window.location.href = "/api/auth/microsoft";
+              }}
+            >
+              EMIT staff — Microsoft (optional)
+            </button>
+          )}
+        </section>
+        <section className="login-section" aria-labelledby="select-sign-in">
+          <h2 id="select-sign-in">Select staff</h2>
+          <p className="lede">For Select people, including staff beyond the first two admins. This is not an EMIT sign-in.</p>
+          {google ? (
+            <button
+              className="btn secondary"
+              type="button"
+              style={{ width: "100%" }}
+              onClick={() => {
+                window.location.href = "/api/auth/google";
+              }}
+            >
+              Sign in with Google
+            </button>
+          ) : (
+            <>
+              <p className="lede">Google sign-in isn't set up on this site yet. Use email and password.</p>
+              <p className="lede">A Select account that already has a password uses the form above.</p>
+            </>
+          )}
+        </section>
       </form>
     </div>
   );

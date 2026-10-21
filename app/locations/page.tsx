@@ -45,7 +45,7 @@ export default function LocationsPage() {
     setRole(me?.role ?? null);
     if (drops.forbidden) {
       setLocations([]);
-      setError("Locations are managed by a Select admin or an EMIT admin.");
+      setError("Locations are managed by Select or an EMIT user with full access.");
     } else {
       setLocations(drops.locations ?? []);
       setError("");

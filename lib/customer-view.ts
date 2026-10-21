@@ -21,6 +21,7 @@ import {
 } from "@/lib/types";
 import { portalPublicUrl } from "@/lib/public-url";
 import { redactSensitiveText } from "@/lib/sensitive";
+import { samLoadUrl } from "@/lib/sam-link";
 import { canSeePricing } from "@/lib/types";
 import { parseTrackingLink } from "@/lib/tracking-link";
 
@@ -170,12 +171,20 @@ export function serializeCustomerOrder(value: unknown, options?: CustomerViewOpt
   return order;
 }
 
-/** The order shape that may be sent to this viewer. Regular EMIT users get no pricing keys. No EMIT user gets the review count. */
+/** The order shape that may be sent to this viewer. Regular EMIT users get no pricing keys. No EMIT user gets the review count or the SAM build controls. */
 export function presentCustomerOrder(order: CustomerOrder, role: string | null | undefined): CustomerOrder {
-  return serializeCustomerOrder(order, {
+  const view = serializeCustomerOrder(order, {
     includePricing: canSeePricing(role),
     includeReview: role === "admin",
   });
+  if (role === "admin") {
+    if (order.samBuildStatus === "building" || order.samBuildStatus === "failed") view.samBuildStatus = order.samBuildStatus;
+    if (order.samBuildError) view.samBuildError = order.samBuildError;
+    if (order.samBuildAt) view.samBuildAt = order.samBuildAt;
+    const url = samLoadUrl(view.loadNumber);
+    if (url) view.samUrl = url;
+  }
+  return view;
 }
 
 function numberOrZero(value: unknown): number {

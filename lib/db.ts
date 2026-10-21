@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   email TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL,
-  role TEXT NOT NULL CHECK(role IN ('customer', 'emit_admin', 'admin')),
+  role TEXT NOT NULL CHECK(role IN ('customer', 'emit_viewer', 'emit_admin', 'admin')),
   password_hash TEXT,
   active INTEGER NOT NULL DEFAULT 1,
   password_changed_at TEXT,
@@ -74,7 +74,10 @@ CREATE TABLE IF NOT EXISTS loads (
   created_by TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  pending_review_count INTEGER NOT NULL DEFAULT 0
+  pending_review_count INTEGER NOT NULL DEFAULT 0,
+  sam_build_status TEXT,
+  sam_build_error TEXT,
+  sam_build_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS customer_documents (
@@ -198,7 +201,8 @@ export const CUSTOMER_LOAD_COLUMNS = `
   id, sales_order_number, load_number, portal_status, tracking_stage, timeline_json,
   origin_json, destination_json, stops_json, truck_type, transit, ship_date, ship_time,
   must_deliver_date, truck_eta, latest_eta, tracking_token, tracking_link, customer_cost_cents,
-  rate_reason, comments, created_by, created_at, updated_at, pending_review_count
+  rate_reason, comments, created_by, created_at, updated_at, pending_review_count,
+  sam_build_status, sam_build_error, sam_build_at
 `;
 
 function coerce(value: unknown): unknown {
@@ -342,6 +346,8 @@ export async function openDatabase(file?: string): Promise<SqlDatabase> {
   await migrateTrackingLink(db);
   await migrateUserAccount(db);
   await migrateEmitAdminRole(db);
+  await migrateEmitViewerRole(db);
+  await migrateSamBuild(db);
   await migrateDocumentUploaders(db);
   await db.exec(`DROP TABLE IF EXISTS outbox`);
   return db;
@@ -507,6 +513,42 @@ async function migrateReceivers(db: SqlDatabase): Promise<void> {
       );
   }
   await db.exec(`DROP TABLE receiver_access`);
+}
+
+/** View only is a fourth EMIT role. Existing add-loads users stay `customer`. Full access stays `emit_admin`. */
+async function migrateEmitViewerRole(db: SqlDatabase): Promise<void> {
+  const row = await db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'`).get();
+  const sql = String(row?.sql ?? "");
+  if (sql.includes("'emit_viewer'")) return;
+  await db.exec(`
+    CREATE TABLE users_emit_viewer (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('customer', 'emit_viewer', 'emit_admin', 'admin')),
+      password_hash TEXT,
+      active INTEGER NOT NULL DEFAULT 1,
+      password_changed_at TEXT,
+      password_epoch INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+    INSERT INTO users_emit_viewer (
+      id, email, name, role, password_hash, active, password_changed_at, password_epoch, created_at
+    )
+    SELECT
+      id, email, name, role, password_hash,
+      COALESCE(active, 1), password_changed_at, COALESCE(password_epoch, 0), created_at
+    FROM users;
+    DROP TABLE users;
+    ALTER TABLE users_emit_viewer RENAME TO users;
+  `);
+}
+
+async function migrateSamBuild(db: SqlDatabase): Promise<void> {
+  const columns = await columnNames(db, "loads");
+  if (!columns.includes("sam_build_status")) await db.exec(`ALTER TABLE loads ADD COLUMN sam_build_status TEXT`);
+  if (!columns.includes("sam_build_error")) await db.exec(`ALTER TABLE loads ADD COLUMN sam_build_error TEXT`);
+  if (!columns.includes("sam_build_at")) await db.exec(`ALTER TABLE loads ADD COLUMN sam_build_at TEXT`);
 }
 
 /** Older databases only allowed customer and Select admin. EMIT admin is a third role. */

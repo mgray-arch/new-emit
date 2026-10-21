@@ -8,7 +8,9 @@ import { BrandLogo } from "@/components/brand-logo";
 interface Me {
   name: string;
   email: string;
-  role: "customer" | "emit_admin" | "admin";
+  role: "customer" | "emit_viewer" | "emit_admin" | "admin";
+  actorRole?: "customer" | "emit_viewer" | "emit_admin" | "admin";
+  viewAs?: "customer" | "emit_viewer" | "emit_admin" | null;
 }
 
 export default function Shell({ children }: { children: React.ReactNode }) {
@@ -68,6 +70,16 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     router.refresh();
   }
 
+  async function setView(role: string) {
+    const response = await fetch("/api/view-as", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ role: role === "admin" ? null : role }),
+    });
+    if (!response.ok) return;
+    window.location.href = "/";
+  }
+
   const initials = (me?.name || "EM")
     .split(" ")
     .map((part) => part[0])
@@ -110,6 +122,17 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
         <div className="sidenav-foot">
+          {me?.actorRole === "admin" ? (
+            <label className="view-as">
+              <span>View as</span>
+              <select aria-label="View as" value={me.viewAs || "admin"} onChange={(event) => void setView(event.target.value)}>
+                <option value="admin">Select view</option>
+                <option value="emit_admin">View as EMIT admin</option>
+                <option value="customer">View as EMIT regular user</option>
+                <option value="emit_viewer">View as view only</option>
+              </select>
+            </label>
+          ) : null}
           <button
             className="logout"
             type="button"
@@ -140,6 +163,20 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           </Link>
         </header>
         {demo && <div className="demo-bar">Test environment. These shipments are not live SAM data.</div>}
+        {me?.viewAs ? (
+          <div className="view-as-bar" role="status">
+            <span>
+              {me.viewAs === "emit_admin"
+                ? "Viewing as an EMIT admin. You see EMIT's cost and can add loads. Carrier pay stays hidden."
+                : me.viewAs === "emit_viewer"
+                  ? "Viewing as view only. You cannot add loads, and pricing is hidden."
+                  : "Viewing as an EMIT regular user. You can add loads. Pricing is hidden."}
+            </span>
+            <button className="btn secondary" type="button" onClick={() => void setView("admin")}>
+              Back to Select view
+            </button>
+          </div>
+        ) : null}
         {children}
       </div>
       {toastMessage ? (

@@ -140,6 +140,8 @@ describe("production sign-in and an empty database", () => {
       expect((await listed.json()).setup.join(" ")).toMatch(/TURSO_DATABASE_URL/);
       const page = readFileSync("app/login/page.tsx", "utf8");
       expect(page).toMatch(/Google sign-in isn't set up/);
+      expect(page).toMatch(/EMIT staff/);
+      expect(page).toMatch(/Select staff/);
     } finally {
       delete process.env.VERCEL;
     }
@@ -559,7 +561,9 @@ describe("Select load numbers", () => {
     const columns = (await upgraded.prepare(`PRAGMA table_info(users)`).all()) as Array<{ name: string }>;
     expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining(["active", "password_epoch"]));
     const loadColumns = (await upgraded.prepare(`PRAGMA table_info(loads)`).all()) as Array<{ name: string }>;
-    expect(loadColumns.map((column) => column.name)).toEqual(expect.arrayContaining(["tracking_link", "tracking_link_source"]));
+    expect(loadColumns.map((column) => column.name)).toEqual(
+      expect.arrayContaining(["tracking_link", "tracking_link_source", "sam_build_status", "sam_build_error", "sam_build_at"]),
+    );
     const customerDocs = (await upgraded.prepare(`PRAGMA table_info(customer_documents)`).all()) as Array<{ name: string }>;
     const internalDocs = (await upgraded.prepare(`PRAGMA table_info(internal_documents)`).all()) as Array<{ name: string }>;
     expect(customerDocs.map((column) => column.name)).toContain("uploaded_by");
@@ -570,6 +574,11 @@ describe("Select load numbers", () => {
       .run();
     const emitAdmin = await upgraded.prepare(`SELECT role FROM users WHERE id = ?`).get("u-emit");
     expect(emitAdmin?.role).toBe("emit_admin");
+    await upgraded
+      .prepare(`INSERT INTO users (id, email, name, role, created_at) VALUES ('u-view', 'viewer@emit.example', 'View', 'emit_viewer', '2026-10-02T00:00:00.000Z')`)
+      .run();
+    const viewer = await upgraded.prepare(`SELECT role FROM users WHERE id = ?`).get("u-view");
+    expect(viewer?.role).toBe("emit_viewer");
     rmSync(file, { force: true });
   });
 

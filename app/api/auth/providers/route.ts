@@ -16,6 +16,8 @@ export async function GET(_req: Request) {
     demoHint: showDemo
       ? {
           emit: "m.gray@emit.example",
+          emitViewer: "viewer@emit.example",
+          emitFull: "lead@emit.example",
           select: ["mgray@goselect.com", "dmartin@goselect.com"],
           password: process.env.DEMO_USER_PASSWORD || "Emit-Demo-2026",
         }

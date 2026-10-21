@@ -174,10 +174,12 @@ export async function assertSessionLive(
   };
 }
 
-/** Microsoft sign-in returns customer. That must not demote an EMIT admin or a Select admin. */
+/** Microsoft sign-in returns customer. That must not change a permission Select already set. */
 function preservedRole(existing: PortalRole, incoming: PortalRole): PortalRole {
-  if (existing === "emit_admin" && incoming === "customer") return "emit_admin";
-  if (existing === "admin" && incoming !== "admin") return "admin";
+  if (existing === "admin") return "admin";
+  if ((existing === "emit_admin" || existing === "emit_viewer" || existing === "customer") && incoming === "customer") {
+    return existing;
+  }
   return incoming;
 }
 

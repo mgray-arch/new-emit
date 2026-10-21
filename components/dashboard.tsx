@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import LoadForm, { draftFromOrder, emptyDraft, payloadFromDraft, useSites, type Draft } from "@/components/load-form";
+import SamBuildButton from "@/components/sam-build-button";
 import PhotoGallery from "@/components/photo-gallery";
 import SelectLoadField from "@/components/select-load-field";
 import StatusPill from "@/components/status-pill";
@@ -24,6 +25,7 @@ import {
 import { toast } from "@/lib/toast";
 import {
   STATUS_LABEL,
+  canAddLoads,
   canSeePricing,
   formatLoadNumber,
   type CustomerDocument,
@@ -111,12 +113,22 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   }, []);
 
   useEffect(() => {
-    if (role !== "customer" && role !== "emit_admin") return;
+    if (role === "emit_viewer") setCreating(false);
+  }, [role]);
+
+  useEffect(() => {
+    if (role !== "customer" && role !== "emit_admin" && role !== "emit_viewer") return;
     if (window.localStorage.getItem("emit-tips-v1") === "1") return;
     setShowTips(true);
   }, [role]);
 
   const showPricing = canSeePricing(role);
+  const allowLoads = canAddLoads(role);
+
+  const replaceOrder = useCallback((next: CustomerOrder) => {
+    setRows((current) => current.map((item) => (item.id === next.id ? next : item)));
+    setEditing((current) => (current?.id === next.id ? next : current));
+  }, []);
 
   useEffect(() => {
     if (!creating && !editing) return;
@@ -291,19 +303,21 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
           <h1>Loads</h1>
           <p className="lede">What needs a look, what is moving, and what already delivered.</p>
         </div>
-        <button
-          className="btn"
-          type="button"
-          onClick={() => {
-            setCreating(true);
-            setEditing(null);
-            setDraft(emptyDraft());
-            setSubmitted(null);
-            setFormError("");
-          }}
-        >
-          New load
-        </button>
+        {allowLoads ? (
+          <button
+            className="btn"
+            type="button"
+            onClick={() => {
+              setCreating(true);
+              setEditing(null);
+              setDraft(emptyDraft());
+              setSubmitted(null);
+              setFormError("");
+            }}
+          >
+            New load
+          </button>
+        ) : null}
       </div>
       {showTips && (
         <aside className="tips">
@@ -460,6 +474,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                   ) : null}
                   {order.comments ? <Note text={order.comments} /> : null}
                   <div className="load-row-actions">
+                    {role === "admin" ? <SamBuildButton order={order} onUpdated={replaceOrder} /> : null}
                     <TrackLink href={order.trackingLink} />
                     {showPricing && (
                       <span className="load-meta">
@@ -519,6 +534,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
             )}
             {role === "admin" && editing && (
               <>
+                <SamBuildButton order={editing} onUpdated={replaceOrder} />
                 <SelectLoadField
                   orderId={editing.id}
                   loadNumber={editing.loadNumber}

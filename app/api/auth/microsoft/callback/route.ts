@@ -1,6 +1,6 @@
 import { identityFromMicrosoft } from "@/lib/auth-policy";
 import { json, PortalError } from "@/lib/http";
-import { upsertExternalUser } from "@/lib/passwords";
+import { findUser, upsertExternalUser } from "@/lib/passwords";
 import { readyPortal } from "@/lib/portal";
 import {
   clearStateCookie,
@@ -59,6 +59,10 @@ export async function GET(req: Request) {
     const ctx = await readyPortal();
     const decision = identityFromMicrosoft(email);
     if (!decision.ok) return loginError(decision.error);
+    const approved = await findUser(ctx, decision.email);
+    if (!approved || approved.role === "admin") {
+      return loginError("This email is not on the EMIT list. A Select admin has to add it before it can sign in.");
+    }
     const session = await upsertExternalUser(ctx, {
       email: decision.email,
       name: profile.name || decision.email,

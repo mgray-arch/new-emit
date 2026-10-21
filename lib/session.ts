@@ -36,7 +36,7 @@ export async function signSession(session: Session): Promise<string> {
 export async function verifySessionToken(token: string): Promise<(Session & { issuedAt: number }) | null> {
   try {
     const { payload } = await jwtVerify(token, authSecret());
-    if (payload.role !== "customer" && payload.role !== "emit_admin" && payload.role !== "admin") return null;
+    if (payload.role !== "customer" && payload.role !== "emit_viewer" && payload.role !== "emit_admin" && payload.role !== "admin") return null;
     if (typeof payload.email !== "string" || typeof payload.name !== "string" || typeof payload.sub !== "string") {
       return null;
     }
@@ -79,6 +79,19 @@ export function clearSessionCookie(): string {
   return `${COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${secure}`;
 }
 
+/** Select staff preview an EMIT role. Ignored unless the signed-in role is admin. */
+export const VIEW_AS_COOKIE = "portal_view_as";
+
+export function viewAsCookie(role: string): string {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  return `${VIEW_AS_COOKIE}=${encodeURIComponent(role)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${60 * 60 * 24 * 7}${secure}`;
+}
+
+export function clearViewAsCookie(): string {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  return `${VIEW_AS_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${secure}`;
+}
+
 export function stateCookie(state: string): string {
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   return `${STATE_COOKIE}=${state}; HttpOnly; Path=/; SameSite=Lax; Max-Age=600${secure}`;
@@ -102,6 +115,8 @@ export function isPublicPath(pathname: string): boolean {
   if (pathname === "/api/ingest/carrier-photos") return true;
   // The SAM bot authenticates with BOT_UPLOAD_KEY. The handler is upload-only.
   if (pathname === "/api/integrations/documents") return true;
+  // The Load Builder bot posts the SAM load number. The handler requires LOAD_BUILDER_SECRET.
+  if (pathname === "/api/integrations/sam-load") return true;
   return false;
 }
 

@@ -8,7 +8,7 @@ import type { LoadTab } from "@/lib/load-list";
 import { listCustomerDocuments } from "@/lib/documents";
 import { PortalError } from "@/lib/http";
 import type { CustomerOrder, PortalStatus, Session, TimelineEvent, TrackingStage } from "@/lib/types";
-import { STAGE_LABEL, TRACKING_STAGES, canSeePricing } from "@/lib/types";
+import { STAGE_LABEL, TRACKING_STAGES, canAddLoads, canSeePricing } from "@/lib/types";
 import { syncStopLocations } from "@/lib/locations";
 import { legacyStops, resolvedRoute } from "@/lib/stops";
 import type { OrderInput, OrderPatch } from "@/lib/validate";
@@ -74,6 +74,9 @@ interface LoadRow {
   pending_review_count: number;
   attachment_count: number;
   bol_count: number;
+  sam_build_status: string | null;
+  sam_build_error: string | null;
+  sam_build_at: string | null;
 }
 
 const LIST_SQL_HEAD = `
@@ -88,7 +91,7 @@ export function likeContains(query: string): string {
 }
 
 async function rowToOrder(ctx: PortalContext, row: LoadRow, withDocuments: boolean): Promise<CustomerOrder> {
-  return serializeCustomerOrder({
+  const order = serializeCustomerOrder({
     id: row.id,
     salesOrderNumber: row.sales_order_number,
     loadNumber: row.load_number,
@@ -118,6 +121,13 @@ async function rowToOrder(ctx: PortalContext, row: LoadRow, withDocuments: boole
     pendingReviewCount: row.pending_review_count ?? 0,
     documents: withDocuments ? await listCustomerDocuments(ctx, row.id) : [],
   });
+  const status = row.sam_build_status === "building" || row.sam_build_status === "failed" ? row.sam_build_status : null;
+  return {
+    ...order,
+    samBuildStatus: status,
+    samBuildError: row.sam_build_error || null,
+    samBuildAt: row.sam_build_at || null,
+  };
 }
 
 function parseStops(row: LoadRow): Stop[] {
@@ -440,6 +450,7 @@ function routeFrom(input: { origin?: OrderInput["origin"]; destination?: OrderIn
 export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: Session): Promise<{
   order: CustomerOrder;
 }> {
+  if (!canAddLoads(actor.role)) throw new PortalError("This account can view loads but cannot add them.", 403);
   const now = ctx.now().toISOString();
   const id = randomUUID();
   const token = randomBytes(24).toString("base64url");
@@ -496,6 +507,7 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
 }
 
 export async function updateOrder(ctx: PortalContext, id: string, patch: OrderPatch, actor: Session): Promise<CustomerOrder> {
+  if (!canAddLoads(actor.role)) throw new PortalError("This account can view loads but cannot change them.", 403);
   const existing = (await ctx.db.prepare(`${LIST_SQL_HEAD} WHERE id = ?`).get(id)) as LoadRow | undefined;
   if (!existing) throw new PortalError("Order not found", 404);
   const current = await rowToOrder(ctx, existing, false);

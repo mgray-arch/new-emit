@@ -127,6 +127,13 @@ export interface CustomerOrder {
   /** Pages held for Select. Omitted for every EMIT user, including EMIT admins. */
   pendingReviewCount?: number;
   documents: CustomerDocument[];
+  /** Select only. Omitted for every EMIT role and for view-as. */
+  samBuildStatus?: "building" | "failed" | null;
+  samBuildError?: string | null;
+  /** Select only. When the build was requested, so a stuck build can be retried. */
+  samBuildAt?: string | null;
+  /** Select only. Present when SAM_LOAD_URL_TEMPLATE can build a link. */
+  samUrl?: string | null;
 }
 
 export interface PublicTracking {
@@ -147,16 +154,46 @@ export interface PublicTracking {
   trackingLink: string | null;
 }
 
-export type PortalRole = "customer" | "emit_admin" | "admin";
+/** customer = add loads, no pricing. emit_viewer = view only. emit_admin = full access. admin = Select. */
+export type PortalRole = "customer" | "emit_viewer" | "emit_admin" | "admin";
 
-/** Select admins and EMIT admins see EMIT's customer cost. Regular EMIT users do not. */
+/** The one permission a Select admin assigns. Pricing is included only in full access. */
+export type EmitPermission = "view" | "add" | "full";
+
+export const EMIT_PERMISSIONS = ["view", "add", "full"] as const;
+
+export const PERMISSION_LABEL: Record<EmitPermission, string> = {
+  view: "View only",
+  add: "Add loads",
+  full: "Full access",
+};
+
+/** Select staff, and EMIT full access, see what Select charges EMIT. Nobody at EMIT sees carrier pay. */
 export function canSeePricing(role: string | null | undefined): boolean {
   return role === "admin" || role === "emit_admin";
 }
 
-/** Saved delivery locations. Select admins and EMIT admins. Pickup sites stay with Select admins. */
+/** View only can look. Add loads and full access can create and edit. Select can too, unless they are viewing as view only. */
+export function canAddLoads(role: string | null | undefined): boolean {
+  return role === "admin" || role === "emit_admin" || role === "customer";
+}
+
+/** Saved delivery locations. Full access and Select. Pickup sites stay with Select. */
 export function canManageLocations(role: string | null | undefined): boolean {
   return role === "admin" || role === "emit_admin";
+}
+
+export function permissionFromRole(role: string | null | undefined): EmitPermission | null {
+  if (role === "emit_viewer") return "view";
+  if (role === "customer") return "add";
+  if (role === "emit_admin") return "full";
+  return null;
+}
+
+export function roleFromPermission(permission: EmitPermission): PortalRole {
+  if (permission === "view") return "emit_viewer";
+  if (permission === "full") return "emit_admin";
+  return "customer";
 }
 
 export interface Session {
@@ -166,6 +203,10 @@ export interface Session {
   role: PortalRole;
   /** Bumped when the password changes so older cookies stop working. */
   passwordEpoch?: number;
+  /** The signed-in role. Equals role unless Select is previewing an EMIT role. */
+  actorRole?: PortalRole;
+  /** Set only for a Select admin who is previewing an EMIT role. */
+  viewAs?: PortalRole | null;
 }
 
 export interface AssistantReference {

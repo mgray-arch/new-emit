@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import PhotoGallery from "@/components/photo-gallery";
+import SamBuildButton from "@/components/sam-build-button";
 import SelectLoadField from "@/components/select-load-field";
 import Shell from "@/components/shell";
 import StatusPill from "@/components/status-pill";
@@ -13,7 +14,7 @@ import TrackingLinkField from "@/components/tracking-link-field";
 import { denverDate, formatDay, formatWhen } from "@/lib/dates";
 import { displayStatus, fileSummary } from "@/lib/load-list";
 import { toast } from "@/lib/toast";
-import { canSeePricing, formatLoadNumber, formatPlace, type CustomerOrder, type PortalRole } from "@/lib/types";
+import { canAddLoads, canSeePricing, formatLoadNumber, formatPlace, type CustomerOrder, type PortalRole } from "@/lib/types";
 
 export default function OrderPage() {
   const params = useParams<{ id: string }>();
@@ -90,10 +91,20 @@ export default function OrderPage() {
               <p className="mini">Select has not entered the load number yet. This page is the confirmation. No email is sent.</p>
             )}
             <div className="load-row-actions">
+              {role === "admin" ? (
+                <SamBuildButton
+                  order={order}
+                  onUpdated={(next) => {
+                    setOrder(next);
+                  }}
+                />
+              ) : null}
               <TrackLink href={order.trackingLink} />
-              <Link className="btn secondary" href={`/?edit=${order.id}`}>
-                Edit load
-              </Link>
+              {canAddLoads(role) ? (
+                <Link className="btn secondary" href={`/?edit=${order.id}`}>
+                  Edit load
+                </Link>
+              ) : null}
             </div>
 
             <section className="detail-section">

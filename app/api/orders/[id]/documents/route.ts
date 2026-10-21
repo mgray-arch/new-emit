@@ -4,6 +4,7 @@ import { isSession, requireSession } from "@/lib/guard";
 import { errorResponse, json, PortalError } from "@/lib/http";
 import { getOrder } from "@/lib/orders";
 import { readyPortal } from "@/lib/portal";
+import { canAddLoads } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,6 +15,7 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
     if (!isSession(session)) return session;
     const { id } = await context.params;
     const ctx = await readyPortal();
+    if (!canAddLoads(session.role)) return json({ error: "This account can view loads but cannot add files." }, 403);
     if (!(await getOrder(ctx, id))) return json({ error: "Order not found" }, 404);
     const form = await req.formData();
     const file = form.get("file");

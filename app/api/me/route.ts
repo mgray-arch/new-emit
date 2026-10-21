@@ -8,7 +8,13 @@ export async function GET(req: Request) {
   try {
     const session = await requireSession(req);
     if (!isSession(session)) return session;
-    return json({ name: session.name, email: session.email, role: session.role });
+    return json({
+      name: session.name,
+      email: session.email,
+      role: session.role,
+      actorRole: session.actorRole ?? session.role,
+      viewAs: session.viewAs ?? null,
+    });
   } catch (error) {
     return errorResponse(error);
   }

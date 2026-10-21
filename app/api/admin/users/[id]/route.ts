@@ -11,6 +11,7 @@ const patchSchema = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   active: z.boolean().optional(),
   emitAdmin: z.boolean().optional(),
+  permission: z.enum(["view", "add", "full"]).optional(),
 });
 
 export async function PATCH(req: Request, context: { params: Promise<{ id: string }> }) {
