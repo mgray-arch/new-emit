@@ -2,7 +2,7 @@
 
 Customer portal for EMIT Technologies, a shipper of Select Transport Partners. It replaces the old Lovable app on **emit-select.com**.
 
-EMIT staff sign in with email and password. Select admins sign in with Google. The portal is the order confirmation: it does not send email. There is no SAM API yet, so a Select admin types the real SAM load number onto an order after building it in SAM. Until that number is entered, EMIT sees **Pending**. The portal does not invent a load number.
+EMIT staff sign in with email and password. Select admins sign in with Google. A Select admin can mark an EMIT user as an EMIT admin. EMIT admins see EMIT's own cost. Regular EMIT users do not see pricing anywhere. Carrier pay stays hidden from every EMIT user, including EMIT admins. The portal is the order confirmation: it does not send email. There is no SAM API yet, so a Select admin types the real SAM load number and the public tracking link onto an order after building it in SAM. Until that number is entered, EMIT sees **Pending**. The portal does not invent a load number.
 
 Orders, users, and the document review queue live in Turso. Document and photo bytes live in Vercel Blob. Locally, with those unset, the app uses a SQLite file and `data/blobs`.
 
@@ -11,19 +11,20 @@ Orders, users, and the document review queue live in Turso. Document and photo b
 - Broker dashboard with status counts, ship-date range, search, and pagination. A load can have any number of pickups and drops.
 - Submit a load. The order appears in the portal immediately. That screen is the confirmation. No email is sent.
 - See the Select load number once a Select admin has entered it. Before that, the column says Pending.
-- Status timeline, latest ETA, and a public tracking link.
+- Open a Track button when a Select admin has pasted the SAM or MacroPoint share link.
+- Status timeline, latest ETA, and the portal's own status page.
 - Carrier photo gallery. Rate-confirmation images stay with Select admins.
-- Ask about an SO. Answers come from the customer-safe shipment view.
+- Ask about an SO. Answers come from the customer-safe shipment view. Regular EMIT users do not get pricing in that answer. EMIT admins do.
 
-Select admins also get the document review queue, ship-from sites, receiver companies, and the EMIT user list.
+Select admins also get the document review queue, ship-from sites, receiver companies, and the EMIT user list. On Users, they choose who is an EMIT admin.
 
 ## Security boundary
 
-Customer responses are an allowlist. Carrier pay is not stored. The serializer drops a carrier-pay field if one is posted, and the assistant reads that same view. Questions about carrier pay, margins, or rate confirmations are refused before any shipment data is attached.
+Customer responses are an allowlist. Carrier pay is not stored. The serializer drops a carrier-pay field if one is posted, and the assistant reads that same view. Questions about carrier pay, margins, or rate confirmations are refused before any shipment data is attached. Regular EMIT users also have `customerCost` and `rateReason` removed from that allowlist, including list, detail, and assistant responses. EMIT admins and Select admins still receive EMIT's cost. A regular user cannot clear or set that cost by saving a load.
 
 Every upload is split into pages and screened. A rate confirmation, or a page the screener cannot read, stays in an internal store. Releasing a flagged rate confirmation requires an explicit confirm and records the admin email and time.
 
-Unauthenticated routes are the tracking link (`/track/[token]`) and a receiver's private link (`/r/[token]`). Tracking returns cities, status, timeline, and ETA. It does not return cost, comments, documents, street address, or carrier data. Receiver links do not show customer cost or documents.
+Unauthenticated routes are the portal status page (`/track/[token]`) and a receiver's private link (`/r/[token]`). The status page returns cities, status, timeline, and ETA. It does not return cost, comments, documents, street address, or carrier data. Receiver links do not show customer cost or documents. When a tracking link is set, both show a Track button to the public SAM or MacroPoint page.
 
 ## Run locally
 
@@ -97,9 +98,9 @@ Do not set `DEMO_USER_PASSWORD` in production. Do not set a Gmail client. Order 
    - Put the client id and secret in `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
 7. Move the domain off the old Lovable app (steps below) and redeploy Production.
 8. Sign in as `mgray@goselect.com` or `dmartin@goselect.com` with Google. That first sign-in creates the admin. There is no password for that account in production.
-9. Open **Users**. Add each EMIT person (name and email). Set a temporary password or generate one, and send it to them yourself. The portal does not email it.
+9. Open **Users**. Add each EMIT person (name and email). Set a temporary password or generate one, and send it to them yourself. The portal does not email it. Check **EMIT admin** only for the people who should see EMIT's cost.
 10. Ask one EMIT person to sign in and change the password under **Password**.
-11. Submit a test order. Confirm the Select load column says Pending, then enter the real SAM number (for example `458934-1`) and confirm EMIT sees that number.
+11. Submit a test order. Confirm the Select load column says Pending, then enter the real SAM number (for example `458934-1`) and the public tracking link. Confirm EMIT sees that number and a Track button. Sign in as a regular EMIT user and confirm the cost is gone. Sign in as an EMIT admin and confirm the cost is there.
 12. Add receiver companies under Settings only when a receiver should have a private link.
 
 Microsoft sign-in can stay unconfigured. The login page hides that button until the Azure variables are set.
@@ -124,7 +125,7 @@ If `PORTAL_PUBLIC_URL` is blank, production links fall back to `VERCEL_PROJECT_P
 
 Submitting an order stores it with no load number. EMIT, the tracking page, and receiver links show Pending. A Select admin enters the number from SAM on the order. The shape is the SAM load number, loosely `458934-1` (digits, a dash, digits). A duplicate number is rejected. Clearing the field returns the order to Pending.
 
-When a SAM API exists, call `syncSelectLoadNumberFromSam` in `lib/select-load.ts` with the TMS payload. That writes the same column with source `sam`. It does not invent a number when SAM has not assigned one, and it does not copy carrier cost.
+When a SAM API exists, call `syncSelectLoadNumberFromSam` in `lib/select-load.ts` with the TMS payload. That writes the same column with source `sam`. It does not invent a number when SAM has not assigned one, and it does not copy carrier cost. Call `syncTrackingLinkFromSam` in the same file with that payload to store `tracking.shareUrl` as the Track link. It does not clear a link when SAM has not published one.
 
 ## EMIT passwords
 
@@ -132,8 +133,18 @@ Select admins create users on **Users**. They can type a temporary password or g
 
 There is no self-service signup and no password email. Azure is not involved.
 
+## EMIT admins and pricing
+
+There are three roles. **Select admin** (`admin`) signs in with Google and can open Review, Users, and Settings. **EMIT admin** (`emit_admin`) is an EMIT password user a Select admin marks on Users. **EMIT staff** (`customer`) is everyone else at EMIT.
+
+EMIT's cost and the rate reason are included only for Select admins and EMIT admins. A regular EMIT user does not receive those fields from the list, the load detail, a document upload, or the assistant, and a save from that user leaves the stored cost alone. Carrier pay is hidden from EMIT admins too.
+
+## Tracking links
+
+Each load has a tracking link, separate from the portal status page. A Select admin pastes the public SAM or MacroPoint URL on the load. EMIT users and receivers get a Track button when it is set. The link has to be http or https. Clearing the field removes the button.
+
 ## Carrier pay
 
-Nothing in this go-live changes the carrier-pay rule. It is not a column, not a form field, and not in the assistant's context. Held rate confirmations stay on the admin review queue.
+Carrier pay is not a column, not a form field, and not in the assistant's context. Held rate confirmations stay on the admin review queue. That rule applies to EMIT admins as well as regular EMIT users.
 
 See [docs/REPORT.md](docs/REPORT.md) for the screening rules, receiver links, and the SAM client that is still not wired up.

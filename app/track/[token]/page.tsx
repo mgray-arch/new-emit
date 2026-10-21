@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Timeline from "@/components/timeline";
+import TrackLink from "@/components/track-link";
 import { formatDay, formatWhen } from "@/lib/dates";
 import { STAGE_LABEL, STATUS_LABEL, formatLoadNumber, type PublicTracking } from "@/lib/types";
 
@@ -54,6 +55,7 @@ export default function TrackPage() {
           </ol>
           <p className="mini">Ship date {formatDay(data.shipDate)} · Must deliver {formatDay(data.mustDeliverDate)}</p>
           <p>Latest ETA: {data.latestEta ? formatWhen(data.latestEta) : "Not posted yet"}</p>
+          <TrackLink href={data.trackingLink} />
           {data.truckType && <p className="mini">{data.truckType}</p>}
         </>
       )}

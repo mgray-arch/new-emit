@@ -107,9 +107,14 @@ export interface CustomerOrder {
   mustDeliverDate: string | null;
   truckEta: string | null;
   latestEta: string | null;
+  /** Portal status page. This is not the carrier's public share link. */
   trackingUrl: string;
-  customerCost: number | null;
-  rateReason: RateReason | null;
+  /** SAM / MacroPoint public share link. Null until a Select admin or a future SAM sync sets it. */
+  trackingLink: string | null;
+  /** EMIT's own cost. Omitted entirely for regular EMIT users. */
+  customerCost?: number | null;
+  /** Omitted entirely for regular EMIT users. */
+  rateReason?: RateReason | null;
   comments: string;
   createdBy: string;
   createdAt: string;
@@ -135,9 +140,15 @@ export interface PublicTracking {
   shipDate: string | null;
   mustDeliverDate: string | null;
   truckType: TruckType | null;
+  trackingLink: string | null;
 }
 
-export type PortalRole = "customer" | "admin";
+export type PortalRole = "customer" | "emit_admin" | "admin";
+
+/** Select admins and EMIT admins see EMIT's customer cost. Regular EMIT users do not. */
+export function canSeePricing(role: string | null | undefined): boolean {
+  return role === "admin" || role === "emit_admin";
+}
 
 export interface Session {
   userId: string;

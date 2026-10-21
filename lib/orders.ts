@@ -7,7 +7,7 @@ import { denverDate } from "@/lib/dates";
 import { listCustomerDocuments } from "@/lib/documents";
 import { PortalError } from "@/lib/http";
 import type { CustomerOrder, PortalStatus, Session, TimelineEvent, TrackingStage } from "@/lib/types";
-import { STAGE_LABEL, TRACKING_STAGES } from "@/lib/types";
+import { STAGE_LABEL, TRACKING_STAGES, canSeePricing } from "@/lib/types";
 import { legacyStops, resolvedRoute } from "@/lib/stops";
 import type { OrderInput, OrderPatch } from "@/lib/validate";
 import type { Stop } from "@/lib/types";
@@ -55,6 +55,7 @@ interface LoadRow {
   truck_eta: string | null;
   latest_eta: string | null;
   tracking_token: string;
+  tracking_link: string | null;
   customer_cost_cents: number | null;
   rate_reason: string | null;
   comments: string;
@@ -96,6 +97,7 @@ async function rowToOrder(ctx: PortalContext, row: LoadRow, withDocuments: boole
     truckEta: row.truck_eta,
     latestEta: row.latest_eta,
     trackingUrl: trackingUrlFor(row.tracking_token),
+    trackingLink: row.tracking_link,
     customerCost: row.customer_cost_cents == null ? null : row.customer_cost_cents / 100,
     rateReason: row.rate_reason,
     comments: row.comments,
@@ -298,6 +300,9 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
   const trackingStage = advanceStage("submitted", portalStatus);
   const timeline = timelineThrough(trackingStage, now);
   const route = routeFrom(input);
+  const seePricing = canSeePricing(actor.role);
+  const customerCost = seePricing ? input.customerCost : undefined;
+  const rateReason = seePricing ? input.rateReason : undefined;
   await withTransaction(ctx.db, async () => {
     await ctx.db
       .prepare(
@@ -327,8 +332,8 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
         input.mustDeliverDate ?? null,
         input.truckEta ?? null,
         token,
-        input.customerCost == null ? null : Math.round(input.customerCost * 100),
-        input.rateReason ?? null,
+        customerCost == null ? null : Math.round(customerCost * 100),
+        rateReason ?? null,
         input.comments ?? "",
         actor.name,
         now,
@@ -363,6 +368,7 @@ export async function updateOrder(ctx: PortalContext, id: string, patch: OrderPa
         }),
       });
   const now = ctx.now().toISOString();
+  const seePricing = canSeePricing(actor.role);
   await ctx.db
     .prepare(
       `UPDATE loads SET
@@ -386,12 +392,12 @@ export async function updateOrder(ctx: PortalContext, id: string, patch: OrderPa
       patch.shipTime === undefined ? current.shipTime : patch.shipTime,
       patch.mustDeliverDate === undefined ? current.mustDeliverDate : patch.mustDeliverDate,
       patch.truckEta === undefined ? current.truckEta : patch.truckEta,
-      patch.customerCost === undefined
+      !seePricing || patch.customerCost === undefined
         ? existing.customer_cost_cents
         : patch.customerCost == null
           ? null
           : Math.round(patch.customerCost * 100),
-      patch.rateReason === undefined ? current.rateReason : patch.rateReason,
+      (!seePricing || patch.rateReason === undefined ? current.rateReason : patch.rateReason) ?? null,
       patch.comments === undefined ? current.comments : patch.comments,
       now,
       id,

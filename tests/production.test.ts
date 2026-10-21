@@ -4,6 +4,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { PATCH as setLoadNumber } from "@/app/api/admin/orders/[id]/load-number/route";
+import { PATCH as setTrackingLink } from "@/app/api/admin/orders/[id]/tracking-link/route";
 import { POST as resetPassword } from "@/app/api/admin/users/[id]/password/route";
 import { PATCH as patchUser } from "@/app/api/admin/users/[id]/route";
 import { GET as listUsers, POST as createUser } from "@/app/api/admin/users/route";
@@ -12,11 +13,14 @@ import { GET as providers } from "@/app/api/auth/providers/route";
 import { GET as me } from "@/app/api/me/route";
 import { POST as changePassword } from "@/app/api/me/password/route";
 import { GET as getOrderRoute, PATCH as patchOrder } from "@/app/api/orders/[id]/route";
+import { GET as receiverPortal } from "@/app/api/r/[token]/route";
 import { POST as createOrderRoute } from "@/app/api/orders/route";
 import { demoSeedEnabled, openDatabase, useTestPortal, type PortalContext } from "@/lib/db";
 import { seedIfEmpty } from "@/lib/portal";
 import { LOGIN_EMAIL_LIMIT } from "@/lib/passwords";
-import { parseSelectLoadNumber, syncSelectLoadNumberFromSam } from "@/lib/select-load";
+import { createReceiver } from "@/lib/receivers";
+import { parseSelectLoadNumber, syncSelectLoadNumberFromSam, syncTrackingLinkFromSam } from "@/lib/select-load";
+import { parseTrackingLink } from "@/lib/tracking-link";
 import { portalPublicUrl } from "@/lib/public-url";
 import { adminSession, customerSession, sessionCookie } from "./helpers";
 
@@ -324,6 +328,91 @@ describe("Select load numbers", () => {
     expect((await cleared.json()).order.loadNumber).toBeNull();
   });
 
+  it("stores a public tracking link an admin pastes, and a future SAM sync can fill the same field", async () => {
+    expect(parseTrackingLink("javascript:alert(1)")).toBeNull();
+    expect(parseTrackingLink("data:text/html,hi")).toBeNull();
+    expect(parseTrackingLink("https://macropoint.example/share/abc")).toBe("https://macropoint.example/share/abc");
+
+    const customer = await sessionCookie(customerSession());
+    const receiverRecord = await createReceiver(ctx, { company: "Enchanted Rock LLC", contactEmails: ["ops@enchantedrock.example"] });
+    const created = await createOrderRoute(
+      new Request("http://portal.test/api/orders", {
+        method: "POST",
+        headers: headers(customer),
+        body: JSON.stringify({
+          salesOrderNumber: "SO-TRACK-1",
+          origin: route.origin,
+          destination: { company: "Enchanted Rock LLC", address1: "1", city: "Cypress", state: "TX", postalCode: "77429" },
+        }),
+      }),
+    );
+    const order = (await created.json()).order;
+    expect(order.trackingLink).toBeNull();
+    const denied = await setTrackingLink(
+      new Request(`http://portal.test/api/admin/orders/${order.id}/tracking-link`, {
+        method: "PATCH",
+        headers: headers(customer),
+        body: JSON.stringify({ trackingLink: "https://macropoint.example/share/abc" }),
+      }),
+      { params: Promise.resolve({ id: order.id }) },
+    );
+    expect(denied.status).toBe(403);
+
+    const admin = await sessionCookie(adminSession());
+    const bad = await setTrackingLink(
+      new Request(`http://portal.test/api/admin/orders/${order.id}/tracking-link`, {
+        method: "PATCH",
+        headers: headers(admin),
+        body: JSON.stringify({ trackingLink: "javascript:alert(1)" }),
+      }),
+      { params: Promise.resolve({ id: order.id }) },
+    );
+    expect(bad.status).toBe(400);
+
+    const saved = await setTrackingLink(
+      new Request(`http://portal.test/api/admin/orders/${order.id}/tracking-link`, {
+        method: "PATCH",
+        headers: headers(admin),
+        body: JSON.stringify({ trackingLink: "https://macropoint.example/share/abc" }),
+      }),
+      { params: Promise.resolve({ id: order.id }) },
+    );
+    expect((await saved.json()).order.trackingLink).toBe("https://macropoint.example/share/abc");
+    const seen = await getOrderRoute(new Request(`http://portal.test/api/orders/${order.id}`, { headers: { cookie: customer } }), {
+      params: Promise.resolve({ id: order.id }),
+    });
+    const seenBody = await seen.json();
+    expect(seenBody.order.trackingLink).toBe("https://macropoint.example/share/abc");
+    expect("customerCost" in seenBody.order).toBe(false);
+
+    const receiver = await receiverPortal(new Request(`http://portal.test/api/r/${receiverRecord.token}`), {
+      params: Promise.resolve({ token: receiverRecord.token }),
+    });
+    const match = (await receiver.json()).loads.find((load: { salesOrderNumber: string }) => load.salesOrderNumber === "SO-TRACK-1");
+    expect(match.trackingLink).toBe("https://macropoint.example/share/abc");
+    expect(match.customerCost).toBeUndefined();
+
+    const synced = await syncTrackingLinkFromSam(ctx, order.id, {
+      loads: [{ tracking: { shareUrl: "https://macropoint.example/share/next" }, carrierCost: 8765.43 }],
+    });
+    expect(synced.trackingLink).toBe("https://macropoint.example/share/next");
+    expect(JSON.stringify(synced)).not.toMatch(/carrierCost|8765/);
+    const source = await ctx.db.prepare(`SELECT tracking_link_source FROM loads WHERE id = ?`).get(order.id);
+    expect(source?.tracking_link_source).toBe("sam");
+    const unchanged = await syncTrackingLinkFromSam(ctx, order.id, { loads: [{ transitStatus: "Open" }] });
+    expect(unchanged.trackingLink).toBe("https://macropoint.example/share/next");
+
+    const cleared = await setTrackingLink(
+      new Request(`http://portal.test/api/admin/orders/${order.id}/tracking-link`, {
+        method: "PATCH",
+        headers: headers(admin),
+        body: JSON.stringify({ trackingLink: "" }),
+      }),
+      { params: Promise.resolve({ id: order.id }) },
+    );
+    expect((await cleared.json()).order.trackingLink).toBeNull();
+  });
+
   it("keeps an existing load number when an older database is opened", async () => {
     const file = path.join(tmpdir(), `emit-migrate-${Date.now()}.db`);
     const raw = new DatabaseSync(file);
@@ -384,6 +473,13 @@ describe("Select load numbers", () => {
     expect(pending?.load_number).toBeNull();
     const columns = (await upgraded.prepare(`PRAGMA table_info(users)`).all()) as Array<{ name: string }>;
     expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining(["active", "password_epoch"]));
+    const loadColumns = (await upgraded.prepare(`PRAGMA table_info(loads)`).all()) as Array<{ name: string }>;
+    expect(loadColumns.map((column) => column.name)).toEqual(expect.arrayContaining(["tracking_link", "tracking_link_source"]));
+    await upgraded
+      .prepare(`INSERT INTO users (id, email, name, role, created_at) VALUES ('u-emit', 'lead@emit.example', 'Lead', 'emit_admin', '2026-10-02T00:00:00.000Z')`)
+      .run();
+    const emitAdmin = await upgraded.prepare(`SELECT role FROM users WHERE id = ?`).get("u-emit");
+    expect(emitAdmin?.role).toBe("emit_admin");
     rmSync(file, { force: true });
   });
 

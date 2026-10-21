@@ -36,7 +36,7 @@ export async function signSession(session: Session): Promise<string> {
 export async function verifySessionToken(token: string): Promise<(Session & { issuedAt: number }) | null> {
   try {
     const { payload } = await jwtVerify(token, authSecret());
-    if (payload.role !== "customer" && payload.role !== "admin") return null;
+    if (payload.role !== "customer" && payload.role !== "emit_admin" && payload.role !== "admin") return null;
     if (typeof payload.email !== "string" || typeof payload.name !== "string" || typeof payload.sub !== "string") {
       return null;
     }

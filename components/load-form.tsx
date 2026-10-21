@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Timeline from "@/components/timeline";
+import TrackLink from "@/components/track-link";
 import { formatWhen } from "@/lib/dates";
 import {
   RATE_REASONS,
@@ -96,7 +97,8 @@ export function draftFromOrder(order: CustomerOrder): Draft {
   };
 }
 
-export function payloadFromDraft(draft: Draft) {
+export function payloadFromDraft(draft: Draft, options?: { includePricing?: boolean }) {
+  const includePricing = options?.includePricing !== false;
   return {
     salesOrderNumber: draft.salesOrderNumber,
     origin: draft.origin,
@@ -109,8 +111,12 @@ export function payloadFromDraft(draft: Draft) {
     shipTime: draft.shipTime || null,
     mustDeliverDate: draft.mustDeliverDate || null,
     truckEta: draft.truckEta || null,
-    customerCost: draft.customerCost === "" ? null : Number(draft.customerCost),
-    rateReason: draft.rateReason || null,
+    ...(includePricing
+      ? {
+          customerCost: draft.customerCost === "" ? null : Number(draft.customerCost),
+          rateReason: draft.rateReason || null,
+        }
+      : {}),
     comments: draft.comments,
   };
 }
@@ -377,6 +383,7 @@ export default function LoadForm({
             Latest ETA: {order.latestEta ? formatWhen(order.latestEta) : "Not posted yet"}
             {order.portalStatus === "cancelled" ? " · Cancelled" : ""}
           </div>
+          <TrackLink href={order.trackingLink} />
           {order.trackingUrl && (
             <a className="track-link" href={order.trackingUrl} target="_blank" rel="noreferrer">
               Public tracking link

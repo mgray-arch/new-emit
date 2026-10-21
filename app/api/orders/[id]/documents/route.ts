@@ -1,3 +1,4 @@
+import { presentCustomerOrder } from "@/lib/customer-view";
 import { ingestDocument } from "@/lib/documents";
 import { isSession, requireSession } from "@/lib/guard";
 import { errorResponse, json, PortalError } from "@/lib/http";
@@ -24,7 +25,7 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
     return json({
       released: result.releasedIds.length,
       heldForReview: result.heldIds.length,
-      order,
+      order: order ? presentCustomerOrder(order, session.role) : null,
     });
   } catch (error) {
     return errorResponse(error);

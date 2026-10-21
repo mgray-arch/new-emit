@@ -8,6 +8,7 @@ interface EmitUser {
   email: string;
   name: string;
   active: boolean;
+  emitAdmin: boolean;
   hasPassword: boolean;
   createdAt: string;
 }
@@ -86,6 +87,22 @@ export default function UsersPage() {
     await load();
   }
 
+  async function setEmitAdmin(user: EmitUser, emitAdmin: boolean) {
+    setError("");
+    const response = await fetch(`/api/admin/users/${user.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ emitAdmin }),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      setError(body.error || "Could not update that user");
+      return;
+    }
+    setMessage(emitAdmin ? `${user.email} can see EMIT pricing.` : `${user.email} no longer sees pricing.`);
+    await load();
+  }
+
   async function reset(user: EmitUser, generate: boolean) {
     setError("");
     setSharedPassword("");
@@ -113,7 +130,7 @@ export default function UsersPage() {
       <main className="page">
         <h1>EMIT USERS</h1>
         <p className="lede">
-          Create the EMIT staff who sign in with email and password. Select admins are not listed here. They sign in with Google.
+          Create the EMIT staff who sign in with email and password. Select admins are not listed here. They sign in with Google. Mark someone as an EMIT admin when they should see EMIT&apos;s cost. Carrier pay stays hidden from everyone at EMIT.
         </p>
         {error && <p className="error">{error}</p>}
         {message && <p className="mini">{message}</p>}
@@ -164,6 +181,15 @@ export default function UsersPage() {
               {user.name} {!user.active && <span className="mini">· deactivated</span>}
             </h2>
             <p className="mini">{user.email}</p>
+            <label className="checkline">
+              <input
+                type="checkbox"
+                checked={user.emitAdmin}
+                aria-label={`EMIT admin for ${user.email}`}
+                onChange={(event) => setEmitAdmin(user, event.target.checked)}
+              />
+              EMIT admin — can see EMIT&apos;s cost
+            </label>
             <div className="actions" style={{ justifyContent: "flex-start" }}>
               <button className="btn secondary" type="button" onClick={() => setActive(user, !user.active)}>
                 {user.active ? "Deactivate" : "Activate"}

@@ -21,6 +21,8 @@ import {
 } from "@/lib/types";
 import { portalPublicUrl } from "@/lib/public-url";
 import { redactSensitiveText } from "@/lib/sensitive";
+import { canSeePricing } from "@/lib/types";
+import { parseTrackingLink } from "@/lib/tracking-link";
 
 /**
  * The only shipment shape that may leave the server toward EMIT or the assistant.
@@ -112,8 +114,14 @@ function money(value: unknown): number | null {
   return Math.round(value * 100) / 100;
 }
 
-export function serializeCustomerOrder(value: unknown): CustomerOrder {
+export interface CustomerViewOptions {
+  /** False omits customerCost and rateReason. Default true keeps stored orders intact for internal callers. */
+  includePricing?: boolean;
+}
+
+export function serializeCustomerOrder(value: unknown, options?: CustomerViewOptions): CustomerOrder {
   const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const includePricing = options?.includePricing !== false;
   const portalStatus = oneOf(raw.portalStatus, PORTAL_STATUSES) ?? "being_prepared";
   const trackingStage = oneOf(raw.trackingStage, TRACKING_STAGES) ?? "submitted";
   const documents = Array.isArray(raw.documents)
@@ -122,7 +130,7 @@ export function serializeCustomerOrder(value: unknown): CustomerOrder {
   const stops = serializeStops(raw.stops, serializePlace(raw.origin), serializePlace(raw.destination));
   const pickup = stops.find((stop) => stop.kind === "pickup") ?? stops[0];
   const drop = [...stops].reverse().find((stop) => stop.kind === "drop") ?? stops[stops.length - 1];
-  return {
+  const order: CustomerOrder = {
     id: str(raw.id),
     salesOrderNumber: str(raw.salesOrderNumber),
     loadNumber: strOrNull(raw.loadNumber),
@@ -140,8 +148,7 @@ export function serializeCustomerOrder(value: unknown): CustomerOrder {
     truckEta: strOrNull(raw.truckEta),
     latestEta: strOrNull(raw.latestEta),
     trackingUrl: str(raw.trackingUrl),
-    customerCost: money(raw.customerCost),
-    rateReason: oneOf(raw.rateReason, RATE_REASONS),
+    trackingLink: parseTrackingLink(raw.trackingLink),
     comments: redactSensitiveText(str(raw.comments)),
     createdBy: str(raw.createdBy),
     createdAt: str(raw.createdAt),
@@ -151,6 +158,16 @@ export function serializeCustomerOrder(value: unknown): CustomerOrder {
     pendingReviewCount: numberOrZero(raw.pendingReviewCount),
     documents,
   };
+  if (includePricing) {
+    order.customerCost = money(raw.customerCost);
+    order.rateReason = oneOf(raw.rateReason, RATE_REASONS);
+  }
+  return order;
+}
+
+/** The order shape that may be sent to this viewer. Regular EMIT users get no pricing keys at all. */
+export function presentCustomerOrder(order: CustomerOrder, role: string | null | undefined): CustomerOrder {
+  return serializeCustomerOrder(order, { includePricing: canSeePricing(role) });
 }
 
 function numberOrZero(value: unknown): number {
@@ -177,6 +194,7 @@ export function toPublicTracking(order: CustomerOrder): PublicTracking {
     shipDate: order.shipDate,
     mustDeliverDate: order.mustDeliverDate,
     truckType: order.truckType,
+    trackingLink: order.trackingLink ?? null,
   };
 }
 

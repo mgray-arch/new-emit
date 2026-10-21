@@ -4,13 +4,17 @@ import { useEffect, useMemo, useState } from "react";
 import LoadForm, { draftFromOrder, emptyDraft, payloadFromDraft, useSites, type Draft } from "@/components/load-form";
 import PhotoGallery from "@/components/photo-gallery";
 import SelectLoadField from "@/components/select-load-field";
+import TrackLink from "@/components/track-link";
+import TrackingLinkField from "@/components/tracking-link-field";
 import { formatDay } from "@/lib/dates";
 import {
   STATUS_LABEL,
+  canSeePricing,
   formatLoadNumber,
   formatPlace,
   type CustomerDocument,
   type CustomerOrder,
+  type PortalRole,
   type PortalStatus,
 } from "@/lib/types";
 
@@ -100,7 +104,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   const [editing, setEditing] = useState<CustomerOrder | null>(null);
   const [creating, setCreating] = useState(startNew);
   const [draft, setDraft] = useState<Draft>(emptyDraft());
-  const [role, setRole] = useState<"customer" | "admin" | null>(null);
+  const [role, setRole] = useState<PortalRole | null>(null);
   const [submitted, setSubmitted] = useState<CustomerOrder | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
@@ -116,6 +120,14 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       .then((body) => setRole(body?.role ?? null))
       .catch(() => setRole(null));
   }, []);
+
+  const showPricing = canSeePricing(role);
+
+  useEffect(() => {
+    if (!creating && !editing) return;
+    document.documentElement.classList.add("dialog-open");
+    return () => document.documentElement.classList.remove("dialog-open");
+  }, [creating, editing]);
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -157,7 +169,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     setSaving(true);
     setFormError("");
     try {
-      const payload = payloadFromDraft(draft);
+      const payload = payloadFromDraft(draft, { includePricing: showPricing });
       const response = await fetch(editing ? `/api/orders/${editing.id}` : "/api/orders", {
         method: editing ? "PATCH" : "POST",
         headers: { "content-type": "application/json" },
@@ -300,25 +312,34 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
         <table>
           <thead>
             <tr>
-              {["PO / Order #", "Select load", "Origin", "Destination", "Truck Type", "Transit", "Ship Date/Time", "Must Deliver", "Truck ETA", "Status", "Cost", "Notes", "Files", "BOL", "Created By"].map((heading) => (
+              {["PO / Order #", "Select load", "Origin", "Destination", "Truck Type", "Transit", "Ship Date/Time", "Must Deliver", "Truck ETA", "Status", ...(showPricing ? ["Cost"] : []), "Notes", "Files", "BOL", "Created By"].map((heading) => (
                 <th key={heading}>{heading}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {data?.orders.map((order) => (
-              <tr key={order.id}>
+              <tr
+                key={order.id}
+                className="click-row"
+                tabIndex={0}
+                aria-label={`Open ${order.salesOrderNumber}`}
+                onClick={(event) => {
+                  const target = event.target as HTMLElement;
+                  if (target.closest("a, button, select, input, label, option")) return;
+                  void openEdit(order.id);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && event.target === event.currentTarget) void openEdit(order.id);
+                }}
+              >
                 <td>
-                  <span className="so">
-                    <button className="icon-btn" aria-label={`Edit ${order.salesOrderNumber}`} type="button" onClick={() => openEdit(order.id)}>
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                        <path d="M4 20h4l10-10-4-4L4 16v4z" />
-                      </svg>
-                    </button>
-                    {order.salesOrderNumber}
-                  </span>
+                  <span className="so">{order.salesOrderNumber}</span>
                 </td>
-                <td className={order.loadNumber ? undefined : "pending"}>{formatLoadNumber(order.loadNumber)}</td>
+                <td className={order.loadNumber ? undefined : "pending"}>
+                  {formatLoadNumber(order.loadNumber)}
+                  <TrackLink href={order.trackingLink} />
+                </td>
                 <td>
                   <div className="company">{order.origin.company}</div>
                   <div className="addr">{formatPlace(order.origin).replace(`${order.origin.company}, `, "")}</div>
@@ -348,7 +369,9 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                     ))}
                   </select>
                 </td>
-                <td>{order.customerCost == null ? "—" : order.customerCost.toLocaleString("en-US", { style: "currency", currency: "USD" })}</td>
+                {showPricing && (
+                  <td>{order.customerCost == null ? "—" : order.customerCost.toLocaleString("en-US", { style: "currency", currency: "USD" })}</td>
+                )}
                 <td className="notes">{order.comments || "—"}</td>
                 <td>
                   <div>{order.attachmentCount}</div>
@@ -363,7 +386,20 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       </div>
       <div className="load-cards">
         {data?.orders.map((order) => (
-          <article className="load-card" key={order.id}>
+          <article
+            className="load-card clickable"
+            key={order.id}
+            tabIndex={0}
+            aria-label={`Open ${order.salesOrderNumber}`}
+            onClick={(event) => {
+              const target = event.target as HTMLElement;
+              if (target.closest("a, button, select, input, label")) return;
+              void openEdit(order.id);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && event.target === event.currentTarget) void openEdit(order.id);
+            }}
+          >
             <h3>{order.salesOrderNumber}</h3>
             <div className="pill">{STATUS_LABEL[order.portalStatus]}</div>
             <p className={order.loadNumber ? "mini" : "mini pending"}>Select load {formatLoadNumber(order.loadNumber)}</p>
@@ -374,9 +410,10 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
             <p className="mini">
               Ship {order.shipDate || "—"} {order.shipTime || ""} · ETA {order.latestEta ? formatDay(order.latestEta.slice(0, 10)) : order.truckEta || "—"}
             </p>
-            <button className="btn secondary" type="button" onClick={() => openEdit(order.id)}>
-              Open
-            </button>
+            {showPricing && (
+              <p className="mini">{order.customerCost == null ? "Cost not set" : order.customerCost.toLocaleString("en-US", { style: "currency", currency: "USD" })}</p>
+            )}
+            <TrackLink href={order.trackingLink} />
           </article>
         ))}
       </div>
@@ -428,17 +465,27 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
               </div>
             )}
             {role === "admin" && editing && (
-              <SelectLoadField
-                orderId={editing.id}
-                loadNumber={editing.loadNumber}
-                onUpdated={(order) => {
-                  setEditing(order);
-                  setSubmitted((current) => (current?.id === order.id ? order : current));
-                }}
-              />
+              <>
+                <SelectLoadField
+                  orderId={editing.id}
+                  loadNumber={editing.loadNumber}
+                  onUpdated={(order) => {
+                    setEditing(order);
+                    setSubmitted((current) => (current?.id === order.id ? order : current));
+                  }}
+                />
+                <TrackingLinkField
+                  orderId={editing.id}
+                  trackingLink={editing.trackingLink}
+                  onUpdated={(order) => {
+                    setEditing(order);
+                    setSubmitted((current) => (current?.id === order.id ? order : current));
+                  }}
+                />
+              </>
             )}
             {formError && <p className="error">{formError}</p>}
-            <LoadForm draft={draft} setDraft={setDraft} order={editing} sites={sites} />
+            <LoadForm draft={draft} setDraft={setDraft} order={editing} sites={sites} hideCommercial={!showPricing} />
             {editing && (
               <div className="grid-2">
                 <div className="field">

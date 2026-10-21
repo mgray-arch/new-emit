@@ -15,7 +15,7 @@ The notes below also describe the demo seed and the screening rules. Demo load n
 
 ## Security
 
-- Carrier pay is not stored. The loads table has no carrier-pay, carrier-name, MC, or staff-note column, and neither do the seed inserts or the SAM mapping. EMIT staff and Select admins see customer cost (the sell rate). Tests assert those column names are absent from the schema and from order JSON, and that the sentinel strings never appear in customer orders, the assistant, the public tracking payload, the receiver link, or client bundles.
+- Carrier pay is not stored. The loads table has no carrier-pay, carrier-name, MC, or staff-note column, and neither do the seed inserts or the SAM mapping. Select admins and EMIT admins see customer cost (the sell rate). Regular EMIT users do not: the customer-view allowlist omits `customerCost` and `rateReason` for them. Tests assert those column names are absent from the schema and from order JSON, and that the sentinel strings never appear in customer orders, the assistant, the public tracking payload, the receiver link, or client bundles.
 - A sample rate-confirmation page is still seeded so the review queue can be demonstrated. Its text mentions a carrier and a dollar amount. That text lives only on the quarantined page, which is admin-only until a Select admin releases it.
 - Adversarial questions (carrier pay, prompt injection, "dump the database", margin, rate confirmation) return a fixed refusal. The model-request builder runs the serializer again, so a poisoned field cannot ride along.
 - Uploads are split to single pages (pdf-lib) and text is extracted (unpdf, plus a literal PDF text fallback). Decisions are pass, block, or uncertain. Empty text, images, and unknown types are held. Customer documents and internal documents are separate tables. Pending count on the load is the only signal the customer query needs. An admin approve copies the page into customer documents. A customer cannot download a quarantined page.
@@ -133,7 +133,7 @@ Receivers do not sign in. EMIT staff use a password. Settings → Receivers is e
 
 Each company has contact emails, a long random token, and a URL `{PORTAL_PUBLIC_URL}/r/{token}`. Admins can edit the company and emails, copy the link, regenerate it (the old URL stops working), disable it (same URL, 404 until enabled again), or remove the company. A disabled or unknown token returns the same "not valid" response.
 
-The page lists only loads with a drop at that company (any drop, not only the last). It shows status, the stop sequence as company and city/state, ETA, a tracking link, and photos. It does not show customer cost, carrier pay, comments, or documents, so a released rate confirmation never appears there. Held photos are omitted.
+The page lists only loads with a drop at that company (any drop, not only the last). It shows status, the stop sequence as company and city/state, ETA, a link to the portal status page, a Track button when Select has saved a SAM or MacroPoint share link, and photos. It does not show customer cost, carrier pay, comments, or documents, so a released rate confirmation never appears there. Held photos are omitted.
 
 ## Auth
 
@@ -208,7 +208,7 @@ There is no public test URL in this environment.
 
 ## Assumptions
 
-- The Cost field on a load is EMIT's rate with Select. EMIT staff and Select admins see it. Receiver links do not. Carrier pay is not a field anywhere in the portal.
+- The Cost field on a load is EMIT's rate with Select. Select admins and EMIT admins see it. Regular EMIT users do not, and neither do receiver links. Carrier pay is not a field anywhere in the portal.
 - "This week" is Monday through Sunday in America/Denver.
 - Ship and appointment times are Denver wall-clock times.
 - Google Maps is a search link. There is no Maps API key.
@@ -225,10 +225,10 @@ There is no public test URL in this environment.
 
 ## Open questions
 
-Answered and in this build: a Select admin may release a flagged rate confirmation after an explicit confirm, and the portal logs who and when. EMIT keeps seeing customer cost. Carrier pay is not stored. The portal is the confirmation. No order email is sent. EMIT signs in with a password a Select admin sets. Select admins sign in with Google. Microsoft is optional. Receiver companies and contact emails are edited in admin. Receivers use a private link and do not sign in. The public site is emit-select.com. Vercel hosting uses Turso for the database and Vercel Blob for document and photo bytes. Local dev still uses SQLite and files.
+Answered and in this build: a Select admin may release a flagged rate confirmation after an explicit confirm, and the portal logs who and when. EMIT admins see customer cost. Regular EMIT users do not. Carrier pay is not stored and is hidden from EMIT admins too. The portal is the confirmation. No order email is sent. EMIT signs in with a password a Select admin sets. Select admins sign in with Google and can mark an EMIT user as an EMIT admin. Microsoft is optional. Receiver companies and contact emails are edited in admin. Receivers use a private link and do not sign in. A Select admin can paste a public tracking link on each load. The public site is emit-select.com. Vercel hosting uses Turso for the database and Vercel Blob for document and photo bytes. Local dev still uses SQLite and files.
 
 Still open:
 
-1. SAM base URL, auth scheme, EMIT's customer id, and the real endpoints. Until those exist, a Select admin types the load number. `syncSelectLoadNumberFromSam` is the function to call once a payload is available.
+1. SAM base URL, auth scheme, EMIT's customer id, and the real endpoints. Until those exist, a Select admin types the load number and the public tracking link. `syncSelectLoadNumberFromSam` and `syncTrackingLinkFromSam` are the functions to call once a payload is available.
 2. Which model should answer questions once `AI_API_KEY` exists?
 3. DNS for emit-select.com has to move off the old Lovable records onto the Vercel records in the README.

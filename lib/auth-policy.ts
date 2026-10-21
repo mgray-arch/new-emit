@@ -2,7 +2,8 @@
  * Who may sign in, and through which provider.
  * EMIT staff use email and password. Microsoft Entra is optional and not required.
  * Select admins use Google. Receivers do not sign in. They open a private link.
- * The only admins are the Select addresses in SELECT_ADMIN_EMAILS.
+ * Select admins are the addresses in SELECT_ADMIN_EMAILS.
+ * An EMIT admin is a portal role a Select admin sets on the Users page. It is not an identity-provider role.
  */
 
 export type SignInRole = "customer" | "admin";

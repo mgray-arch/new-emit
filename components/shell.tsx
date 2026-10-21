@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 interface Me {
   name: string;
   email: string;
-  role: "customer" | "admin";
+  role: "customer" | "emit_admin" | "admin";
 }
 
 export default function Shell({ children }: { children: React.ReactNode }) {

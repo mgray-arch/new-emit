@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   email TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL,
-  role TEXT NOT NULL CHECK(role IN ('customer', 'admin')),
+  role TEXT NOT NULL CHECK(role IN ('customer', 'emit_admin', 'admin')),
   password_hash TEXT,
   active INTEGER NOT NULL DEFAULT 1,
   password_changed_at TEXT,
@@ -66,6 +66,8 @@ CREATE TABLE IF NOT EXISTS loads (
   truck_eta TEXT,
   latest_eta TEXT,
   tracking_token TEXT NOT NULL UNIQUE,
+  tracking_link TEXT,
+  tracking_link_source TEXT,
   customer_cost_cents INTEGER,
   rate_reason TEXT,
   comments TEXT NOT NULL DEFAULT '',
@@ -155,7 +157,7 @@ CREATE INDEX IF NOT EXISTS login_attempts_bucket ON login_attempts(bucket, creat
 export const CUSTOMER_LOAD_COLUMNS = `
   id, sales_order_number, load_number, portal_status, tracking_stage, timeline_json,
   origin_json, destination_json, stops_json, truck_type, transit, ship_date, ship_time,
-  must_deliver_date, truck_eta, latest_eta, tracking_token, customer_cost_cents,
+  must_deliver_date, truck_eta, latest_eta, tracking_token, tracking_link, customer_cost_cents,
   rate_reason, comments, created_by, created_at, updated_at, pending_review_count
 `;
 
@@ -297,7 +299,9 @@ export async function openDatabase(file?: string): Promise<SqlDatabase> {
   await migrateReceivers(db);
   await migrateStoredBytes(db);
   await migrateLoadNumbers(db);
+  await migrateTrackingLink(db);
   await migrateUserAccount(db);
+  await migrateEmitAdminRole(db);
   await db.exec(`DROP TABLE IF EXISTS outbox`);
   return db;
 }
@@ -361,16 +365,18 @@ async function migrateLoadNumbers(db: SqlDatabase): Promise<void> {
       ship_time TEXT,
       must_deliver_date TEXT,
       truck_eta TEXT,
-      latest_eta TEXT,
-      tracking_token TEXT NOT NULL UNIQUE,
-      customer_cost_cents INTEGER,
-      rate_reason TEXT,
-      comments TEXT NOT NULL DEFAULT '',
-      created_by TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      pending_review_count INTEGER NOT NULL DEFAULT 0
-    );
+  latest_eta TEXT,
+  tracking_token TEXT NOT NULL UNIQUE,
+  tracking_link TEXT,
+  tracking_link_source TEXT,
+  customer_cost_cents INTEGER,
+  rate_reason TEXT,
+  comments TEXT NOT NULL DEFAULT '',
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  pending_review_count INTEGER NOT NULL DEFAULT 0
+);
     INSERT INTO loads_migrated (
       id, sales_order_number, load_number, load_number_source, portal_status, tracking_stage, timeline_json,
       origin_json, destination_json, stops_json, truck_type, transit, ship_date, ship_time,
@@ -462,6 +468,41 @@ async function migrateReceivers(db: SqlDatabase): Promise<void> {
   await db.exec(`DROP TABLE receiver_access`);
 }
 
+/** Older databases only allowed customer and Select admin. EMIT admin is a third role. */
+async function migrateEmitAdminRole(db: SqlDatabase): Promise<void> {
+  const row = await db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'`).get();
+  const sql = String(row?.sql ?? "");
+  if (sql.includes("'emit_admin'")) return;
+  await db.exec(`
+    CREATE TABLE users_emit_admin (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('customer', 'emit_admin', 'admin')),
+      password_hash TEXT,
+      active INTEGER NOT NULL DEFAULT 1,
+      password_changed_at TEXT,
+      password_epoch INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+    INSERT INTO users_emit_admin (
+      id, email, name, role, password_hash, active, password_changed_at, password_epoch, created_at
+    )
+    SELECT
+      id, email, name, role, password_hash,
+      COALESCE(active, 1), password_changed_at, COALESCE(password_epoch, 0), created_at
+    FROM users;
+    DROP TABLE users;
+    ALTER TABLE users_emit_admin RENAME TO users;
+  `);
+}
+
+async function migrateTrackingLink(db: SqlDatabase): Promise<void> {
+  const columns = await columnNames(db, "loads");
+  if (!columns.includes("tracking_link")) await db.exec(`ALTER TABLE loads ADD COLUMN tracking_link TEXT`);
+  if (!columns.includes("tracking_link_source")) await db.exec(`ALTER TABLE loads ADD COLUMN tracking_link_source TEXT`);
+}
+
 /** Databases that allowed a receiver login role drop those users. */
 async function migrateUserRoles(db: SqlDatabase): Promise<void> {
   const row = await db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'`).get();
@@ -472,7 +513,7 @@ async function migrateUserRoles(db: SqlDatabase): Promise<void> {
       id TEXT PRIMARY KEY,
       email TEXT NOT NULL UNIQUE,
       name TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('customer', 'admin')),
+      role TEXT NOT NULL CHECK(role IN ('customer', 'emit_admin', 'admin')),
       password_hash TEXT,
       active INTEGER NOT NULL DEFAULT 1,
       password_changed_at TEXT,

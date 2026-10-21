@@ -6,20 +6,25 @@ import PhotoGallery from "@/components/photo-gallery";
 import SelectLoadField from "@/components/select-load-field";
 import Shell from "@/components/shell";
 import Timeline from "@/components/timeline";
+import TrackLink from "@/components/track-link";
+import TrackingLinkField from "@/components/tracking-link-field";
 import { formatWhen } from "@/lib/dates";
-import { STATUS_LABEL, formatLoadNumber, formatPlace, type CustomerOrder } from "@/lib/types";
+import { STATUS_LABEL, canSeePricing, formatLoadNumber, formatPlace, type CustomerOrder, type PortalRole } from "@/lib/types";
 
 export default function OrderPage() {
   const params = useParams<{ id: string }>();
   const [order, setOrder] = useState<CustomerOrder | null>(null);
-  const [canUpload, setCanUpload] = useState(false);
+  const [role, setRole] = useState<PortalRole | null>(null);
 
   useEffect(() => {
     fetch("/api/me")
       .then((response) => (response.ok ? response.json() : null))
-      .then((body) => setCanUpload(body?.role === "admin"))
-      .catch(() => setCanUpload(false));
+      .then((body) => setRole(body?.role ?? null))
+      .catch(() => setRole(null));
   }, []);
+
+  const canUpload = role === "admin";
+  const showPricing = canSeePricing(role);
 
   useEffect(() => {
     if (!params.id) return;
@@ -45,13 +50,25 @@ export default function OrderPage() {
               <p className="mini">Select has not entered the SAM load number yet. This page is the confirmation. No email is sent.</p>
             )}
             {canUpload && (
-              <SelectLoadField orderId={order.id} loadNumber={order.loadNumber} onUpdated={setOrder} />
+              <>
+                <SelectLoadField orderId={order.id} loadNumber={order.loadNumber} onUpdated={setOrder} />
+                <TrackingLinkField orderId={order.id} trackingLink={order.trackingLink} onUpdated={setOrder} />
+              </>
             )}
             <Timeline order={order} />
             <p>Latest ETA: {order.latestEta ? formatWhen(order.latestEta) : "Not posted yet"}</p>
-            <a className="track-link" href={order.trackingUrl}>
-              Public tracking link
-            </a>
+            {showPricing && (
+              <p>
+                Cost: {order.customerCost == null ? "Not set" : order.customerCost.toLocaleString("en-US", { style: "currency", currency: "USD" })}
+                {order.rateReason ? ` · ${order.rateReason}` : ""}
+              </p>
+            )}
+            <TrackLink href={order.trackingLink} />
+            <p>
+              <a className="track-link" href={order.trackingUrl}>
+                Public tracking link
+              </a>
+            </p>
             <PhotoGallery orderId={order.id} loadNumber={order.loadNumber} canUpload={canUpload} />
             <ol className="stop-list">
               {order.stops.map((stop) => (

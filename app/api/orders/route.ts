@@ -1,3 +1,4 @@
+import { presentCustomerOrder } from "@/lib/customer-view";
 import { errorResponse, json } from "@/lib/http";
 import { isSession, requireSession } from "@/lib/guard";
 import { listOrders, orderStats, submitOrder } from "@/lib/orders";
@@ -27,6 +28,7 @@ export async function GET(req: Request) {
     });
     return json({
       ...orders,
+      orders: orders.orders.map((order) => presentCustomerOrder(order, session.role)),
       stats: await orderStats(ctx),
     });
   } catch (error) {
@@ -41,7 +43,7 @@ export async function POST(req: Request) {
     const ctx = await readyPortal();
     const input = orderInputSchema.parse(await req.json());
     const result = await submitOrder(ctx, input, session);
-    return json(result, 201);
+    return json({ order: presentCustomerOrder(result.order, session.role) }, 201);
   } catch (error) {
     return errorResponse(error);
   }

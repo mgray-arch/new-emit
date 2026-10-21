@@ -334,7 +334,33 @@ describe("authenticated API", () => {
     expect(body.order.loadNumber).toBeNull();
     expect(body.confirmation).toBeUndefined();
     expectNoSecrets(body);
-    expect(body.order.customerCost).toBe(1100);
+    expect("customerCost" in body.order).toBe(false);
+    expect("rateReason" in body.order).toBe(false);
+    const stored = (await ctx.db.prepare(`SELECT customer_cost_cents FROM loads WHERE sales_order_number = ?`).get("SO-NEW-1")) as {
+      customer_cost_cents: number | null;
+    };
+    expect(stored.customer_cost_cents).toBeNull();
+    const adminCookie = await sessionCookie(adminSession());
+    const priced = await createOrderRoute(
+      new Request("http://portal.test/api/orders", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: adminCookie, host: "portal.test", origin: "http://portal.test" },
+        body: JSON.stringify({
+          salesOrderNumber: "SO-NEW-ADMIN",
+          origin: { company: "EMIT Technologies", address1: "2437 Allen Avenue", city: "Sheridan", state: "WY", postalCode: "82801" },
+          destination: { company: "Kodiak Gas Services", address1: "6801 Brooklyn Court", city: "Oklahoma City", state: "OK", postalCode: "73132" },
+          shipDate: "2026-10-20",
+          customerCost: 1100,
+          carrierPay: 8765.43,
+          carrierName: "BLACKHAWK HAULING LLC",
+          staffNotes: "INTERNAL-ONLY-SENTINEL",
+        }),
+      }),
+    );
+    expect(priced.status).toBe(201);
+    const pricedBody = await priced.json();
+    expect(pricedBody.order.customerCost).toBe(1100);
+    expectNoSecrets(pricedBody);
     const tables = (await ctx.db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`).all()) as Array<{ name: string }>;
     expect(tables.map((table) => table.name)).not.toContain("outbox");
     const columns = (await ctx.db.prepare(`PRAGMA table_info(loads)`).all()) as Array<{ name: string }>;

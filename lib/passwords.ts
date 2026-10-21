@@ -174,6 +174,13 @@ export async function assertSessionLive(
   };
 }
 
+/** Microsoft sign-in returns customer. That must not demote an EMIT admin or a Select admin. */
+function preservedRole(existing: PortalRole, incoming: PortalRole): PortalRole {
+  if (existing === "emit_admin" && incoming === "customer") return "emit_admin";
+  if (existing === "admin" && incoming !== "admin") return "admin";
+  return incoming;
+}
+
 export async function upsertExternalUser(
   ctx: PortalContext,
   input: { email: string; name: string; role: PortalRole },
@@ -182,10 +189,11 @@ export async function upsertExternalUser(
   const existing = await findUser(ctx, email);
   if (existing) {
     if (Number(existing.active) === 0) throw new PortalError("This account is deactivated.", 403);
+    const role = preservedRole(existing.role, input.role);
     await ctx.db
       .prepare(`UPDATE users SET name = ?, role = ? WHERE id = ?`)
-      .run(input.name || existing.name, input.role, existing.id);
-    return { userId: existing.id, email, name: input.name || existing.name, role: input.role };
+      .run(input.name || existing.name, role, existing.id);
+    return { userId: existing.id, email, name: input.name || existing.name, role };
   }
   const id = randomUUID();
   await ctx.db

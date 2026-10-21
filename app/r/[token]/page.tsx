@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Timeline from "@/components/timeline";
+import TrackLink from "@/components/track-link";
 import { formatDay, formatWhen } from "@/lib/dates";
 import { STAGE_LABEL, STATUS_LABEL, formatLoadNumber, type PortalStatus, type TimelineEvent, type TrackingStage } from "@/lib/types";
 
@@ -25,6 +26,7 @@ interface ReceiverLoad {
   latestEta: string | null;
   truckType: string | null;
   trackingUrl: string;
+  trackingLink: string | null;
   photos: ReceiverPhoto[];
 }
 
@@ -81,9 +83,10 @@ export default function ReceiverLinkPage() {
             {load.truckType ? ` · ${load.truckType}` : ""}
           </p>
           <p>Latest ETA: {load.latestEta ? formatWhen(load.latestEta) : "Not posted yet"}</p>
+          <TrackLink href={load.trackingLink} />
           {load.trackingUrl && (
             <p>
-              <a href={load.trackingUrl}>Tracking link</a>
+              <a href={load.trackingUrl}>Portal status</a>
             </p>
           )}
           {load.photos.length > 0 && (

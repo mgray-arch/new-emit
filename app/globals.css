@@ -19,7 +19,8 @@
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); min-height: 100%; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); min-height: 100%; max-width: 100%; }
+html.dialog-open, html.dialog-open body { overflow: hidden; }
 a { color: inherit; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
@@ -70,7 +71,7 @@ button { cursor: pointer; }
   border-bottom: 1px solid #4a3824;
 }
 
-.page { padding: 26px 22px 48px; max-width: 1440px; margin: 0 auto; }
+.page { padding: 26px 22px 48px; max-width: 1440px; margin: 0 auto; overflow-x: clip; }
 .page h1 {
   margin: 0;
   font-size: 22px;
@@ -173,18 +174,47 @@ td select {
 
 .backdrop {
   position: fixed; inset: 0; background: rgba(0,0,0,0.62);
-  display: grid; place-items: center; padding: 18px; z-index: 20;
+  display: grid; place-items: center; padding: 16px; z-index: 20;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 .dialog {
-  width: min(560px, 100%);
+  width: min(560px, calc(100vw - 32px));
+  max-width: 100%;
   max-height: min(92vh, 900px);
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
   background: #2a2e35;
   border: 1px solid #3a404a;
   border-radius: 12px;
   box-shadow: var(--shadow);
   padding: 18px 18px 16px;
 }
+.dialog .field,
+.dialog .grid-2,
+.dialog .grid-3,
+.dialog .stop-card,
+.dialog .timeline,
+.dialog .inline-field,
+.dialog .actions,
+.dialog .confirm,
+.dialog .pair,
+.dialog section {
+  max-width: 100%;
+  min-width: 0;
+}
+.dialog .grid-2 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.dialog .grid-3 { grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.6fr) minmax(0, 0.8fr); }
+.dialog .inline-field { width: 100%; }
+.dialog .inline-field input { min-width: 0; flex: 1 1 8rem; width: auto; }
+.dialog .timeline { flex-wrap: wrap; width: 100%; }
+.dialog .step { flex: 1 1 4.5rem; }
+.dialog .step small { white-space: normal; overflow-wrap: anywhere; line-height: 1.25; }
+.dialog input, .dialog select, .dialog textarea { width: 100%; max-width: 100%; }
+.dialog .actions, .dialog .pair { flex-wrap: wrap; }
+.dialog .stop-actions { max-width: 100%; }
 .dialog h2 { margin: 0; font-size: 14px; letter-spacing: 0.08em; }
 .dialog .sub { color: var(--muted); font-size: 13px; margin: 4px 0 14px; }
 .dialog-head { display: flex; justify-content: space-between; align-items: flex-start; }
@@ -240,6 +270,13 @@ td select {
 .step.done .bar { background: var(--green); }
 .step small { display: block; margin-top: 8px; color: var(--muted); font-size: 11px; }
 .track-link { color: var(--orange); font-size: 13px; }
+.track-btn { display: inline-flex; align-items: center; text-decoration: none; margin-top: 6px; padding: 6px 12px; }
+.click-row { cursor: pointer; }
+.click-row:hover td { background: rgba(255,255,255,0.03); }
+.click-row:focus-visible { outline: 2px solid var(--orange); outline-offset: -2px; }
+.load-card.clickable { cursor: pointer; }
+.load-card.clickable:hover { border-color: var(--orange); }
+.checkline { display: flex; align-items: center; gap: 8px; margin: 8px 0; color: var(--muted); font-size: 13px; }
 .photo-gallery { margin-top: 8px; }
 .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin: 8px 0; }
 .photo-card { margin: 0; background: #1c2026; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
@@ -293,7 +330,7 @@ td select {
   .load-cards { display: grid; gap: 10px; }
   .load-card { background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
   .load-card h3 { margin: 0 0 6px; font-size: 15px; }
-  .grid-2, .grid-3, .site-row { grid-template-columns: 1fr; }
+  .grid-2, .grid-3, .site-row, .dialog .grid-2, .dialog .grid-3 { grid-template-columns: minmax(0, 1fr); }
   .timeline { flex-wrap: wrap; }
   .step { min-width: 70px; }
   .topbar { align-items: flex-start; }

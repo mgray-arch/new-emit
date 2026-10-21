@@ -13,7 +13,8 @@ import type { Session } from "@/lib/types";
  * onto the customer order, and there is no fallback from carrier cost to the
  * customer rate. A SAM load number is copied only when it matches the Select
  * load-number shape. The running app does not call this client. When it does,
- * persist that number with syncSelectLoadNumberFromSam in lib/select-load.ts.
+ * persist that number with syncSelectLoadNumberFromSam and the public share
+ * link with syncTrackingLinkFromSam, both in lib/select-load.ts.
  */
 
 export interface SamClientOptions {
@@ -148,6 +149,7 @@ export function mapSamDetailToCustomer(raw: unknown): CustomerOrder {
     truckEta: null,
     latestEta: typeof tracking.eta === "string" ? tracking.eta : null,
     trackingUrl: shareUrl || trackingUrlFor(String(load.trackingToken ?? "")),
+    trackingLink: shareUrl || null,
     customerCost: pickCustomerRate(order),
     rateReason: null,
     comments: commentsFrom(order),
