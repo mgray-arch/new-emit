@@ -6,6 +6,7 @@ import type { PortalContext } from "@/lib/db";
 import { withTransaction } from "@/lib/db";
 import { ingestDocument } from "@/lib/documents";
 import { ingestCarrierPhoto, solidPng } from "@/lib/photos";
+import { backfillDropLocations } from "@/lib/locations";
 import { demoTrackingToken, timelineThrough } from "@/lib/orders";
 import type { Place, PortalStatus, RateReason, TrackingStage, TransitOption, TruckType } from "@/lib/types";
 
@@ -721,4 +722,6 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
     receivedAt: "2026-10-14T18:40:00Z",
     subject: "Arrived at Enchanted Rock",
   });
+
+  await backfillDropLocations(ctx);
 }

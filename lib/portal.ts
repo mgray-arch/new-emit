@@ -1,4 +1,5 @@
 import { demoSeedEnabled, getPortalContext, type PortalContext } from "@/lib/db";
+import { backfillDropLocations } from "@/lib/locations";
 import { seedDemo } from "@/lib/seed";
 
 type GlobalSeed = typeof globalThis & { __portalSeed?: Promise<void>; __portalTest?: PortalContext };
@@ -19,7 +20,7 @@ export async function readyPortal(): Promise<PortalContext> {
   const ctx = await getPortalContext();
   const g = globalThis as GlobalSeed;
   if (process.env.PORTAL_TEST_MODE === "1" && g.__portalTest) return ctx;
-  if (!g.__portalSeed) g.__portalSeed = seedIfEmpty(ctx);
+  if (!g.__portalSeed) g.__portalSeed = seedIfEmpty(ctx).then(() => backfillDropLocations(ctx));
   await g.__portalSeed;
   return ctx;
 }

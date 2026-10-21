@@ -11,7 +11,9 @@ The notes below also describe the demo seed and the screening rules. Demo load n
 3. **Ask about an SO.** "where is SO2196?" answers from shipment data. "what are you paying the truck?" is refused and does not include a dollar amount. With no AI key, the built-in answerer is used. If `AI_API_KEY` is set, the model receives only the customer-safe JSON.
 4. **Search, pagination, mobile.** Search matches SO or city. Page size is 8. Upcoming ship dates are listed first. Below 980px the table becomes stacked cards.
 
-`npm test` — 31 tests passed (18 security, 4 stops, 4 access, 3 carrier photos, 2 boundary).
+Saved delivery locations are searched from the drop stop. Pickup yards stay the one-tap list. A one-off pickup is not added to that list. Duplicate docks are caught in the form and again on the server. A drop whose company matches a receiver is linked to that receiver.
+
+`npm test` — 49 tests passed, including location duplicate detection.
 
 ## Security
 

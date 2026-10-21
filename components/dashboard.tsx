@@ -166,6 +166,10 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       setFormError("Add at least one pickup and one drop.");
       return;
     }
+    if (draft.stops.some((stop) => stop.duplicateOf && !stop.saveAsNew)) {
+      setFormError("This looks like a duplicate. Use the existing location, or save it as new.");
+      return;
+    }
     setSaving(true);
     setFormError("");
     try {
@@ -176,6 +180,47 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
         body: JSON.stringify(payload),
       });
       const body = await response.json();
+      if (response.status === 409 && Array.isArray(body.duplicates)) {
+        const duplicates = body.duplicates as Array<{
+          stopId?: string;
+          location?: {
+            id: string;
+            company: string;
+            address1: string;
+            address2?: string;
+            city: string;
+            state: string;
+            postalCode?: string;
+            country?: string;
+            receiverCompany?: string | null;
+          };
+        }>;
+        const warnings = new Map(duplicates.map((item) => [item.stopId, item.location]));
+        setDraft({
+          ...draft,
+          stops: draft.stops.map((stop) => {
+            const location = warnings.get(stop.id);
+            if (!location) return stop;
+            return {
+              ...stop,
+              saveAsNew: false,
+              duplicateOf: {
+                id: location.id,
+                company: location.receiverCompany || location.company,
+                address1: location.address1,
+                address2: location.address2 ?? "",
+                city: location.city,
+                state: location.state,
+                postalCode: location.postalCode ?? "",
+                country: location.country || "US",
+                receiverCompany: location.receiverCompany ?? null,
+              },
+            };
+          }),
+        });
+        setFormError(body.error || "This looks like a duplicate.");
+        return;
+      }
       if (!response.ok) throw new Error(body.error || "Could not save");
       if (!editing) {
         setSubmitted(body.order);

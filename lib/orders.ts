@@ -8,6 +8,7 @@ import { listCustomerDocuments } from "@/lib/documents";
 import { PortalError } from "@/lib/http";
 import type { CustomerOrder, PortalStatus, Session, TimelineEvent, TrackingStage } from "@/lib/types";
 import { STAGE_LABEL, TRACKING_STAGES, canSeePricing } from "@/lib/types";
+import { syncStopLocations } from "@/lib/locations";
 import { legacyStops, resolvedRoute } from "@/lib/stops";
 import type { OrderInput, OrderPatch } from "@/lib/validate";
 import type { Stop } from "@/lib/types";
@@ -299,11 +300,14 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
   const portalStatus = input.portalStatus ?? "being_prepared";
   const trackingStage = advanceStage("submitted", portalStatus);
   const timeline = timelineThrough(trackingStage, now);
-  const route = routeFrom(input);
+  const drafted = routeFrom(input);
   const seePricing = canSeePricing(actor.role);
   const customerCost = seePricing ? input.customerCost : undefined;
   const rateReason = seePricing ? input.rateReason : undefined;
+  let route = drafted;
   await withTransaction(ctx.db, async () => {
+    const syncedStops = await syncStopLocations(ctx, drafted.stops, actor.name, input.stops ?? []);
+    route = resolvedRoute({ stops: syncedStops });
     await ctx.db
       .prepare(
         `INSERT INTO loads (
@@ -353,7 +357,7 @@ export async function updateOrder(ctx: PortalContext, id: string, patch: OrderPa
   const trackingStage = advanceStage(current.trackingStage, portalStatus);
   const timeline =
     trackingStage === current.trackingStage ? current.timeline : timelineThrough(trackingStage, ctx.now().toISOString());
-  const route = patch.stops
+  const drafted = patch.stops
     ? routeFrom({ stops: patch.stops })
     : routeFrom({
         stops: current.stops.map((stop, index) => {
@@ -369,7 +373,11 @@ export async function updateOrder(ctx: PortalContext, id: string, patch: OrderPa
       });
   const now = ctx.now().toISOString();
   const seePricing = canSeePricing(actor.role);
-  await ctx.db
+  let route = drafted;
+  await withTransaction(ctx.db, async () => {
+    const syncedStops = await syncStopLocations(ctx, drafted.stops, actor.name, patch.stops ?? drafted.stops, current.stops);
+    route = resolvedRoute({ stops: syncedStops });
+    await ctx.db
     .prepare(
       `UPDATE loads SET
          sales_order_number = ?, portal_status = ?, tracking_stage = ?, timeline_json = ?,
@@ -402,6 +410,7 @@ export async function updateOrder(ctx: PortalContext, id: string, patch: OrderPa
       now,
       id,
     );
+  });
   void actor;
   const updated = await getOrder(ctx, id);
   if (!updated) throw new PortalError("Order not found", 404);

@@ -139,6 +139,16 @@ There are three roles. **Select admin** (`admin`) signs in with Google and can o
 
 EMIT's cost and the rate reason are included only for Select admins and EMIT admins. A regular EMIT user does not receive those fields from the list, the load detail, a document upload, or the assistant, and a save from that user leaves the stored cost alone. Carrier pay is hidden from EMIT admins too.
 
+## Locations
+
+Delivery stops search a saved list of drops. One field matches company, city, or street, with the most-used docks first. Picking a result fills the stop. Add new location opens the address on that same stop, and saving the load adds it to the list.
+
+A likely duplicate (same dock with different capitalization, St/Street, a suite line, or a ZIP+4, or a close company name) asks you to use the existing location or save it as new. The server applies the same check. An exact address is reused instead of creating a second row.
+
+Pickup stops keep the EMIT yards as large one-tap choices. Other pickup location is for that load only. It is not added to the yard list. Select admins edit the yards on Settings. EMIT admins can list, edit, merge, and deactivate drops on Locations, and they see the yards but cannot change them.
+
+A drop is linked to a receiver when the company name matches, so the receiver page still finds the load.
+
 ## Tracking links
 
 Each load has a tracking link, separate from the portal status page. A Select admin pastes the public SAM or MacroPoint URL on the load. EMIT users and receivers get a Track button when it is set. The link has to be http or https. Clearing the field removes the button.

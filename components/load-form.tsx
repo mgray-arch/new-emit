@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { StopPlace, type DraftStop } from "@/components/stop-place";
 import Timeline from "@/components/timeline";
 import TrackLink from "@/components/track-link";
 import { formatWhen } from "@/lib/dates";
@@ -10,7 +11,6 @@ import {
   TRANSIT_OPTIONS,
   TRUCK_TYPES,
   formatLoadNumber,
-  mapsUrl,
   type CustomerOrder,
   type Place,
   type PortalStatus,
@@ -23,7 +23,7 @@ export interface Draft {
   salesOrderNumber: string;
   origin: Place;
   destination: Place;
-  stops: Stop[];
+  stops: DraftStop[];
   portalStatus: PortalStatus;
   truckType: string;
   transit: string;
@@ -36,7 +36,15 @@ export interface Draft {
   comments: string;
 }
 
-const emptyPlace = (): Place => ({ company: "", address1: "", city: "", state: "", postalCode: "", country: "US" });
+const emptyPlace = (): Place => ({
+  company: "",
+  address1: "",
+  address2: "",
+  city: "",
+  state: "",
+  postalCode: "",
+  country: "US",
+});
 
 function newStopId(): string {
   return crypto.randomUUID();
@@ -103,7 +111,24 @@ export function payloadFromDraft(draft: Draft, options?: { includePricing?: bool
     salesOrderNumber: draft.salesOrderNumber,
     origin: draft.origin,
     destination: draft.destination,
-    stops: draft.stops,
+    stops: draft.stops.map((stop) => ({
+      id: stop.id,
+      kind: stop.kind,
+      place: {
+        company: stop.place.company,
+        address1: stop.place.address1,
+        address2: stop.place.address2 ?? "",
+        city: stop.place.city,
+        state: stop.place.state,
+        postalCode: stop.place.postalCode,
+        country: stop.place.country || "US",
+      },
+      locationId: stop.locationId ?? null,
+      ...(stop.saveAsNew ? { saveAsNew: true } : {}),
+      ...(stop.contact ? { contact: stop.contact } : {}),
+      ...(stop.phone ? { phone: stop.phone } : {}),
+      ...(stop.notes ? { notes: stop.notes } : {}),
+    })),
     portalStatus: draft.portalStatus,
     truckType: draft.truckType || null,
     transit: draft.transit || null,
@@ -119,87 +144,6 @@ export function payloadFromDraft(draft: Draft, options?: { includePricing?: bool
       : {}),
     comments: draft.comments,
   };
-}
-
-function PlaceFields({
-  label,
-  place,
-  sites,
-  onChange,
-}: {
-  label: string;
-  place: Place;
-  sites: Site[];
-  onChange: (place: Place) => void;
-}) {
-  return (
-    <div className="field">
-      <label>{label}</label>
-      {sites.length > 0 && (
-        <select
-          aria-label={`${label} site`}
-          value=""
-          onChange={(event) => {
-            const site = sites.find((item) => item.id === event.target.value);
-            if (!site) return;
-            onChange({
-              company: site.company,
-              address1: site.address1,
-              city: site.city,
-              state: site.state,
-              postalCode: site.postalCode,
-              country: site.country || "US",
-            });
-          }}
-        >
-          <option value="">Fill from a ship-from site</option>
-          {sites.map((site) => (
-            <option key={site.id} value={site.id}>
-              {site.company} — {site.city}, {site.state}
-            </option>
-          ))}
-        </select>
-      )}
-      <input
-        aria-label={`${label} company`}
-        placeholder="Company name"
-        value={place.company}
-        onChange={(event) => onChange({ ...place, company: event.target.value })}
-      />
-      <input
-        aria-label={`${label} street`}
-        placeholder="Street address"
-        value={place.address1}
-        onChange={(event) => onChange({ ...place, address1: event.target.value })}
-      />
-      <div className="grid-3">
-        <input
-          aria-label={`${label} city`}
-          placeholder="City"
-          value={place.city}
-          onChange={(event) => onChange({ ...place, city: event.target.value })}
-        />
-        <input
-          aria-label={`${label} state`}
-          placeholder="ST"
-          maxLength={2}
-          value={place.state}
-          onChange={(event) => onChange({ ...place, state: event.target.value.toUpperCase() })}
-        />
-        <input
-          aria-label={`${label} postal code`}
-          placeholder="Postal"
-          value={place.postalCode}
-          onChange={(event) => onChange({ ...place, postalCode: event.target.value })}
-        />
-      </div>
-      {place.address1 && place.city && (
-        <a className="track-link" href={mapsUrl(place)} target="_blank" rel="noreferrer">
-          Open address in Google Maps
-        </a>
-      )}
-    </div>
-  );
 }
 
 function StopsEditor({
@@ -319,18 +263,30 @@ function StopsEditor({
               value={stop.kind}
               disabled={readOnly}
               onChange={(event) =>
-                commit(draft.stops.map((item) => (item.id === stop.id ? { ...item, kind: event.target.value as StopKind } : item)))
+                commit(
+                  draft.stops.map((item) =>
+                    item.id === stop.id
+                      ? {
+                          ...item,
+                          kind: event.target.value as StopKind,
+                          locationId: null,
+                          saveAsNew: false,
+                          duplicateOf: null,
+                        }
+                      : item,
+                  ),
+                )
               }
             >
               <option value="pickup">Pickup</option>
               <option value="drop">Drop</option>
             </select>
           </div>
-          <PlaceFields
-            label={`Stop ${index + 1}`}
-            place={stop.place}
+          <StopPlace
+            stop={stop}
             sites={stop.kind === "pickup" ? sites : []}
-            onChange={(place) => commit(draft.stops.map((item) => (item.id === stop.id ? { ...item, place } : item)))}
+            readOnly={readOnly}
+            onChange={(next) => commit(draft.stops.map((item) => (item.id === stop.id ? next : item)))}
           />
         </article>
       ))}

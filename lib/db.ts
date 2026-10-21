@@ -149,6 +149,29 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 );
 
 CREATE INDEX IF NOT EXISTS login_attempts_bucket ON login_attempts(bucket, created_at);
+
+CREATE TABLE IF NOT EXISTS locations (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK(kind IN ('drop', 'pickup_once')),
+  company TEXT NOT NULL,
+  address1 TEXT NOT NULL,
+  address2 TEXT NOT NULL DEFAULT '',
+  city TEXT NOT NULL,
+  state TEXT NOT NULL,
+  postal_code TEXT NOT NULL DEFAULT '',
+  country TEXT NOT NULL DEFAULT 'US',
+  contact TEXT NOT NULL DEFAULT '',
+  phone TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  receiver_id TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_used_at TEXT,
+  use_count INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS locations_kind ON locations(kind, active, use_count);
 `;
 
 /**

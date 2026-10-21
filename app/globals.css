@@ -324,6 +324,44 @@ td select {
 .confirm-box { border: 1px solid #e08a2f; border-radius: 10px; padding: 10px; margin-top: 8px; display: grid; gap: 8px; }
 .link-box { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
 
+.site-chips { display: flex; flex-wrap: wrap; gap: 10px; width: 100%; }
+.site-chip {
+  flex: 1 1 140px;
+  max-width: 100%;
+  min-width: 0;
+  text-align: left;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: grid;
+  gap: 4px;
+}
+.site-chip.on { border-color: var(--orange); background: #2a241c; }
+.site-chip strong { font-size: 14px; }
+.site-chip span, .loc-hit span, .place-summary span, .loc-card span { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.loc-results, .loc-list { display: grid; gap: 10px; width: 100%; }
+.loc-hit, .text-link { max-width: 100%; }
+.loc-hit {
+  text-align: left;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: grid;
+  gap: 4px;
+}
+.text-link { background: none; border: 0; color: var(--orange); padding: 8px 0; text-align: left; text-decoration: none; display: inline-block; }
+.dup-card { border: 1px solid var(--orange); border-radius: 12px; padding: 14px; display: grid; gap: 10px; }
+.dup-card p { margin: 0; }
+.dup-actions, .loc-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.loc-actions select { max-width: 100%; min-width: 0; background: var(--bg-input); border: 1px solid #3c424d; border-radius: 8px; padding: 8px 10px; }
+.loc-card { background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; padding: 18px; display: grid; gap: 8px; }
+.place-summary { display: grid; gap: 4px; }
+.loc-search { display: block; width: min(480px, 100%); margin: 0 0 16px; }
+.dialog .site-chips, .dialog .loc-results, .dialog .dup-card, .dialog .loc-hit, .dialog .place-summary { max-width: 100%; min-width: 0; }
+.page h2 { margin: 28px 0 0; font-size: 16px; letter-spacing: 0.06em; }
+
 @media (max-width: 980px) {
   .stats { grid-template-columns: 1fr 1fr; }
   .table-wrap { display: none; }
@@ -334,6 +372,8 @@ td select {
   .timeline { flex-wrap: wrap; }
   .step { min-width: 70px; }
   .topbar { align-items: flex-start; }
+  .loc-actions, .loc-actions select, .dup-actions, .dup-actions .btn { width: 100%; }
+  .site-chip { flex-basis: 100%; }
 }
 @media (max-width: 640px) {
   .stop-actions { flex-basis: 100%; }

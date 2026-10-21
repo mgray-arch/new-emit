@@ -22,6 +22,14 @@ export async function requireAdmin(req: Request): Promise<Session | Response> {
   return session;
 }
 
+/** Saved delivery locations. EMIT admins can manage drops. They cannot edit EMIT pickup sites. */
+export async function requireLocationEditor(req: Request): Promise<Session | Response> {
+  const session = await requireSession(req);
+  if (session instanceof Response) return session;
+  if (session.role !== "admin" && session.role !== "emit_admin") return forbidden();
+  return session;
+}
+
 export function isSession(value: Session | Response): value is Session {
   return !(value instanceof Response);
 }

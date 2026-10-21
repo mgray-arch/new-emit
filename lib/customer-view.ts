@@ -47,6 +47,7 @@ export function serializePlace(value: unknown): Place {
   return {
     company: str(place.company),
     address1: str(place.address1),
+    address2: str(place.address2),
     city: str(place.city),
     state: str(place.state),
     postalCode: str(place.postalCode),
@@ -97,6 +98,7 @@ function serializeStops(value: unknown, origin: Place, destination: Place): Stop
         id: str(row.id) || `stop-${parsed.length + 1}`,
         kind,
         place: serializePlace(row.place),
+        locationId: typeof row.locationId === "string" && row.locationId ? row.locationId : null,
       });
     }
   }

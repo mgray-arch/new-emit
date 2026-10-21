@@ -57,6 +57,11 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           <Link href="/ask" className={pathname === "/ask" ? "active" : ""}>
             Ask about an SO
           </Link>
+          {(me?.role === "admin" || me?.role === "emit_admin") && (
+            <Link href="/locations" className={pathname === "/locations" ? "active" : ""}>
+              Locations
+            </Link>
+          )}
           {me?.role === "admin" && (
             <>
               <Link href="/admin" className={pathname === "/admin" ? "active" : ""}>

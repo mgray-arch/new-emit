@@ -52,6 +52,7 @@ export const STAGE_LABEL: Record<TrackingStage, string> = {
 export interface Place {
   company: string;
   address1: string;
+  address2?: string;
   city: string;
   state: string;
   postalCode: string;
@@ -65,6 +66,8 @@ export interface Stop {
   id: string;
   kind: StopKind;
   place: Place;
+  /** Saved drop this stop was filled from. Empty for a one-off pickup. */
+  locationId?: string | null;
 }
 
 /** Public tracking lists the sequence without street addresses. */
@@ -150,6 +153,11 @@ export function canSeePricing(role: string | null | undefined): boolean {
   return role === "admin" || role === "emit_admin";
 }
 
+/** Saved delivery locations. Select admins and EMIT admins. Pickup sites stay with Select admins. */
+export function canManageLocations(role: string | null | undefined): boolean {
+  return role === "admin" || role === "emit_admin";
+}
+
 export interface Session {
   userId: string;
   email: string;
@@ -213,7 +221,7 @@ export function formatLoadNumber(loadNumber: string | null | undefined): string 
 
 export function formatPlace(place: Place): string {
   const cityLine = [place.city, place.state].filter(Boolean).join(", ");
-  return [place.company, place.address1, cityLine, place.postalCode].filter(Boolean).join(", ");
+  return [place.company, place.address1, place.address2, cityLine, place.postalCode].filter(Boolean).join(", ");
 }
 
 export function mapsUrl(place: Place): string {

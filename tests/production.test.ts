@@ -311,7 +311,8 @@ describe("Select load numbers", () => {
       loads: [{ loadNumber: "458935-1", carrierCost: 8765.43 }],
     });
     expect(synced.loadNumber).toBe("458935-1");
-    expect(JSON.stringify(synced)).not.toMatch(/carrierCost|8765/);
+    expect("carrierCost" in synced).toBe(false);
+    expect(JSON.stringify(synced)).not.toMatch(/carrierCost|8765\.43|8,765/);
     const source = await ctx.db.prepare(`SELECT load_number_source FROM loads WHERE id = ?`).get(other.id);
     expect(source?.load_number_source).toBe("sam");
     const unchanged = await syncSelectLoadNumberFromSam(ctx, other.id, { loads: [{ transitStatus: "Open" }] });
