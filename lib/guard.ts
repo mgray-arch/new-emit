@@ -1,4 +1,6 @@
 import { forbidden, json, unauthorized } from "@/lib/http";
+import { findUser } from "@/lib/passwords";
+import { readyPortal } from "@/lib/portal";
 import { readSession, sameOrigin } from "@/lib/session";
 import type { Session } from "@/lib/types";
 
@@ -8,7 +10,9 @@ export async function requireSession(req: Request): Promise<Session | Response> 
   }
   const session = await readSession(req);
   if (!session) return unauthorized();
-  return session;
+  const user = await findUser(await readyPortal(), session.email);
+  if (!user?.active) return unauthorized();
+  return { userId: user.id, email: user.email, name: user.name, role: user.role };
 }
 
 export async function requireAdmin(req: Request): Promise<Session | Response> {

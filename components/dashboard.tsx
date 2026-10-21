@@ -4,12 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import LoadForm, { draftFromOrder, emptyDraft, payloadFromDraft, useSites, type Draft } from "@/components/load-form";
 import PhotoGallery from "@/components/photo-gallery";
 import { formatDay } from "@/lib/dates";
+import { formatLoadNumber } from "@/lib/load-number";
 import {
   STATUS_LABEL,
   formatPlace,
   type CustomerDocument,
   type CustomerOrder,
-  type OrderConfirmation,
   type PortalStatus,
 } from "@/lib/types";
 
@@ -100,7 +100,9 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   const [creating, setCreating] = useState(startNew);
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [role, setRole] = useState<"customer" | "admin" | null>(null);
-  const [confirmation, setConfirmation] = useState<OrderConfirmation | null>(null);
+  const [revision, setRevision] = useState(0);
+  const [loadNumberDraft, setLoadNumberDraft] = useState("");
+  const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
 
@@ -133,7 +135,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
         setError("");
       })
       .catch(() => setError("Could not load orders"));
-  }, [status, query, shipFrom, shipTo, page, confirmation, editing]);
+  }, [status, query, shipFrom, shipTo, page, revision, editing]);
 
   const stats = data?.stats ?? { total: 0, being_prepared: 0, ready_to_ship: 0, shipped: 0, cancelled: 0 };
 
@@ -143,7 +145,8 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     const body = await response.json();
     setEditing(body.order);
     setDraft(draftFromOrder(body.order));
-    setConfirmation(body.confirmation);
+    setLoadNumberDraft(body.order.loadNumber ?? "");
+    setNotice("");
     setFormError("");
     setCreating(false);
   }
@@ -156,7 +159,8 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     setSaving(true);
     setFormError("");
     try {
-      const payload = payloadFromDraft(draft);
+      const payload: Record<string, unknown> = payloadFromDraft(draft);
+      if (editing && role === "admin") payload.loadNumber = loadNumberDraft.trim();
       const response = await fetch(editing ? `/api/orders/${editing.id}` : "/api/orders", {
         method: editing ? "PATCH" : "POST",
         headers: { "content-type": "application/json" },
@@ -164,14 +168,18 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Could not save");
+      setRevision((value) => value + 1);
       if (!editing) {
-        setConfirmation(body.confirmation);
+        setNotice("Order saved. The Select load number stays pending until a Select admin enters the number from SAM.");
         setEditing(body.order);
         setDraft(draftFromOrder(body.order));
+        setLoadNumberDraft(body.order.loadNumber ?? "");
         setCreating(false);
       } else {
         setEditing(body.order);
         setDraft(draftFromOrder(body.order));
+        setLoadNumberDraft(body.order.loadNumber ?? "");
+        setNotice(body.order.loadNumber ? `Select load ${body.order.loadNumber} saved.` : "Select load number is pending.");
       }
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Could not save");
@@ -287,7 +295,8 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
             setCreating(true);
             setEditing(null);
             setDraft(emptyDraft());
-            setConfirmation(null);
+            setLoadNumberDraft("");
+            setNotice("");
             setFormError("");
           }}
         >
@@ -299,7 +308,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
         <table>
           <thead>
             <tr>
-              {["PO / Order #", "Origin", "Destination", "Truck Type", "Transit", "Ship Date/Time", "Must Deliver", "Truck ETA", "Status", "Cost", "Notes", "Files", "BOL", "Created By"].map((heading) => (
+              {["PO / Order #", "Select load", "Origin", "Destination", "Truck Type", "Transit", "Ship Date/Time", "Must Deliver", "Truck ETA", "Status", "Cost", "Notes", "Files", "BOL", "Created By"].map((heading) => (
                 <th key={heading}>{heading}</th>
               ))}
             </tr>
@@ -317,6 +326,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                     {order.salesOrderNumber}
                   </span>
                 </td>
+                <td>{formatLoadNumber(order.loadNumber)}</td>
                 <td>
                   <div className="company">{order.origin.company}</div>
                   <div className="addr">{formatPlace(order.origin).replace(`${order.origin.company}, `, "")}</div>
@@ -363,6 +373,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
         {data?.orders.map((order) => (
           <article className="load-card" key={order.id}>
             <h3>{order.salesOrderNumber}</h3>
+            <div className="pill">{formatLoadNumber(order.loadNumber)}</div>
             <div className="pill">{STATUS_LABEL[order.portalStatus]}</div>
             <p>
               {order.origin.city}, {order.origin.state} → {order.destination.city}, {order.destination.state}
@@ -411,22 +422,17 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                 ✕
               </button>
             </div>
-            {confirmation && (
-              <div className="confirm">
-                <strong>Order confirmed</strong>
-                <div className="pair">
-                  <span>{confirmation.salesOrderNumber}</span>
-                  <span>→</span>
-                  <b>Select load {confirmation.loadNumber}</b>
-                </div>
-                <p className="mini">
-                  Confirmation prepared for {confirmation.emailedTo}
-                  {confirmation.sender ? ` from ${confirmation.sender}` : ""}.{" "}
-                  {confirmation.delivered
-                    ? "Sent from the Select Gmail account."
-                    : "Stored in the outbox. It sends when the Select Gmail account is configured."}
-                </p>
-                <pre className="email-preview">{confirmation.subject}{"\n\n"}{confirmation.body}</pre>
+            {notice && <p className="mini">{notice}</p>}
+            {editing && role === "admin" && (
+              <div className="field">
+                <label htmlFor="select-load-number">Select load number</label>
+                <input
+                  id="select-load-number"
+                  value={loadNumberDraft}
+                  placeholder="458934-1"
+                  onChange={(event) => setLoadNumberDraft(event.target.value)}
+                />
+                <p className="mini">From SAM, after the load is built there. Leave blank to keep it pending. EMIT does not see a number until this is saved.</p>
               </div>
             )}
             {formError && <p className="error">{formError}</p>}

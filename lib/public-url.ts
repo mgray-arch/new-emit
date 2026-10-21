@@ -1,4 +1,4 @@
-/** Origin used in tracking links, receiver links, and confirmation emails. */
+/** Origin used in tracking links and receiver links. */
 export function portalPublicUrl(): string {
   const explicit = process.env.PORTAL_PUBLIC_URL?.trim();
   if (explicit) return explicit.replace(/\/$/, "");

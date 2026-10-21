@@ -5,8 +5,9 @@ import { CUSTOMER_LOAD_COLUMNS, withTransaction } from "@/lib/db";
 import { serializeCustomerOrder, trackingUrlFor } from "@/lib/customer-view";
 import { denverDate } from "@/lib/dates";
 import { listCustomerDocuments } from "@/lib/documents";
-import { sendOrderConfirmation } from "@/lib/email";
 import { PortalError } from "@/lib/http";
+import { normalizeSelectLoadNumber, type LoadNumberSource } from "@/lib/load-number";
+import { selectLoadNumberFromSam } from "@/lib/sam";
 import type { CustomerOrder, PortalStatus, Session, TimelineEvent, TrackingStage } from "@/lib/types";
 import { STAGE_LABEL, TRACKING_STAGES } from "@/lib/types";
 import { legacyStops, resolvedRoute } from "@/lib/stops";
@@ -41,7 +42,7 @@ export interface OrderStats {
 interface LoadRow {
   id: string;
   sales_order_number: string;
-  load_number: string;
+  load_number: string | null;
   portal_status: string;
   tracking_stage: string;
   timeline_json: string;
@@ -82,7 +83,7 @@ async function rowToOrder(ctx: PortalContext, row: LoadRow, withDocuments: boole
   return serializeCustomerOrder({
     id: row.id,
     salesOrderNumber: row.sales_order_number,
-    loadNumber: row.load_number,
+    loadNumber: row.load_number?.trim() ? row.load_number.trim() : null,
     portalStatus: row.portal_status,
     trackingStage: row.tracking_stage,
     timeline: JSON.parse(row.timeline_json),
@@ -258,16 +259,6 @@ export async function orderStats(ctx: PortalContext, receiverCompany?: string | 
   return stats;
 }
 
-async function nextLoadNumber(ctx: PortalContext): Promise<string> {
-  const rows = await ctx.db.prepare(`SELECT load_number FROM loads`).all();
-  let max = 900100;
-  for (const row of rows) {
-    const value = Number(String(row.load_number).split("-")[0]);
-    if (Number.isFinite(value) && value > max) max = value;
-  }
-  return `${max + 1}-1`;
-}
-
 export function timelineThrough(stage: TrackingStage, at: string): TimelineEvent[] {
   const index = TRACKING_STAGES.indexOf(stage);
   return TRACKING_STAGES.slice(0, index + 1).map((item, itemIndex) => ({
@@ -299,13 +290,9 @@ function routeFrom(input: { origin?: OrderInput["origin"]; destination?: OrderIn
   }
 }
 
-export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: Session): Promise<{
-  order: CustomerOrder;
-  confirmation: Awaited<ReturnType<typeof sendOrderConfirmation>>;
-}> {
+export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: Session): Promise<CustomerOrder> {
   const now = ctx.now().toISOString();
   const id = randomUUID();
-  const loadNumber = await nextLoadNumber(ctx);
   const token = randomBytes(24).toString("base64url");
   const portalStatus = input.portalStatus ?? "being_prepared";
   const trackingStage = advanceStage("submitted", portalStatus);
@@ -326,7 +313,7 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
       .run(
         id,
         input.salesOrderNumber,
-        loadNumber,
+        null,
         portalStatus,
         trackingStage,
         JSON.stringify(timeline),
@@ -350,13 +337,67 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
   });
   const order = await getOrder(ctx, id);
   if (!order) throw new PortalError("The order could not be saved", 500);
-  const confirmation = await sendOrderConfirmation(ctx, order, actor.email);
-  return { order, confirmation };
+  return order;
+}
+
+/**
+ * Store the Select load number SAM assigned.
+ * "manual" is a Select admin, after they build the load in SAM.
+ * "sam" is reserved for a future API sync. Nothing in the portal invents a number.
+ */
+export async function assignSelectLoadNumber(
+  ctx: PortalContext,
+  orderId: string,
+  value: unknown,
+  source: LoadNumberSource,
+  actor: Session,
+): Promise<CustomerOrder> {
+  if (source === "manual" && actor.role !== "admin") {
+    throw new PortalError("Only a Select admin can set the Select load number.", 403);
+  }
+  const normalized = normalizeSelectLoadNumber(value);
+  if (normalized.error) throw new PortalError(normalized.error);
+  const existing = await ctx.db.prepare(`SELECT id FROM loads WHERE id = ?`).get(orderId);
+  if (!existing) throw new PortalError("Order not found", 404);
+  if (normalized.loadNumber) {
+    const taken = await ctx.db
+      .prepare(`SELECT id FROM loads WHERE load_number = ? AND id != ?`)
+      .get(normalized.loadNumber, orderId);
+    if (taken) throw new PortalError("That Select load number is already on another order.", 409);
+  }
+  await ctx.db
+    .prepare(`UPDATE loads SET load_number = ?, load_number_source = ?, updated_at = ? WHERE id = ?`)
+    .run(normalized.loadNumber, normalized.loadNumber ? source : null, ctx.now().toISOString(), orderId);
+  const updated = await getOrder(ctx, orderId);
+  if (!updated) throw new PortalError("Order not found", 404);
+  return updated;
+}
+
+/**
+ * Future SAM sync entry point. Not called by the running routes until the SAM API
+ * is connected. Reads the load number from a SAM payload and stores that number only.
+ */
+export async function syncSelectLoadNumberFromSam(
+  ctx: PortalContext,
+  orderId: string,
+  samPayload: unknown,
+  actor: Session,
+): Promise<CustomerOrder> {
+  const loadNumber = selectLoadNumberFromSam(samPayload);
+  if (!loadNumber) throw new PortalError("SAM did not return a Select load number.");
+  return assignSelectLoadNumber(ctx, orderId, loadNumber, "sam", actor);
 }
 
 export async function updateOrder(ctx: PortalContext, id: string, patch: OrderPatch, actor: Session): Promise<CustomerOrder> {
   const existing = (await ctx.db.prepare(`${LIST_SQL_HEAD} WHERE id = ?`).get(id)) as LoadRow | undefined;
   if (!existing) throw new PortalError("Order not found", 404);
+  if (patch.loadNumber !== undefined && actor.role !== "admin") {
+    throw new PortalError("Only a Select admin can set the Select load number.", 403);
+  }
+  if (patch.loadNumber !== undefined) {
+    const normalized = normalizeSelectLoadNumber(patch.loadNumber);
+    if (normalized.error) throw new PortalError(normalized.error);
+  }
   const current = await rowToOrder(ctx, existing, false);
   const portalStatus = patch.portalStatus ?? current.portalStatus;
   const trackingStage = advanceStage(current.trackingStage, portalStatus);
@@ -410,7 +451,9 @@ export async function updateOrder(ctx: PortalContext, id: string, patch: OrderPa
       now,
       id,
     );
-  void actor;
+  if (patch.loadNumber !== undefined) {
+    return assignSelectLoadNumber(ctx, id, patch.loadNumber, "manual", actor);
+  }
   const updated = await getOrder(ctx, id);
   if (!updated) throw new PortalError("Order not found", 404);
   return updated;

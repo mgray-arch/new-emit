@@ -20,7 +20,7 @@ export interface ReceiverRecord {
 export interface ReceiverShipment {
   id: string;
   salesOrderNumber: string;
-  loadNumber: string;
+  loadNumber: string | null;
   portalStatus: PortalStatus;
   trackingStage: TrackingStage;
   timeline: TimelineEvent[];

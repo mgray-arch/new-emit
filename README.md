@@ -1,29 +1,33 @@
 # EMIT Load Order Portal
 
-Customer portal for EMIT Technologies, a shipper of Select Transport Partners. This replaces the Lovable portal at emit-select.com. It is a test deployment only: no custom domain, and the 587 existing loads are not migrated.
+Customer portal for EMIT Technologies, a shipper of Select Transport Partners. EMIT staff enter loads here. Select builds the load in SAM and types that load number back into the portal. The portal does not send a confirmation email and does not invent a Select load number.
 
-The app is a Next.js server. Orders, the document review queue, users, and the email outbox live in Turso on Vercel, or in a local SQLite file when `TURSO_DATABASE_URL` is unset. Document and photo bytes live in Vercel Blob, or in `data/blobs` locally. A SAM TMS client is included and unit-tested, but the running app still reads and writes this store. SAM credentials are not available yet.
+The app is a Next.js server. Orders, users, and the document review queue live in Turso on Vercel, or in a local SQLite file when `TURSO_DATABASE_URL` is unset. Document and photo bytes live in Vercel Blob, or in `data/blobs` locally. A SAM TMS client is included and unit-tested. It is not called by the running app until SAM credentials exist. When they do, `syncSelectLoadNumberFromSam` in `lib/orders.ts` is the place that writes the load number SAM returned.
 
 ## Run locally
 
 ```bash
 npm ci
 cp .env.example .env.local
-# Set AUTH_SECRET to a long random string before any shared deployment.
+```
+
+For a local demo, set `DEMO_SEED=true` and `NEXT_PUBLIC_DEMO_HINT=true` in `.env.local`, and set `AUTH_SECRET` to any long string. Then:
+
+```bash
 npm run dev
 ```
 
-Open http://localhost:3000. With `DEMO_SEED=true` (the default outside production) the first start creates demo users and 24 clearly fake shipments.
+Open http://localhost:3000. The first start with `DEMO_SEED=true` creates demo users and 24 fake shipments.
 
-| Who | Email | Password | Sign-in in production |
-| --- | --- | --- | --- |
-| EMIT staff | m.gray@emit.example | Emit-Demo-2026 | Microsoft |
-| Select admin | mgray@goselect.com | Emit-Demo-2026 | Google |
-| Select admin | dmartin@goselect.com | Emit-Demo-2026 | Google |
+| Who | Email | Password |
+| --- | --- | --- |
+| EMIT staff | m.gray@emit.example | Emit-Demo-2026 |
+| Select admin | mgray@goselect.com | Emit-Demo-2026 |
+| Select admin | dmartin@goselect.com | Emit-Demo-2026 |
 
-EMIT staff use Microsoft. Select staff use Google (`mgray@goselect.com` and `dmartin@goselect.com` only). Receivers do not sign in: an admin creates a private link under Settings. The demo seed includes one Enchanted Rock LLC link. There is no EMIT admin role and no public signup. Password sign-in is for this demo. Production rejects it unless `DEMO_SEED=true` or `ALLOW_PASSWORD_LOGIN=true`.
+`DEMO_SEED=false` does not create those users or any shipments. Production uses that setting.
 
-The Microsoft and Google buttons explain what is missing until `AZURE_AD_*` and `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` are set.
+EMIT staff sign in with email and password. A Select admin creates those users under Users. Select admins sign in with Google (`mgray@goselect.com` and `dmartin@goselect.com` only). Receivers do not sign in: an admin creates a private link under Settings. Microsoft sign-in can stay in the code and is off until `AZURE_AD_*` is set. It is not required.
 
 ```bash
 npm test
@@ -34,12 +38,13 @@ npm run build && npm start
 ## What EMIT can do
 
 - Broker dashboard with status counts, status filter, ship-date range, search by SO or city, and pagination. A load can have any number of pickups and drops, reordered before or after it is saved.
-- Create and edit a load. Submitting stores the order in the mock SAM layer and shows a confirmation that pairs the sales order with Select's load number. The same message is written to the outbox and sent through the Gmail API when `EMAIL_FROM` and the Gmail OAuth values are set.
+- Create and edit a load. Submitting stores the order and shows it on the dashboard. The Select load number stays **Pending** until a Select admin enters the number from SAM (shape `458934-1`). There is no confirmation email.
 - Status timeline (Submitted, Booked, At Pickup, In Transit, Delivered), latest ETA, and a public tracking link.
-- Carrier photo gallery on each load. Select admins and EMIT can view the images. An ingest API (bearer token) and the admin upload accept jpg, png, heic, and webp only.
+- Carrier photo gallery on each load. Select admins and EMIT can view the images. An ingest API (bearer token) and the admin upload accept jpg, png, heic, and webp only. Photos attach by the real Select load number, so they wait until that number is entered.
 - Ask about an SO. Answers come from the customer-safe shipment view. With no `AI_API_KEY`, a built-in answerer handles status, location, and "this week" questions.
+- Change their own password under Password.
 
-Select admins also get the document review queue, the ship-from site list, and receiver companies. A receiver opens a private link and sees only that company's loads, tracking, and photos. The link does not show customer cost or documents.
+Select admins also get the document review queue, the ship-from site list, receiver companies, and EMIT users. A receiver opens a private link and sees only that company's loads, tracking, and photos. The link does not show customer cost or documents.
 
 ## Security boundary
 
@@ -49,38 +54,58 @@ Every upload is split into pages and screened. A clean page is stored as a custo
 
 Unauthenticated routes are the tracking link (`/track/[token]`) and a receiver's private link (`/r/[token]`). Tracking returns cities, status, timeline, and ETA. It does not return cost, comments, documents, street address, or carrier data. Demo tracking tokens are derived from the load number and are not secrets. New orders get a random token. Receiver tokens are 32 random bytes.
 
-See [docs/REPORT.md](docs/REPORT.md) for branding notes, credentials still needed, and open questions.
+Password sign-in locks an email after 5 failures in 15 minutes, and an address after 20 failures in that same window. A deactivated user cannot sign in, and an existing session stops working on the next request.
 
-## Put a preview on Vercel
+See [docs/REPORT.md](docs/REPORT.md) for branding notes and earlier design notes. The go-live steps below are the ones to follow.
 
-Turso is the database. It is hosted SQLite, so the portal keeps the same schema and the same tests. Local `npm test` and `npm run dev` do not need a Turso or Vercel account.
+## Go-live checklist
 
-1. Create the database.
-   - Open [https://turso.tech/app](https://turso.tech/app) and sign in with GitHub.
-   - Click **Create Database**.
-   - Name it `emit-portal`. Pick location **Washington, D.C. (iad)**. Create it.
-   - Copy the database URL. It starts with `libsql://`.
-   - On the database, create a token with full access. Copy the token. Turso shows it once.
+Do this in the Vercel project for **Production**. Leave the SAM API and Azure unset.
 
-2. Import the repo.
-   - In Vercel, **Add New → Project**.
-   - Import GitHub `mgray-arch/new-emit`.
-   - Framework preset **Next.js**. Production branch `main`. Leave preview deployments on.
+1. Create the Turso database if it does not exist yet.
+   - Open [https://turso.tech/app](https://turso.tech/app).
+   - Create database `emit-portal` in **Washington, D.C. (iad)**.
+   - Copy the `libsql://` URL and a full-access token.
 
-3. Create the Blob store.
-   - Open the new project's **Storage** tab. **Create → Blob**.
+2. Connect Vercel Blob.
+   - Project **Storage** → **Create** → **Blob**.
    - Name it `emit-portal` and connect it to this project.
-   - Vercel fills in `BLOB_READ_WRITE_TOKEN` for Production and Preview.
+   - Vercel sets `BLOB_READ_WRITE_TOKEN`.
 
-4. Set environment variables. Add each one for **Preview** and **Production**.
-   - `TURSO_DATABASE_URL` = the `libsql://` URL
-   - `TURSO_AUTH_TOKEN` = the token from step 1
-   - `AUTH_SECRET` = a long random string, at least 16 characters
-   - `DEMO_SEED` = `true` on Preview, `false` on Production
-   - `BLOB_READ_WRITE_TOKEN` is already set if the store is connected
+3. Set these Production variables. Names match `.env.example`.
 
-5. Deploy, then open the preview URL from the deployment page.
-   - Sign in as `mgray@goselect.com` / `Emit-Demo-2026`.
-   - Settings shows the Enchanted Rock LLC receiver link.
+   | Variable | Value |
+   | --- | --- |
+   | `AUTH_SECRET` | A long random string, at least 16 characters |
+   | `TURSO_DATABASE_URL` | The `libsql://` URL |
+   | `TURSO_AUTH_TOKEN` | The Turso token |
+   | `DEMO_SEED` | `false` |
+   | `NEXT_PUBLIC_DEMO_HINT` | `false` |
+   | `SELECT_ADMIN_EMAILS` | `mgray@goselect.com,dmartin@goselect.com` |
+   | `GOOGLE_CLIENT_ID` | Select Workspace OAuth client id |
+   | `GOOGLE_CLIENT_SECRET` | That client's secret |
+   | `GOOGLE_HOSTED_DOMAIN` | `goselect.com` |
+   | `PORTAL_PUBLIC_URL` | The production origin, once the hostname is stable. Blank until then. |
 
-Leave `PORTAL_PUBLIC_URL` blank and links use that deployment's URL. Set it after you have a stable hostname, then add that origin to the Microsoft and Google callback URLs. The other variables in `.env.example` (Google, Microsoft, Gmail, the photo ingest token) can wait until those features are turned on.
+   Do **not** set `AZURE_AD_TENANT_ID`, `AZURE_AD_CLIENT_ID`, `AZURE_AD_CLIENT_SECRET`, `SAM_API_BASE_URL`, `SAM_API_TOKEN`, or `SAM_CUSTOMER_ID` for this launch. Do **not** set `EMAIL_FROM` or any `GMAIL_*` variable. Confirmation email has been removed. Do **not** set `ALLOW_PASSWORD_LOGIN`. Password sign-in is the normal EMIT path.
+
+   `AI_API_KEY` and `CARRIER_PHOTO_INGEST_TOKEN` can wait.
+
+4. Google OAuth client (Select Google Cloud, consent screen **Internal**).
+   - Type: Web application.
+   - Redirect URI: `{PORTAL_PUBLIC_URL}/api/auth/google/callback`
+   - JavaScript origin: the origin of `PORTAL_PUBLIC_URL`
+   - Scopes: `openid`, `email`, `profile`
+
+5. Deploy Production. Open the site.
+   - The login page has email and password, plus **Select staff — Google**. It does not ask EMIT to use Microsoft.
+   - Sign in with Google as `mgray@goselect.com`.
+   - Users should be empty. Settings → Receivers should be empty. The dashboard should have no loads.
+   - Create the first EMIT user (name and email). Copy the temporary password and send it to them.
+   - That person signs in, then sets their own password under Password.
+   - They submit an order. Select load shows **Pending**.
+   - Build the load in SAM. On the order, enter the SAM load number (for example `458934-1`) and save. EMIT then sees that number. Until you enter it, they do not see a made-up number.
+
+6. When a hostname is final, set `PORTAL_PUBLIC_URL` to it and add that origin to the Google client. Tracking and receiver links use it.
+
+Preview deployments may set `DEMO_SEED=true` if you still want the fake shipments there. Production must stay `DEMO_SEED=false`.

@@ -40,8 +40,8 @@ export async function POST(req: Request) {
     if (!isSession(session)) return session;
     const ctx = await readyPortal();
     const input = orderInputSchema.parse(await req.json());
-    const result = await submitOrder(ctx, input, session);
-    return json(result, 201);
+    const order = await submitOrder(ctx, input, session);
+    return json({ order }, 201);
   } catch (error) {
     return errorResponse(error);
   }

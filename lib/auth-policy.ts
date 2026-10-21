@@ -1,6 +1,7 @@
 /**
  * Who may sign in, and through which provider.
- * EMIT staff use Microsoft. Select staff use Google.
+ * EMIT staff use email and password. Select staff use Google.
+ * Microsoft (Entra ID) is optional and is not required for go-live.
  * Receivers do not sign in. They open a private link.
  * Select never uses Microsoft. EMIT never uses Google.
  * The only admins are the Select addresses in SELECT_ADMIN_EMAILS.
@@ -82,14 +83,14 @@ export function identityFromGoogle(input: {
   if (!input.emailVerified) {
     return { ok: false, error: "Google did not confirm this email address." };
   }
+  if (isEmitStaff(normalized)) {
+    return { ok: false, error: "EMIT staff sign in with email and password, not Google." };
+  }
   if (!normalized.endsWith(`@${selectDomain()}`)) {
     return { ok: false, error: "Select staff sign in with a goselect.com Google account." };
   }
   if (input.hostedDomain && input.hostedDomain.toLowerCase() !== selectDomain()) {
     return { ok: false, error: "This Google account is not in the Select Workspace." };
-  }
-  if (isEmitStaff(normalized)) {
-    return { ok: false, error: "EMIT signs in with Microsoft, not Google." };
   }
   if (!adminEmails().includes(normalized)) {
     return { ok: false, error: "This Google account is not a Select portal admin." };

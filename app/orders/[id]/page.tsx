@@ -6,12 +6,12 @@ import PhotoGallery from "@/components/photo-gallery";
 import Shell from "@/components/shell";
 import Timeline from "@/components/timeline";
 import { formatWhen } from "@/lib/dates";
-import { STATUS_LABEL, formatPlace, type CustomerOrder, type OrderConfirmation } from "@/lib/types";
+import { formatLoadNumber } from "@/lib/load-number";
+import { STATUS_LABEL, formatPlace, type CustomerOrder } from "@/lib/types";
 
 export default function OrderPage() {
   const params = useParams<{ id: string }>();
   const [order, setOrder] = useState<CustomerOrder | null>(null);
-  const [confirmation, setConfirmation] = useState<OrderConfirmation | null>(null);
   const [canUpload, setCanUpload] = useState(false);
 
   useEffect(() => {
@@ -28,7 +28,6 @@ export default function OrderPage() {
       .then((body) => {
         if (!body) return;
         setOrder(body.order);
-        setConfirmation(body.confirmation);
       });
   }, [params.id]);
 
@@ -40,19 +39,8 @@ export default function OrderPage() {
           <>
             <h1>{order.salesOrderNumber}</h1>
             <p className="lede">
-              Select load {order.loadNumber} · {STATUS_LABEL[order.portalStatus]}
+              Select load {formatLoadNumber(order.loadNumber)} · {STATUS_LABEL[order.portalStatus]}
             </p>
-            {confirmation && (
-              <div className="confirm">
-                <strong>Order confirmed</strong>
-                <div className="pair">
-                  <span>{confirmation.salesOrderNumber}</span>
-                  <span>→</span>
-                  <b>{confirmation.loadNumber}</b>
-                </div>
-                <pre className="email-preview">{confirmation.body}</pre>
-              </div>
-            )}
             <Timeline order={order} />
             <p>Latest ETA: {order.latestEta ? formatWhen(order.latestEta) : "Not posted yet"}</p>
             <a className="track-link" href={order.trackingUrl}>

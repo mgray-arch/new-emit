@@ -66,7 +66,7 @@ export default function ReviewPage() {
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <span className={`badge ${item.screenResult}`}>{item.screenResult === "block" ? "Rate confirmation" : "Uncertain"}</span>
                 <strong>
-                  {item.salesOrderNumber || "Order"} · {item.loadNumber}
+                  {item.salesOrderNumber || "Order"} · {item.loadNumber || "Pending"}
                 </strong>
                 <span className="mini">
                   {item.filename} · page {item.pageIndex} of {item.pageCount}

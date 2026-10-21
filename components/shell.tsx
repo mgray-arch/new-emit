@@ -8,6 +8,8 @@ interface Me {
   name: string;
   email: string;
   role: "customer" | "admin";
+  mustChangePassword?: boolean;
+  hasPassword?: boolean;
 }
 
 export default function Shell({ children }: { children: React.ReactNode }) {
@@ -17,10 +19,16 @@ export default function Shell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     fetch("/api/me")
-      .then((response) => (response.ok ? response.json() : null))
+      .then((response) => {
+        if (response.status === 401) {
+          router.push("/login");
+          return null;
+        }
+        return response.ok ? response.json() : null;
+      })
       .then((data) => setMe(data))
       .catch(() => setMe(null));
-  }, []);
+  }, [router]);
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -60,8 +68,14 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               <Link href="/admin/settings" className={pathname.startsWith("/admin/settings") ? "active" : ""}>
                 Settings
               </Link>
+              <Link href="/admin/users" className={pathname.startsWith("/admin/users") ? "active" : ""}>
+                Users
+              </Link>
             </>
           )}
+          <Link href="/account" className={pathname === "/account" ? "active" : ""}>
+            Password
+          </Link>
           <span className="who">
             <span className="avatar">{initials}</span>
             {me?.name || "…"}
@@ -74,6 +88,11 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       <div className="accent-line" />
       {process.env.NEXT_PUBLIC_DEMO_HINT !== "false" && (
         <div className="demo-bar">Test environment · simulated shipments, not live SAM data</div>
+      )}
+      {me?.mustChangePassword && pathname !== "/account" && (
+        <div className="demo-bar">
+          <Link href="/account">Choose a new password</Link>. The current one was set by Select.
+        </div>
       )}
       {children}
     </>

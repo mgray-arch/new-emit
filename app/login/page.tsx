@@ -1,20 +1,28 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { safeNextPath } from "@/lib/paths";
 
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const [email, setEmail] = useState("m.gray@emit.example");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const [microsoft, setMicrosoft] = useState(false);
   const showHint = process.env.NEXT_PUBLIC_DEMO_HINT !== "false";
   const microsoftError = params.get("microsoft");
   const googleError = params.get("google");
   const queryError = params.get("error");
+
+  useEffect(() => {
+    fetch("/api/auth/providers")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body) => setMicrosoft(Boolean(body?.microsoft)))
+      .catch(() => setMicrosoft(false));
+  }, []);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -31,6 +39,11 @@ function LoginForm() {
       setError(body.error || "Could not sign in");
       return;
     }
+    if (body.mustChangePassword) {
+      router.push("/account");
+      router.refresh();
+      return;
+    }
     const next = safeNextPath(params.get("next"));
     router.push(body.role === "admin" && next === "/" ? "/admin" : next);
     router.refresh();
@@ -41,7 +54,9 @@ function LoginForm() {
       <form className="login-card" onSubmit={submit}>
         <img src="/brand/emit-logo.png" alt="EMIT" style={{ height: 42 }} />
         <h1>EMIT LOAD ORDER PORTAL</h1>
-        <p className="lede">EMIT staff sign in with Microsoft. Select staff sign in with Google. Receivers use a private link and do not sign in.</p>
+        <p className="lede">
+          EMIT staff sign in with email and password. Select staff sign in with Google. Receivers use a private link and do not sign in.
+        </p>
         {showHint && (
           <div className="demo-hint">
             <strong>Test sign-in</strong>
@@ -55,7 +70,7 @@ function LoginForm() {
             {error ||
               queryError ||
               (microsoftError
-                ? "Microsoft sign-in needs an Entra app registration. Set AZURE_AD_TENANT_ID, AZURE_AD_CLIENT_ID, and AZURE_AD_CLIENT_SECRET."
+                ? "Microsoft sign-in is optional and is not configured."
                 : "Google sign-in needs a Workspace OAuth client. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.")}
           </p>
         )}
@@ -65,20 +80,17 @@ function LoginForm() {
         </div>
         <div className="field">
           <label htmlFor="password">Password</label>
-          <input id="password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required />
+          <input
+            id="password"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            required
+          />
         </div>
         <button className="btn" type="submit" disabled={pending} style={{ width: "100%" }}>
           {pending ? "Signing in…" : "Sign in"}
-        </button>
-        <button
-          className="btn secondary"
-          type="button"
-          style={{ width: "100%", marginTop: 8 }}
-          onClick={() => {
-            window.location.href = "/api/auth/microsoft";
-          }}
-        >
-          EMIT staff — Microsoft
         </button>
         <button
           className="btn secondary"
@@ -90,6 +102,18 @@ function LoginForm() {
         >
           Select staff — Google
         </button>
+        {microsoft && (
+          <button
+            className="btn secondary"
+            type="button"
+            style={{ width: "100%", marginTop: 8 }}
+            onClick={() => {
+              window.location.href = "/api/auth/microsoft";
+            }}
+          >
+            Microsoft (optional)
+          </button>
+        )}
       </form>
     </div>
   );

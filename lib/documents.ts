@@ -267,7 +267,7 @@ export async function listReviewQueue(ctx: PortalContext): Promise<ReviewItem[]>
     id: String(row.id),
     loadId: String(row.load_id),
     salesOrderNumber: String(row.sales_order_number ?? ""),
-    loadNumber: String(row.load_number ?? ""),
+    loadNumber: row.load_number == null || String(row.load_number).trim() === "" ? null : String(row.load_number),
     kind: String(row.kind),
     screenResult: row.screen_result === "block" ? "block" : "uncertain",
     screenReason: String(row.screen_reason ?? ""),

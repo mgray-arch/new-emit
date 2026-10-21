@@ -1,8 +1,14 @@
 import { errorResponse, json } from "@/lib/http";
-import { loginWithPassword, passwordLoginAllowed } from "@/lib/passwords";
+import { loginWithPassword } from "@/lib/passwords";
 import { readyPortal } from "@/lib/portal";
 import { sameOrigin, sessionCookie, signSession } from "@/lib/session";
 import { z } from "zod";
+
+function clientAddress(req: Request): string {
+  const forwarded = req.headers.get("x-forwarded-for");
+  const raw = forwarded?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
+  return raw.slice(0, 80);
+}
 
 const bodySchema = z.object({
   email: z.string().trim().email(),
@@ -15,16 +21,18 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   try {
     if (!sameOrigin(req)) return json({ error: "Cross-origin request blocked" }, 403);
-    if (!passwordLoginAllowed()) {
-      return json({ error: "Sign in with Microsoft or Google." }, 403);
-    }
     const body = bodySchema.parse(await req.json());
     const ctx = await readyPortal();
-    const session = await loginWithPassword(ctx, body.email, body.password);
-    if (!session) return json({ error: "Invalid email or password" }, 401);
-    const token = await signSession(session);
+    const result = await loginWithPassword(ctx, body.email, body.password, clientAddress(req));
+    if (!result.ok) return json({ error: result.error }, result.status);
+    const token = await signSession(result.session);
     return json(
-      { name: session.name, email: session.email, role: session.role },
+      {
+        name: result.session.name,
+        email: result.session.email,
+        role: result.session.role,
+        mustChangePassword: result.mustChangePassword,
+      },
       200,
       { "set-cookie": sessionCookie(token) },
     );

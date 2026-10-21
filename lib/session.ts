@@ -82,6 +82,7 @@ export function clearStateCookie(): string {
 export function isPublicPath(pathname: string): boolean {
   if (pathname === "/login") return true;
   if (pathname === "/api/auth/login" || pathname === "/api/auth/logout") return true;
+  if (pathname === "/api/auth/providers") return true;
   if (pathname === "/api/auth/microsoft" || pathname.startsWith("/api/auth/microsoft/")) return true;
   if (pathname === "/api/auth/google" || pathname.startsWith("/api/auth/google/")) return true;
   if (pathname.startsWith("/track/")) return true;

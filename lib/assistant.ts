@@ -83,7 +83,8 @@ function deliveryDate(order: CustomerOrder): string | null {
 
 function compact(order: CustomerOrder): string {
   const eta = order.latestEta ? ` Latest ETA ${formatWhen(order.latestEta)}.` : "";
-  return `${order.salesOrderNumber} is Select load ${order.loadNumber}, ${STAGE_LABEL[order.trackingStage].toLowerCase()} (${STATUS_LABEL[order.portalStatus]}), ${order.origin.city}, ${order.origin.state} to ${order.destination.city}, ${order.destination.state}. Ship ${order.shipDate ?? "unscheduled"}${order.shipTime ? ` ${order.shipTime}` : ""}. Must deliver ${order.mustDeliverDate ?? "not set"}.${eta}`;
+  const loadLabel = order.loadNumber ? `Select load ${order.loadNumber}` : "Select load pending";
+  return `${order.salesOrderNumber} is ${loadLabel}, ${STAGE_LABEL[order.trackingStage].toLowerCase()} (${STATUS_LABEL[order.portalStatus]}), ${order.origin.city}, ${order.origin.state} to ${order.destination.city}, ${order.destination.state}. Ship ${order.shipDate ?? "unscheduled"}${order.shipTime ? ` ${order.shipTime}` : ""}. Must deliver ${order.mustDeliverDate ?? "not set"}.${eta}`;
 }
 
 function matchSalesOrders(question: string, orders: CustomerOrder[]): CustomerOrder[] {
@@ -91,7 +92,7 @@ function matchSalesOrders(question: string, orders: CustomerOrder[]): CustomerOr
   const found = orders.filter((order) => {
     const tokens = order.salesOrderNumber.split(/[^a-zA-Z0-9]+/).filter((token) => token.length >= 4);
     if (tokens.some((token) => normalized.includes(token.toLowerCase().replace(/[^a-z0-9]/g, "")))) return true;
-    return question.toLowerCase().includes(order.loadNumber.toLowerCase());
+    return Boolean(order.loadNumber && question.toLowerCase().includes(order.loadNumber.toLowerCase()));
   });
   return found;
 }
@@ -207,7 +208,7 @@ async function answerWithModel(question: string, orders: CustomerOrder[]): Promi
   const payload = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
   const text = payload.choices?.[0]?.message?.content?.trim() || "I couldn't form an answer from the shipment list.";
   const mentioned = orders.filter(
-    (order) => text.includes(order.salesOrderNumber) || text.includes(order.loadNumber),
+    (order) => text.includes(order.salesOrderNumber) || (order.loadNumber != null && text.includes(order.loadNumber)),
   );
   return { text, references: mentioned.map(reference), refused: false };
 }
