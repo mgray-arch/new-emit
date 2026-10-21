@@ -1,4 +1,6 @@
 import { forbidden, json, unauthorized } from "@/lib/http";
+import { assertSessionLive } from "@/lib/passwords";
+import { readyPortal } from "@/lib/portal";
 import { readSession, sameOrigin } from "@/lib/session";
 import type { Session } from "@/lib/types";
 
@@ -8,7 +10,9 @@ export async function requireSession(req: Request): Promise<Session | Response> 
   }
   const session = await readSession(req);
   if (!session) return unauthorized();
-  return session;
+  const live = await assertSessionLive(await readyPortal(), session);
+  if (!live) return unauthorized();
+  return live;
 }
 
 export async function requireAdmin(req: Request): Promise<Session | Response> {

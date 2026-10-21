@@ -125,7 +125,7 @@ export function serializeCustomerOrder(value: unknown): CustomerOrder {
   return {
     id: str(raw.id),
     salesOrderNumber: str(raw.salesOrderNumber),
-    loadNumber: str(raw.loadNumber),
+    loadNumber: strOrNull(raw.loadNumber),
     portalStatus,
     trackingStage,
     timeline: serializeTimeline(raw.timeline),

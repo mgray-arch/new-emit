@@ -3,7 +3,7 @@ import { seedDemo } from "@/lib/seed";
 
 type GlobalSeed = typeof globalThis & { __portalSeed?: Promise<void>; __portalTest?: PortalContext };
 
-async function seedIfEmpty(ctx: PortalContext): Promise<void> {
+export async function seedIfEmpty(ctx: PortalContext): Promise<void> {
   const row = await ctx.db.prepare(`SELECT COUNT(*) AS n FROM users`).get();
   if (Number(row?.n ?? 0) > 0 || !demoSeedEnabled()) return;
   try {

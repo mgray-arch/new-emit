@@ -20,7 +20,7 @@ export default function PhotoGallery({
   canUpload,
 }: {
   orderId: string;
-  loadNumber: string;
+  loadNumber: string | null;
   canUpload: boolean;
 }) {
   const [photos, setPhotos] = useState<PhotoItem[]>([]);
@@ -59,6 +59,7 @@ export default function PhotoGallery({
   }, [orderId]);
 
   async function upload(file: File) {
+    if (!loadNumber) return;
     setBusy(true);
     setNotice("");
     setError("");
@@ -106,7 +107,10 @@ export default function PhotoGallery({
           </figure>
         ))}
       </div>
-      {canUpload && (
+      {canUpload && !loadNumber && (
+        <p className="mini">Photos can be attached after a Select admin enters the SAM load number.</p>
+      )}
+      {canUpload && loadNumber && (
         <div className="photo-upload">
           <input
             aria-label="Photo source"

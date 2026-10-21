@@ -3,15 +3,15 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import PhotoGallery from "@/components/photo-gallery";
+import SelectLoadField from "@/components/select-load-field";
 import Shell from "@/components/shell";
 import Timeline from "@/components/timeline";
 import { formatWhen } from "@/lib/dates";
-import { STATUS_LABEL, formatPlace, type CustomerOrder, type OrderConfirmation } from "@/lib/types";
+import { STATUS_LABEL, formatLoadNumber, formatPlace, type CustomerOrder } from "@/lib/types";
 
 export default function OrderPage() {
   const params = useParams<{ id: string }>();
   const [order, setOrder] = useState<CustomerOrder | null>(null);
-  const [confirmation, setConfirmation] = useState<OrderConfirmation | null>(null);
   const [canUpload, setCanUpload] = useState(false);
 
   useEffect(() => {
@@ -28,7 +28,6 @@ export default function OrderPage() {
       .then((body) => {
         if (!body) return;
         setOrder(body.order);
-        setConfirmation(body.confirmation);
       });
   }, [params.id]);
 
@@ -40,18 +39,13 @@ export default function OrderPage() {
           <>
             <h1>{order.salesOrderNumber}</h1>
             <p className="lede">
-              Select load {order.loadNumber} · {STATUS_LABEL[order.portalStatus]}
+              Select load {formatLoadNumber(order.loadNumber)} · {STATUS_LABEL[order.portalStatus]}
             </p>
-            {confirmation && (
-              <div className="confirm">
-                <strong>Order confirmed</strong>
-                <div className="pair">
-                  <span>{confirmation.salesOrderNumber}</span>
-                  <span>→</span>
-                  <b>{confirmation.loadNumber}</b>
-                </div>
-                <pre className="email-preview">{confirmation.body}</pre>
-              </div>
+            {!order.loadNumber && (
+              <p className="mini">Select has not entered the SAM load number yet. This page is the confirmation. No email is sent.</p>
+            )}
+            {canUpload && (
+              <SelectLoadField orderId={order.id} loadNumber={order.loadNumber} onUpdated={setOrder} />
             )}
             <Timeline order={order} />
             <p>Latest ETA: {order.latestEta ? formatWhen(order.latestEta) : "Not posted yet"}</p>

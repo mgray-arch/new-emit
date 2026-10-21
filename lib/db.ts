@@ -29,6 +29,9 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT NOT NULL,
   role TEXT NOT NULL CHECK(role IN ('customer', 'admin')),
   password_hash TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  password_changed_at TEXT,
+  password_epoch INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
 
@@ -47,7 +50,8 @@ CREATE TABLE IF NOT EXISTS sites (
 CREATE TABLE IF NOT EXISTS loads (
   id TEXT PRIMARY KEY,
   sales_order_number TEXT NOT NULL,
-  load_number TEXT NOT NULL UNIQUE,
+  load_number TEXT UNIQUE,
+  load_number_source TEXT,
   portal_status TEXT NOT NULL,
   tracking_stage TEXT NOT NULL,
   timeline_json TEXT NOT NULL,
@@ -99,17 +103,6 @@ CREATE TABLE IF NOT EXISTS internal_documents (
   reviewed_by TEXT
 );
 
-CREATE TABLE IF NOT EXISTS outbox (
-  id TEXT PRIMARY KEY,
-  to_email TEXT NOT NULL,
-  subject TEXT NOT NULL,
-  body TEXT NOT NULL,
-  load_id TEXT,
-  created_at TEXT NOT NULL,
-  delivered INTEGER NOT NULL DEFAULT 0,
-  from_email TEXT
-);
-
 CREATE INDEX IF NOT EXISTS loads_ship_date ON loads(ship_date);
 CREATE INDEX IF NOT EXISTS loads_status ON loads(portal_status);
 CREATE INDEX IF NOT EXISTS loads_so ON loads(sales_order_number);
@@ -146,6 +139,14 @@ CREATE TABLE IF NOT EXISTS receivers (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS receivers_token ON receivers(access_token);
+
+CREATE TABLE IF NOT EXISTS login_attempts (
+  id TEXT PRIMARY KEY,
+  bucket TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS login_attempts_bucket ON login_attempts(bucket, created_at);
 `;
 
 /**
@@ -293,9 +294,11 @@ export async function openDatabase(file?: string): Promise<SqlDatabase> {
   await migrateUserRoles(db);
   await migrateStops(db);
   await migrateDropCarrierColumns(db);
-  await migrateOutboxSender(db);
   await migrateReceivers(db);
   await migrateStoredBytes(db);
+  await migrateLoadNumbers(db);
+  await migrateUserAccount(db);
+  await db.exec(`DROP TABLE IF EXISTS outbox`);
   return db;
 }
 
@@ -327,9 +330,72 @@ async function migrateDropCarrierColumns(db: SqlDatabase): Promise<void> {
   }
 }
 
-async function migrateOutboxSender(db: SqlDatabase): Promise<void> {
-  const columns = await columnNames(db, "outbox");
-  if (!columns.includes("from_email")) await db.exec(`ALTER TABLE outbox ADD COLUMN from_email TEXT`);
+/**
+ * Older databases required a load number, and the portal filled in a fake one.
+ * A missing Select load number is NULL so many orders can be pending at once.
+ */
+async function migrateLoadNumbers(db: SqlDatabase): Promise<void> {
+  const columns = await db.prepare(`PRAGMA table_info(loads)`).all();
+  const loadColumn = columns.find((column) => column.name === "load_number");
+  const hasSource = columns.some((column) => column.name === "load_number_source");
+  if (loadColumn && Number(loadColumn.notnull) === 0 && hasSource) return;
+  if (loadColumn && Number(loadColumn.notnull) === 0 && !hasSource) {
+    await db.exec(`ALTER TABLE loads ADD COLUMN load_number_source TEXT`);
+    return;
+  }
+  await db.exec(`
+    CREATE TABLE loads_migrated (
+      id TEXT PRIMARY KEY,
+      sales_order_number TEXT NOT NULL,
+      load_number TEXT UNIQUE,
+      load_number_source TEXT,
+      portal_status TEXT NOT NULL,
+      tracking_stage TEXT NOT NULL,
+      timeline_json TEXT NOT NULL,
+      origin_json TEXT NOT NULL,
+      destination_json TEXT NOT NULL,
+      stops_json TEXT,
+      truck_type TEXT,
+      transit TEXT,
+      ship_date TEXT,
+      ship_time TEXT,
+      must_deliver_date TEXT,
+      truck_eta TEXT,
+      latest_eta TEXT,
+      tracking_token TEXT NOT NULL UNIQUE,
+      customer_cost_cents INTEGER,
+      rate_reason TEXT,
+      comments TEXT NOT NULL DEFAULT '',
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      pending_review_count INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT INTO loads_migrated (
+      id, sales_order_number, load_number, load_number_source, portal_status, tracking_stage, timeline_json,
+      origin_json, destination_json, stops_json, truck_type, transit, ship_date, ship_time,
+      must_deliver_date, truck_eta, latest_eta, tracking_token, customer_cost_cents,
+      rate_reason, comments, created_by, created_at, updated_at, pending_review_count
+    )
+    SELECT
+      id, sales_order_number, NULLIF(load_number, ''), NULL, portal_status, tracking_stage, timeline_json,
+      origin_json, destination_json, stops_json, truck_type, transit, ship_date, ship_time,
+      must_deliver_date, truck_eta, latest_eta, tracking_token, customer_cost_cents,
+      rate_reason, comments, created_by, created_at, updated_at, pending_review_count
+    FROM loads;
+    DROP TABLE loads;
+    ALTER TABLE loads_migrated RENAME TO loads;
+    CREATE INDEX IF NOT EXISTS loads_ship_date ON loads(ship_date);
+    CREATE INDEX IF NOT EXISTS loads_status ON loads(portal_status);
+    CREATE INDEX IF NOT EXISTS loads_so ON loads(sales_order_number);
+  `);
+}
+
+async function migrateUserAccount(db: SqlDatabase): Promise<void> {
+  const columns = await columnNames(db, "users");
+  if (!columns.includes("active")) await db.exec(`ALTER TABLE users ADD COLUMN active INTEGER NOT NULL DEFAULT 1`);
+  if (!columns.includes("password_changed_at")) await db.exec(`ALTER TABLE users ADD COLUMN password_changed_at TEXT`);
+  if (!columns.includes("password_epoch")) await db.exec(`ALTER TABLE users ADD COLUMN password_epoch INTEGER NOT NULL DEFAULT 0`);
 }
 
 const BYTE_TABLES = [
@@ -408,6 +474,9 @@ async function migrateUserRoles(db: SqlDatabase): Promise<void> {
       name TEXT NOT NULL,
       role TEXT NOT NULL CHECK(role IN ('customer', 'admin')),
       password_hash TEXT,
+      active INTEGER NOT NULL DEFAULT 1,
+      password_changed_at TEXT,
+      password_epoch INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL
     );
     INSERT INTO users_migrated (id, email, name, role, password_hash, created_at)

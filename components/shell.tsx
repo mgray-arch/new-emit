@@ -14,12 +14,17 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
+  const [demo, setDemo] = useState(false);
 
   useEffect(() => {
     fetch("/api/me")
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => setMe(data))
       .catch(() => setMe(null));
+    fetch("/api/auth/providers")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body) => setDemo(Boolean(body?.demoHint)))
+      .catch(() => setDemo(false));
   }, []);
 
   async function logout() {
@@ -57,11 +62,17 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               <Link href="/admin" className={pathname === "/admin" ? "active" : ""}>
                 Review
               </Link>
+              <Link href="/admin/users" className={pathname.startsWith("/admin/users") ? "active" : ""}>
+                Users
+              </Link>
               <Link href="/admin/settings" className={pathname.startsWith("/admin/settings") ? "active" : ""}>
                 Settings
               </Link>
             </>
           )}
+          <Link href="/account" className={pathname === "/account" ? "active" : ""}>
+            Password
+          </Link>
           <span className="who">
             <span className="avatar">{initials}</span>
             {me?.name || "…"}
@@ -72,9 +83,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
       <div className="accent-line" />
-      {process.env.NEXT_PUBLIC_DEMO_HINT !== "false" && (
-        <div className="demo-bar">Test environment · simulated shipments, not live SAM data</div>
-      )}
+      {demo && <div className="demo-bar">Test environment · simulated shipments, not live SAM data</div>}
       {children}
     </>
   );

@@ -1,5 +1,6 @@
 import { jwtVerify, SignJWT } from "jose";
 import { safeNextPath } from "@/lib/paths";
+import { requestOrigin } from "@/lib/public-url";
 import type { Session } from "@/lib/types";
 
 export { safeNextPath };
@@ -23,6 +24,7 @@ export async function signSession(session: Session): Promise<string> {
     email: session.email,
     name: session.name,
     role: session.role,
+    pwd: session.passwordEpoch ?? 0,
   })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(session.userId)
@@ -31,14 +33,21 @@ export async function signSession(session: Session): Promise<string> {
     .sign(authSecret());
 }
 
-export async function verifySessionToken(token: string): Promise<Session | null> {
+export async function verifySessionToken(token: string): Promise<(Session & { issuedAt: number }) | null> {
   try {
     const { payload } = await jwtVerify(token, authSecret());
     if (payload.role !== "customer" && payload.role !== "admin") return null;
     if (typeof payload.email !== "string" || typeof payload.name !== "string" || typeof payload.sub !== "string") {
       return null;
     }
-    return { userId: payload.sub, email: payload.email, name: payload.name, role: payload.role };
+    return {
+      userId: payload.sub,
+      email: payload.email,
+      name: payload.name,
+      role: payload.role,
+      issuedAt: typeof payload.iat === "number" ? payload.iat : 0,
+      passwordEpoch: typeof payload.pwd === "number" ? payload.pwd : 0,
+    };
   } catch {
     return null;
   }
@@ -81,7 +90,7 @@ export function clearStateCookie(): string {
 
 export function isPublicPath(pathname: string): boolean {
   if (pathname === "/login") return true;
-  if (pathname === "/api/auth/login" || pathname === "/api/auth/logout") return true;
+  if (pathname === "/api/auth/login" || pathname === "/api/auth/logout" || pathname === "/api/auth/providers") return true;
   if (pathname === "/api/auth/microsoft" || pathname.startsWith("/api/auth/microsoft/")) return true;
   if (pathname === "/api/auth/google" || pathname.startsWith("/api/auth/google/")) return true;
   if (pathname.startsWith("/track/")) return true;
@@ -96,11 +105,7 @@ export function isPublicPath(pathname: string): boolean {
 
 export function oauthCallbackUrl(req: Request, provider: "microsoft" | "google"): string {
   const path = `/api/auth/${provider}/callback`;
-  const configured = process.env.PORTAL_PUBLIC_URL?.replace(/\/$/, "");
-  if (configured) return `${configured}${path}`;
-  const host = req.headers.get("host") || "localhost:3000";
-  const proto = req.headers.get("x-forwarded-proto") || "http";
-  return `${proto}://${host}${path}`;
+  return `${requestOrigin(req)}${path}`;
 }
 
 export function sameOrigin(req: Request): boolean {

@@ -16,7 +16,7 @@ function walk(dir: string): string[] {
 describe("boundaries", () => {
   it("keeps server-only modules out of client components", () => {
     const files = [...walk("components"), ...walk("app")];
-    const forbidden = /@\/lib\/(seed|db|orders|documents|sam|portal|passwords|email|session|guard|photos)/;
+    const forbidden = /@\/lib\/(seed|db|orders|documents|sam|portal|passwords|email|session|guard|photos|users|select-load)/;
     for (const file of files) {
       const text = readFileSync(file, "utf8");
       const client = text.includes('"use client"') || text.includes("'use client'");
@@ -34,6 +34,9 @@ describe("boundaries", () => {
     expect(isPublicPath("/api/ask")).toBe(false);
     expect(isPublicPath("/login")).toBe(true);
     expect(isPublicPath("/api/auth/login")).toBe(true);
+    expect(isPublicPath("/api/auth/providers")).toBe(true);
+    expect(isPublicPath("/api/admin/users")).toBe(false);
+    expect(isPublicPath("/api/me/password")).toBe(false);
     expect(isPublicPath("/api/auth/google")).toBe(true);
     expect(isPublicPath("/api/auth/google/callback")).toBe(true);
     expect(isPublicPath("/api/admin/receivers")).toBe(false);

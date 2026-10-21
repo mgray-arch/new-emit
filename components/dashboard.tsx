@@ -3,13 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import LoadForm, { draftFromOrder, emptyDraft, payloadFromDraft, useSites, type Draft } from "@/components/load-form";
 import PhotoGallery from "@/components/photo-gallery";
+import SelectLoadField from "@/components/select-load-field";
 import { formatDay } from "@/lib/dates";
 import {
   STATUS_LABEL,
+  formatLoadNumber,
   formatPlace,
   type CustomerDocument,
   type CustomerOrder,
-  type OrderConfirmation,
   type PortalStatus,
 } from "@/lib/types";
 
@@ -100,7 +101,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   const [creating, setCreating] = useState(startNew);
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [role, setRole] = useState<"customer" | "admin" | null>(null);
-  const [confirmation, setConfirmation] = useState<OrderConfirmation | null>(null);
+  const [submitted, setSubmitted] = useState<CustomerOrder | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
 
@@ -133,7 +134,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
         setError("");
       })
       .catch(() => setError("Could not load orders"));
-  }, [status, query, shipFrom, shipTo, page, confirmation, editing]);
+  }, [status, query, shipFrom, shipTo, page, submitted, editing]);
 
   const stats = data?.stats ?? { total: 0, being_prepared: 0, ready_to_ship: 0, shipped: 0, cancelled: 0 };
 
@@ -143,7 +144,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     const body = await response.json();
     setEditing(body.order);
     setDraft(draftFromOrder(body.order));
-    setConfirmation(body.confirmation);
+    setSubmitted(null);
     setFormError("");
     setCreating(false);
   }
@@ -165,7 +166,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Could not save");
       if (!editing) {
-        setConfirmation(body.confirmation);
+        setSubmitted(body.order);
         setEditing(body.order);
         setDraft(draftFromOrder(body.order));
         setCreating(false);
@@ -287,7 +288,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
             setCreating(true);
             setEditing(null);
             setDraft(emptyDraft());
-            setConfirmation(null);
+            setSubmitted(null);
             setFormError("");
           }}
         >
@@ -299,7 +300,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
         <table>
           <thead>
             <tr>
-              {["PO / Order #", "Origin", "Destination", "Truck Type", "Transit", "Ship Date/Time", "Must Deliver", "Truck ETA", "Status", "Cost", "Notes", "Files", "BOL", "Created By"].map((heading) => (
+              {["PO / Order #", "Select load", "Origin", "Destination", "Truck Type", "Transit", "Ship Date/Time", "Must Deliver", "Truck ETA", "Status", "Cost", "Notes", "Files", "BOL", "Created By"].map((heading) => (
                 <th key={heading}>{heading}</th>
               ))}
             </tr>
@@ -317,6 +318,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                     {order.salesOrderNumber}
                   </span>
                 </td>
+                <td className={order.loadNumber ? undefined : "pending"}>{formatLoadNumber(order.loadNumber)}</td>
                 <td>
                   <div className="company">{order.origin.company}</div>
                   <div className="addr">{formatPlace(order.origin).replace(`${order.origin.company}, `, "")}</div>
@@ -364,6 +366,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
           <article className="load-card" key={order.id}>
             <h3>{order.salesOrderNumber}</h3>
             <div className="pill">{STATUS_LABEL[order.portalStatus]}</div>
+            <p className={order.loadNumber ? "mini" : "mini pending"}>Select load {formatLoadNumber(order.loadNumber)}</p>
             <p>
               {order.origin.city}, {order.origin.state} → {order.destination.city}, {order.destination.state}
               {order.stops.length > 2 ? ` · ${order.stops.length} stops` : ""}
@@ -411,23 +414,28 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                 ✕
               </button>
             </div>
-            {confirmation && (
+            {submitted && editing && submitted.id === editing.id && (
               <div className="confirm">
-                <strong>Order confirmed</strong>
+                <strong>Order submitted</strong>
                 <div className="pair">
-                  <span>{confirmation.salesOrderNumber}</span>
+                  <span>{submitted.salesOrderNumber}</span>
                   <span>→</span>
-                  <b>Select load {confirmation.loadNumber}</b>
+                  <b>Select load {formatLoadNumber(submitted.loadNumber)}</b>
                 </div>
                 <p className="mini">
-                  Confirmation prepared for {confirmation.emailedTo}
-                  {confirmation.sender ? ` from ${confirmation.sender}` : ""}.{" "}
-                  {confirmation.delivered
-                    ? "Sent from the Select Gmail account."
-                    : "Stored in the outbox. It sends when the Select Gmail account is configured."}
+                  This screen is the confirmation. No email is sent. The Select load number stays pending until a Select admin enters the number from SAM.
                 </p>
-                <pre className="email-preview">{confirmation.subject}{"\n\n"}{confirmation.body}</pre>
               </div>
+            )}
+            {role === "admin" && editing && (
+              <SelectLoadField
+                orderId={editing.id}
+                loadNumber={editing.loadNumber}
+                onUpdated={(order) => {
+                  setEditing(order);
+                  setSubmitted((current) => (current?.id === order.id ? order : current));
+                }}
+              />
             )}
             {formError && <p className="error">{formError}</p>}
             <LoadForm draft={draft} setDraft={setDraft} order={editing} sites={sites} />

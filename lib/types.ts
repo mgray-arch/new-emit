@@ -92,7 +92,8 @@ export interface CustomerDocument {
 export interface CustomerOrder {
   id: string;
   salesOrderNumber: string;
-  loadNumber: string;
+  /** Real Select (SAM) load number, or null until a Select admin or a future SAM sync enters it. */
+  loadNumber: string | null;
   portalStatus: PortalStatus;
   trackingStage: TrackingStage;
   timeline: TimelineEvent[];
@@ -120,7 +121,7 @@ export interface CustomerOrder {
 }
 
 export interface PublicTracking {
-  loadNumber: string;
+  loadNumber: string | null;
   salesOrderNumber: string;
   portalStatus: PortalStatus;
   trackingStage: TrackingStage;
@@ -143,22 +144,13 @@ export interface Session {
   email: string;
   name: string;
   role: PortalRole;
-}
-
-export interface OrderConfirmation {
-  salesOrderNumber: string;
-  loadNumber: string;
-  emailedTo: string;
-  subject: string;
-  body: string;
-  sender: string | null;
-  delivered: boolean;
-  createdAt: string;
+  /** Bumped when the password changes so older cookies stop working. */
+  passwordEpoch?: number;
 }
 
 export interface AssistantReference {
   salesOrderNumber: string;
-  loadNumber: string;
+  loadNumber: string | null;
   trackingUrl: string;
   trackingStage: TrackingStage;
   latestEta: string | null;
@@ -189,7 +181,7 @@ export interface ReviewItem {
   id: string;
   loadId: string;
   salesOrderNumber: string;
-  loadNumber: string;
+  loadNumber: string | null;
   kind: string;
   screenResult: "block" | "uncertain";
   screenReason: string;
@@ -200,6 +192,12 @@ export interface ReviewItem {
   pageCount: number;
   textExcerpt: string | null;
   createdAt: string;
+}
+
+/** The number EMIT should see. Pending means Select has not entered the SAM load number yet. */
+export function formatLoadNumber(loadNumber: string | null | undefined): string {
+  const value = loadNumber?.trim();
+  return value ? value : "Pending";
 }
 
 export function formatPlace(place: Place): string {

@@ -5,7 +5,6 @@ import { CUSTOMER_LOAD_COLUMNS, withTransaction } from "@/lib/db";
 import { serializeCustomerOrder, trackingUrlFor } from "@/lib/customer-view";
 import { denverDate } from "@/lib/dates";
 import { listCustomerDocuments } from "@/lib/documents";
-import { sendOrderConfirmation } from "@/lib/email";
 import { PortalError } from "@/lib/http";
 import type { CustomerOrder, PortalStatus, Session, TimelineEvent, TrackingStage } from "@/lib/types";
 import { STAGE_LABEL, TRACKING_STAGES } from "@/lib/types";
@@ -41,7 +40,7 @@ export interface OrderStats {
 interface LoadRow {
   id: string;
   sales_order_number: string;
-  load_number: string;
+  load_number: string | null;
   portal_status: string;
   tracking_stage: string;
   timeline_json: string;
@@ -258,16 +257,6 @@ export async function orderStats(ctx: PortalContext, receiverCompany?: string | 
   return stats;
 }
 
-async function nextLoadNumber(ctx: PortalContext): Promise<string> {
-  const rows = await ctx.db.prepare(`SELECT load_number FROM loads`).all();
-  let max = 900100;
-  for (const row of rows) {
-    const value = Number(String(row.load_number).split("-")[0]);
-    if (Number.isFinite(value) && value > max) max = value;
-  }
-  return `${max + 1}-1`;
-}
-
 export function timelineThrough(stage: TrackingStage, at: string): TimelineEvent[] {
   const index = TRACKING_STAGES.indexOf(stage);
   return TRACKING_STAGES.slice(0, index + 1).map((item, itemIndex) => ({
@@ -301,11 +290,9 @@ function routeFrom(input: { origin?: OrderInput["origin"]; destination?: OrderIn
 
 export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: Session): Promise<{
   order: CustomerOrder;
-  confirmation: Awaited<ReturnType<typeof sendOrderConfirmation>>;
 }> {
   const now = ctx.now().toISOString();
   const id = randomUUID();
-  const loadNumber = await nextLoadNumber(ctx);
   const token = randomBytes(24).toString("base64url");
   const portalStatus = input.portalStatus ?? "being_prepared";
   const trackingStage = advanceStage("submitted", portalStatus);
@@ -326,7 +313,7 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
       .run(
         id,
         input.salesOrderNumber,
-        loadNumber,
+        null,
         portalStatus,
         trackingStage,
         JSON.stringify(timeline),
@@ -350,8 +337,7 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
   });
   const order = await getOrder(ctx, id);
   if (!order) throw new PortalError("The order could not be saved", 500);
-  const confirmation = await sendOrderConfirmation(ctx, order, actor.email);
-  return { order, confirmation };
+  return { order };
 }
 
 export async function updateOrder(ctx: PortalContext, id: string, patch: OrderPatch, actor: Session): Promise<CustomerOrder> {

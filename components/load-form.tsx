@@ -8,6 +8,7 @@ import {
   STATUS_LABEL,
   TRANSIT_OPTIONS,
   TRUCK_TYPES,
+  formatLoadNumber,
   mapsUrl,
   type CustomerOrder,
   type Place,
@@ -382,7 +383,7 @@ export default function LoadForm({
             </a>
           )}
           <div className="mini" style={{ marginTop: 8 }}>
-            Select load {order.loadNumber} · created by {order.createdBy}
+            Select load {formatLoadNumber(order.loadNumber)} · created by {order.createdBy}
           </div>
         </section>
       )}

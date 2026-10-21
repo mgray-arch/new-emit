@@ -225,15 +225,9 @@ td select {
 .confirm strong { color: #b7ebc8; }
 .pair { display: flex; gap: 10px; align-items: baseline; margin-top: 6px; }
 .pair b { font-size: 18px; }
-.email-preview {
-  white-space: pre-wrap;
-  background: #15181d;
-  border-radius: 8px;
-  padding: 10px;
-  color: var(--muted);
-  font-size: 12px;
-  margin-top: 8px;
-}
+.pending { color: var(--gold); }
+.inline-field { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.inline-field input { flex: 1; min-width: 160px; background: var(--bg-input); border: 1px solid #3c424d; border-radius: 8px; padding: 8px 10px; }
 .timeline { display: flex; gap: 0; margin: 8px 0 14px; }
 .step { flex: 1; min-width: 0; }
 .step .dot {
