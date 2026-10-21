@@ -84,7 +84,8 @@ CREATE TABLE IF NOT EXISTS customer_documents (
   filename TEXT NOT NULL,
   media_type TEXT NOT NULL,
   storage_key TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  uploaded_by TEXT
 );
 
 CREATE TABLE IF NOT EXISTS internal_documents (
@@ -102,8 +103,24 @@ CREATE TABLE IF NOT EXISTS internal_documents (
   storage_key TEXT NOT NULL,
   created_at TEXT NOT NULL,
   reviewed_at TEXT,
-  reviewed_by TEXT
+  reviewed_by TEXT,
+  uploaded_by TEXT
 );
+
+CREATE TABLE IF NOT EXISTS document_uploads (
+  id TEXT PRIMARY KEY,
+  load_id TEXT NOT NULL,
+  sha256 TEXT NOT NULL,
+  filename TEXT NOT NULL,
+  doc_type TEXT NOT NULL,
+  uploaded_by TEXT NOT NULL,
+  released_count INTEGER NOT NULL,
+  held_count INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (load_id, sha256)
+);
+
+CREATE INDEX IF NOT EXISTS document_uploads_load ON document_uploads(load_id);
 
 CREATE INDEX IF NOT EXISTS loads_ship_date ON loads(ship_date);
 CREATE INDEX IF NOT EXISTS loads_status ON loads(portal_status);
@@ -325,6 +342,7 @@ export async function openDatabase(file?: string): Promise<SqlDatabase> {
   await migrateTrackingLink(db);
   await migrateUserAccount(db);
   await migrateEmitAdminRole(db);
+  await migrateDocumentUploaders(db);
   await db.exec(`DROP TABLE IF EXISTS outbox`);
   return db;
 }
@@ -518,6 +536,14 @@ async function migrateEmitAdminRole(db: SqlDatabase): Promise<void> {
     DROP TABLE users;
     ALTER TABLE users_emit_admin RENAME TO users;
   `);
+}
+
+/** Older document tables have no uploader. The bot upload log is created with the schema. */
+async function migrateDocumentUploaders(db: SqlDatabase): Promise<void> {
+  for (const table of ["customer_documents", "internal_documents"] as const) {
+    const columns = await columnNames(db, table);
+    if (!columns.includes("uploaded_by")) await db.exec(`ALTER TABLE ${table} ADD COLUMN uploaded_by TEXT`);
+  }
 }
 
 async function migrateTrackingLink(db: SqlDatabase): Promise<void> {

@@ -460,6 +460,30 @@ describe("Select load numbers", () => {
         password_hash TEXT,
         created_at TEXT NOT NULL
       );
+      CREATE TABLE customer_documents (
+        id TEXT PRIMARY KEY,
+        load_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        filename TEXT NOT NULL,
+        media_type TEXT NOT NULL,
+        storage_key TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE internal_documents (
+        id TEXT PRIMARY KEY,
+        load_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        screen_result TEXT NOT NULL,
+        screen_reason TEXT NOT NULL,
+        review_status TEXT NOT NULL,
+        filename TEXT NOT NULL,
+        media_type TEXT NOT NULL,
+        page_index INTEGER NOT NULL,
+        page_count INTEGER NOT NULL,
+        text_excerpt TEXT,
+        storage_key TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
     `);
     raw.close();
     const upgraded = await openDatabase(file);
@@ -476,6 +500,11 @@ describe("Select load numbers", () => {
     expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining(["active", "password_epoch"]));
     const loadColumns = (await upgraded.prepare(`PRAGMA table_info(loads)`).all()) as Array<{ name: string }>;
     expect(loadColumns.map((column) => column.name)).toEqual(expect.arrayContaining(["tracking_link", "tracking_link_source"]));
+    const customerDocs = (await upgraded.prepare(`PRAGMA table_info(customer_documents)`).all()) as Array<{ name: string }>;
+    const internalDocs = (await upgraded.prepare(`PRAGMA table_info(internal_documents)`).all()) as Array<{ name: string }>;
+    expect(customerDocs.map((column) => column.name)).toContain("uploaded_by");
+    expect(internalDocs.map((column) => column.name)).toContain("uploaded_by");
+    expect(await upgraded.prepare(`SELECT name FROM sqlite_master WHERE name = 'document_uploads'`).get()).toBeTruthy();
     await upgraded
       .prepare(`INSERT INTO users (id, email, name, role, created_at) VALUES ('u-emit', 'lead@emit.example', 'Lead', 'emit_admin', '2026-10-02T00:00:00.000Z')`)
       .run();

@@ -78,6 +78,7 @@ Leave these blank unless you are turning that feature on:
 | `AZURE_AD_TENANT_ID`, `AZURE_AD_CLIENT_ID`, `AZURE_AD_CLIENT_SECRET` | Only if EMIT later wants Microsoft sign-in. Not required. |
 | `AI_API_KEY`, `AI_BASE_URL`, `AI_MODEL` | Optional assistant. Blank uses the built-in answers. |
 | `CARRIER_PHOTO_INGEST_TOKEN` | Bearer token for the photo ingest API. Admins can upload without it. |
+| `BOT_UPLOAD_KEY` | Bearer token for the SAM bot document upload. At least 16 characters. The bot can only upload. |
 | `SAM_API_BASE_URL`, `SAM_API_TOKEN`, `SAM_CUSTOMER_ID` | Leave blank. SAM is not connected. |
 
 Do not set `DEMO_USER_PASSWORD` in production. Do not set a Gmail client. Order mail has been removed.
@@ -164,6 +165,18 @@ History can be exported as CSV. The file never includes carrier pay. A regular E
 ## Tracking links
 
 Each load has a tracking link, separate from the portal status page. A Select admin pastes the public SAM or MacroPoint URL on the load. EMIT users and receivers get a Track button when it is set. The link has to be http or https. Clearing the field removes the button.
+
+## Bot document upload
+
+Mike's bot posts a BOL from SAM email to `POST /api/integrations/documents`.
+
+Send `Authorization: Bearer <BOT_UPLOAD_KEY>`. The key is at least 16 characters and compared in constant time. A missing or wrong key is 401. A session cookie is not accepted. The path skips the session-cookie check so the bot does not sign in, and it is limited to 60 requests a minute per IP.
+
+The body is multipart: `file`, `loadNumber` (a Select load number such as `458934-1`; `load_number` is accepted too), and optional `doc_type` (`bol`, `pod`, or `photo`). Omitted `doc_type` means `bol`.
+
+The file is screened with the same page rules as an upload from the portal. A rate confirmation or a page with no readable text stays in Select review. The uploader is stored as Select bot. The same file bytes on the same load are stored once; a retry returns the first result. This path cannot list, read, or delete documents.
+
+An unknown load number is 404. A number that matches more than one load is rejected instead of guessing.
 
 ## Carrier pay
 

@@ -13,7 +13,7 @@ The notes below also describe the demo seed and the screening rules. Demo load n
 
 Saved delivery locations are searched from the drop stop. Pickup yards stay the one-tap list. A one-off pickup is not added to that list. Duplicate docks are caught in the form and again on the server. A drop whose company matches a receiver is linked to that receiver.
 
-`npm test` — 57 tests passed, including location duplicate detection, the load-list tabs, and the rule that EMIT never receives the held-document count.
+`npm test` — 61 tests passed, including location duplicate detection, the load-list tabs, the rule that EMIT never receives the held-document count, and the SAM bot upload.
 
 ## Security
 
@@ -23,7 +23,7 @@ Saved delivery locations are searched from the drop stop. Pickup yards stay the 
 - Uploads are split to single pages (pdf-lib) and text is extracted (unpdf, plus a literal PDF text fallback). Decisions are pass, block, or uncertain. Empty text, images, and unknown types are held. Customer documents and internal documents are separate tables. Pending count on the load is the only signal the customer query needs. An admin approve copies the page into customer documents. A customer cannot download a quarantined page.
 - Auth is a server-side httpOnly JWT (`portal_session`). Middleware and each handler check it. Admin paths require a Select staff email. Secrets stay in environment variables. There is no open database policy: the app uses a server-side SQLite file, not client-exposed row security.
 - New-order requests are validated with Zod. Carrier fields posted by a client are ignored. There is nowhere to write them.
-- Unauthenticated routes are the per-load tracking link and the per-receiver private link. Neither is an open order API.
+- Unauthenticated routes are the per-load tracking link, the per-receiver private link, and two machine ingest paths (carrier photos and `POST /api/integrations/documents`). The bot path checks `BOT_UPLOAD_KEY` in constant time, rate-limits by IP, and can only upload. Neither path is an open order API.
 
 Staff can still read the text excerpt of a quarantined page. Releasing a page the screener flagged as a rate confirmation takes a second click ("Yes, release it") and the API rejects `{ action: "approve" }` without `confirm: true`. The release stores `reviewed_by` (the admin email) and `reviewed_at`. Uncertain pages can still be released in one click. Keeping a page internal does not require the extra confirm.
 
@@ -109,6 +109,20 @@ Gallery reads, all session-authenticated and scoped like the load:
 
 - `GET /api/orders/{id}/photos` returns id, filename, type, source, subject, and received time. Held rows are included only for admins.
 - `GET /api/carrier-photos/{id}` returns the image bytes. Held bytes are admin-only.
+
+## Bot document upload
+
+`POST /api/integrations/documents`
+
+Mike's bot attaches a BOL (or a POD or photo) that arrived by email from SAM. Auth is `Authorization: Bearer <BOT_UPLOAD_KEY>` only. The key is at least 16 characters, compared in constant time, and a missing, short, or wrong key is 401. An admin session cookie is not accepted. Middleware lets the path through so the bot gets JSON instead of a login redirect; the handler still rejects every request without the key. The route exports POST only.
+
+Sixty requests per IP per minute, including failed keys. Over the limit is 429 with `Retry-After`. The bucket is separate from the login lockout.
+
+Multipart fields are `file`, `loadNumber` (or `load_number`), and optional `doc_type` (`bol`, `pod`, or `photo`; default `bol`). `loadNumber` is the Select load number, for example `458934-1`. No match is 404. More than one match is 409 and names the number. Anything other than multipart is 415.
+
+The bytes go through `ingestDocument`, the same rate-confirmation and unreadable-page screening as a portal upload. Released pages are customer documents. Flagged pages stay on the Select review queue. `uploaded_by` on those rows, and on the `document_uploads` log, is `Select bot`. A BOL is filed as a BOL. A POD or photo is filed as an attachment, and a photo with no extracted text is held.
+
+The same SHA-256 on one load is one upload. A retry is 200 with `duplicate: true` and does not add another page. The same bytes on a different load are a new upload. The JSON response is the load number, document type, hash, uploader, duplicate flag, and released / held counts. It has no document id and no file bytes. There is no list, read, or delete on this path.
 
 ## Data layer and SAM
 
@@ -204,6 +218,7 @@ There is no public test URL in this environment.
 | `GOOGLE_HOSTED_DOMAIN` | Default `goselect.com` | Workspace domain check. |
 | `AI_API_KEY`, optional `AI_BASE_URL`, `AI_MODEL` | Select | OpenAI-compatible chat. Blank uses the built-in answerer. |
 | `CARRIER_PHOTO_INGEST_TOKEN` | Select | Bearer token for the photo ingest API. At least 16 characters. |
+| `BOT_UPLOAD_KEY` | Select | Bearer token for `POST /api/integrations/documents`. At least 16 characters. Upload only. |
 | `SAM_API_BASE_URL`, `SAM_API_TOKEN`, `SAM_CUSTOMER_ID` | Mike, already requested | Live orders. Not connected until the HTTP contract is confirmed. |
 
 `PORTAL_DB_PATH` defaults to `./data/portal.db` and is used only when `TURSO_DATABASE_URL` is unset. `PORTAL_BLOB_DIR` defaults to `./data/blobs` when Blob is unset.
