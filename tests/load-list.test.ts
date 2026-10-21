@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { GET as exportOrders } from "@/app/api/orders/export/route";
 import { GET as listOrdersRoute } from "@/app/api/orders/route";
-import { attentionReasons, loadsToCsv, pickupGroup } from "@/lib/load-list";
+import { attentionReasons, displayStatus, emptyListMessage, fileSummary, loadsToCsv, pickupGroup, simpleStepIndex, tripCaption } from "@/lib/load-list";
 import { listBoard, listOrders } from "@/lib/orders";
 import type { PortalContext } from "@/lib/db";
 import type { CustomerOrder } from "@/lib/types";
@@ -45,6 +45,38 @@ describe("load lists", () => {
     expect(attentionReasons({ ...base, trackingStage: "in_transit", trackingLink: null }, today)).toEqual(["Missing tracking"]);
     expect(attentionReasons({ ...base, mustDeliverDate: "2026-10-01" }, today)).toEqual(["Past due"]);
     expect(attentionReasons({ ...base, loadNumber: null, portalStatus: "cancelled" }, today)).toEqual([]);
+  });
+
+  it("uses plain status pills, file counts, and a four-step timeline", () => {
+    const today = "2026-10-14";
+    const base = {
+      loadNumber: "1-1",
+      pendingReviewCount: 0,
+      trackingLink: "https://track.example/a",
+      trackingStage: "booked" as const,
+      mustDeliverDate: "2026-10-16",
+      portalStatus: "ready_to_ship" as const,
+      attachmentCount: 2,
+      bolCount: 0,
+    };
+    expect(displayStatus(base, today)).toBe("booked");
+    expect(displayStatus({ ...base, trackingStage: "in_transit", portalStatus: "shipped" }, today)).toBe("in_transit");
+    expect(displayStatus({ ...base, trackingStage: "delivered", portalStatus: "shipped" }, today)).toBe("delivered");
+    expect(displayStatus({ ...base, trackingStage: "submitted", portalStatus: "being_prepared", loadNumber: null }, today)).toBe("attention");
+    expect(displayStatus({ ...base, trackingStage: "in_transit", trackingLink: null, portalStatus: "shipped" }, today)).toBe("attention");
+    expect(displayStatus({ ...base, portalStatus: "cancelled" }, today)).toBe("cancelled");
+    expect(fileSummary(base)).toBe("2 files");
+    expect(fileSummary({ ...base, attachmentCount: 1, bolCount: 1, pendingReviewCount: 1 })).toBe("2 files, 1 awaiting review");
+    expect(fileSummary({ ...base, attachmentCount: 0, bolCount: 0, pendingReviewCount: 0 })).toBe("No files yet");
+    expect(fileSummary({ ...base, attachmentCount: 0, bolCount: 0, pendingReviewCount: 1 })).toBe("1 awaiting review");
+    expect(simpleStepIndex("submitted")).toBe(0);
+    expect(simpleStepIndex("booked")).toBe(1);
+    expect(simpleStepIndex("at_pickup")).toBe(2);
+    expect(simpleStepIndex("in_transit")).toBe(2);
+    expect(simpleStepIndex("delivered")).toBe(3);
+    expect(tripCaption("in_transit", false)).toContain("on the road");
+    expect(emptyListMessage("attention", false)).toContain("Nothing needs attention");
+    expect(emptyListMessage("history", true)).toContain("No loads match");
   });
 
   it("puts each seeded load in one tab and keeps a 7-day delivered window", async () => {

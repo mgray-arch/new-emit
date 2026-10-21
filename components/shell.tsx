@@ -15,6 +15,36 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
   const [demo, setDemo] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark">("dark");
+  const [toastMessage, setToastMessage] = useState("");
+
+  useEffect(() => {
+    const stored = document.documentElement.dataset.theme === "light" ? "light" : "dark";
+    setTheme(stored);
+  }, []);
+
+  useEffect(() => {
+    let timer = 0;
+    function onToast(event: Event) {
+      const message = (event as CustomEvent<string>).detail;
+      if (!message) return;
+      setToastMessage(message);
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => setToastMessage(""), 3200);
+    }
+    window.addEventListener("emit-toast", onToast);
+    return () => {
+      window.removeEventListener("emit-toast", onToast);
+      window.clearTimeout(timer);
+    };
+  }, []);
+
+  function toggleTheme() {
+    const next = theme === "light" ? "dark" : "light";
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem("emit-theme", next);
+    setTheme(next);
+  }
 
   useEffect(() => {
     fetch("/api/me")
@@ -78,11 +108,22 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           <Link href="/account" className={pathname === "/account" ? "active" : ""}>
             Password
           </Link>
-          <span className="who">
-            <span className="avatar">{initials}</span>
+          <button
+            className="logout"
+            type="button"
+            onClick={toggleTheme}
+            title={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+            aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+          >
+            {theme === "light" ? "Dark mode" : "Light mode"}
+          </button>
+          <span className="who" title={me?.email || "Signed in"}>
+            <span className="avatar" title={me?.name || "Your account"}>
+              {initials}
+            </span>
             {me?.name || "…"}
           </span>
-          <button className="logout" onClick={logout} type="button">
+          <button className="logout" onClick={logout} type="button" title="Sign out">
             Logout
           </button>
         </div>
@@ -90,6 +131,11 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       <div className="accent-line" />
       {demo && <div className="demo-bar">Test environment · simulated shipments, not live SAM data</div>}
       {children}
+      {toastMessage ? (
+        <div className="toast" role="status">
+          {toastMessage}
+        </div>
+      ) : null}
     </>
   );
 }

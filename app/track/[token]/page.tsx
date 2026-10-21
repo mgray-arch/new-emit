@@ -34,7 +34,7 @@ export default function TrackPage() {
           <div className="brand-sub">Select Transport Partners</div>
         </div>
       </header>
-      {missing && <p>This tracking link is not valid.</p>}
+      {missing && <p>This tracking link does not match a load. Check the link and try again.</p>}
       {data && (
         <>
           <h1 style={{ letterSpacing: "0.04em", fontSize: 22 }}>

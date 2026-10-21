@@ -153,6 +153,8 @@ A drop is linked to a receiver when the company name matches, so the receiver pa
 
 The dashboard is four lists: **Needs Attention** (no Select load number, files in review, an in-transit load with no tracking link, or a past-due delivery), **Active**, **Delivered** for the last 7 days, and **History**. A delivered load moves to History on its own after those 7 days. Cancelled loads are in History too.
 
+Each load is a card: the lane in bold, pickup and delivery dates, a colored status, and Track when there is a link. Long notes stay on two lines until you expand them. Open a card for the four-step timeline (Ordered, Booked, Picked up, Delivered) and the stops, documents, tracking, and notes. Light mode is in the header. EMIT users see a short tip the first time.
+
 One search box looks through every list for a Select load number, an EMIT order number, a city, or a receiver. Date range, pickup site, receiver, and status narrow whichever list you are in. Loads are grouped by pickup date. The page loads 25 at a time.
 
 History can be exported as CSV. The file never includes carrier pay. A regular EMIT user does not get EMIT's cost or the rate reason in that file. Select admins and EMIT admins do.

@@ -9,7 +9,7 @@ export default function TrackLink({
 }) {
   if (!href) return null;
   return (
-    <a className="btn secondary track-btn" href={href} target="_blank" rel="noreferrer" onClick={onClick}>
+    <a className="btn secondary track-btn" href={href} target="_blank" rel="noreferrer" title="Open live tracking" onClick={onClick}>
       Track
     </a>
   );

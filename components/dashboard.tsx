@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import LoadForm, { draftFromOrder, emptyDraft, payloadFromDraft, useSites, type Draft } from "@/components/load-form";
 import PhotoGallery from "@/components/photo-gallery";
 import SelectLoadField from "@/components/select-load-field";
+import StatusPill from "@/components/status-pill";
 import TrackLink from "@/components/track-link";
 import TrackingLinkField from "@/components/tracking-link-field";
 import { formatDay } from "@/lib/dates";
@@ -12,10 +14,14 @@ import {
   LOAD_TAB_LABEL,
   PICKUP_GROUP_LABEL,
   attentionReasons,
+  displayStatus,
+  emptyListMessage,
+  fileSummary,
   pickupGroup,
   type LoadTab,
   type PickupGroup,
 } from "@/lib/load-list";
+import { toast } from "@/lib/toast";
 import {
   STATUS_LABEL,
   canSeePricing,
@@ -23,7 +29,6 @@ import {
   type CustomerDocument,
   type CustomerOrder,
   type PortalRole,
-  type PortalStatus,
 } from "@/lib/types";
 
 interface ListResponse {
@@ -42,7 +47,32 @@ interface ListResponse {
 
 const PAGE_SIZE = 25;
 
+function Note({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const long = text.length > 90;
+  return (
+    <div className="note-wrap">
+      <p className={open || !long ? "note" : "note clamp"} title={text}>
+        {text}
+      </p>
+      {long ? (
+        <button
+          className="text-btn"
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            setOpen((value) => !value);
+          }}
+        >
+          {open ? "Show less" : "Show note"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export default function Dashboard({ startNew = false }: { startNew?: boolean }) {
+  const router = useRouter();
   const sites = useSites();
   const [tab, setTab] = useState<LoadTab>("attention");
   const [status, setStatus] = useState<string>("");
@@ -61,6 +91,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   const [creating, setCreating] = useState(startNew);
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [role, setRole] = useState<PortalRole | null>(null);
+  const [showTips, setShowTips] = useState(false);
   const [submitted, setSubmitted] = useState<CustomerOrder | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
@@ -75,7 +106,15 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       .then((response) => (response.ok ? response.json() : null))
       .then((body) => setRole(body?.role ?? null))
       .catch(() => setRole(null));
+    const edit = new URLSearchParams(window.location.search).get("edit");
+    if (edit) void openEdit(edit);
   }, []);
+
+  useEffect(() => {
+    if (role !== "customer" && role !== "emit_admin") return;
+    if (window.localStorage.getItem("emit-tips-v1") === "1") return;
+    setShowTips(true);
+  }, [role]);
 
   const showPricing = canSeePricing(role);
 
@@ -110,7 +149,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
         });
         setError("");
       })
-      .catch(() => setError("Could not load orders"));
+      .catch(() => setError("We couldn't load your loads. Refresh the page and try again."));
   }, [tab, status, query, shipFrom, shipTo, pickup, receiver, page, reload]);
 
   async function openEdit(id: string) {
@@ -196,21 +235,12 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       }
       setPage(1);
       setReload((value) => value + 1);
+      toast(editing ? "Load saved." : "Load submitted. Select will add the load number.");
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Could not save");
+      setFormError(err instanceof Error ? err.message : "We couldn't save this load. Check the fields and try again.");
     } finally {
       setSaving(false);
     }
-  }
-
-  async function changeStatus(order: CustomerOrder, portalStatus: PortalStatus) {
-    await fetch(`/api/orders/${order.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ portalStatus }),
-    });
-    setPage(1);
-    setReload((value) => value + 1);
   }
 
   async function upload(slot: "attachment" | "bol", file: File) {
@@ -221,7 +251,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     const response = await fetch(`/api/orders/${editing.id}/documents`, { method: "POST", body: form });
     const body = await response.json();
     if (!response.ok) {
-      setFormError(body.error || "Upload failed");
+      setFormError(body.error || "We couldn't upload that file. Try again.");
       return;
     }
     setEditing(body.order);
@@ -259,8 +289,25 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
 
   return (
     <main className="page">
-      <h1>BROKER DASHBOARD</h1>
-      <p className="lede">View and track all incoming shipment loads</p>
+      <h1>Loads</h1>
+      <p className="lede">What needs a look, what is moving, and what already delivered.</p>
+      {showTips && (
+        <aside className="tips">
+          <strong>A few tips</strong>
+          <p>Needs Attention is the short list: a missing Select load number, files in review, or a truck with no tracking link.</p>
+          <p>Search finds a load in any tab. Click a card to open it.</p>
+          <button
+            className="btn secondary"
+            type="button"
+            onClick={() => {
+              window.localStorage.setItem("emit-tips-v1", "1");
+              setShowTips(false);
+            }}
+          >
+            Got it
+          </button>
+        </aside>
+      )}
       <div className="tabs" role="tablist" aria-label="Load lists">
         {LOAD_TABS.map((item) => (
           <button
@@ -352,6 +399,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
             </div>
             {group.orders.map((order) => {
               const reasons = data ? attentionReasons(order, data.today) : [];
+              const today = data?.today ?? "";
               return (
                 <article
                   key={order.id}
@@ -361,55 +409,49 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                   onClick={(event) => {
                     const target = event.target as HTMLElement;
                     if (target.closest("a, button, select, input, label, option")) return;
-                    void openEdit(order.id);
+                    router.push(`/orders/${order.id}`);
                   }}
                   onKeyDown={(event) => {
-                    if (event.key === "Enter" && event.target === event.currentTarget) void openEdit(order.id);
+                    if (event.key === "Enter" && event.target === event.currentTarget) router.push(`/orders/${order.id}`);
                   }}
                 >
                   <div className="load-row-top">
-                    <strong className="so">{order.salesOrderNumber}</strong>
-                    <span className="pill">{STATUS_LABEL[order.portalStatus]}</span>
+                    <div className="lane">
+                      {order.origin.city}, {order.origin.state} → {order.destination.city}, {order.destination.state}
+                    </div>
+                    <StatusPill status={displayStatus(order, today)} />
                   </div>
-                  <div className={order.loadNumber ? "mini" : "mini pending"}>
-                    Select load {formatLoadNumber(order.loadNumber)}
-                    {order.shipDate ? ` · Ship ${formatDay(order.shipDate)}${order.shipTime ? ` ${order.shipTime}` : ""}` : ""}
+                  <div className="load-dates">
+                    <span>Pickup {order.shipDate ? `${formatDay(order.shipDate)}${order.shipTime ? `, ${order.shipTime}` : ""}` : "not set"}</span>
+                    <span>Delivery {order.mustDeliverDate ? formatDay(order.mustDeliverDate) : "not set"}</span>
                   </div>
-                  <div>
-                    {order.origin.company} · {order.origin.city}, {order.origin.state}
-                    {" → "}
-                    {order.destination.company} · {order.destination.city}, {order.destination.state}
-                    {order.stops.length > 2 ? ` · ${order.stops.length} stops` : ""}
+                  <div className="load-meta">
+                    {order.salesOrderNumber} · Select load {formatLoadNumber(order.loadNumber)}
+                    {order.stops.length > 2 ? ` · ${order.stops.length} stops` : ""} · {fileSummary(order)}
                   </div>
                   {reasons.length > 0 && <div className="hold">{reasons.join(" · ")}</div>}
+                  {order.comments ? <Note text={order.comments} /> : null}
                   <div className="load-row-actions">
                     <TrackLink href={order.trackingLink} />
                     {showPricing && (
-                      <span className="mini">
+                      <span className="load-meta">
                         {order.customerCost == null ? "Cost not set" : order.customerCost.toLocaleString("en-US", { style: "currency", currency: "USD" })}
                       </span>
                     )}
-                    <select
-                      aria-label={`Status for ${order.salesOrderNumber}`}
-                      value={order.portalStatus}
-                      onChange={(event) => changeStatus(order, event.target.value as PortalStatus)}
-                    >
-                      {Object.entries(STATUS_LABEL).map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
                   </div>
                 </article>
               );
             })}
           </section>
         ))}
-        {data && rows.length === 0 ? <p className="mini">No loads in this list.</p> : null}
+        {data && rows.length === 0 ? (
+          <p className="empty">
+            {emptyListMessage(tab, Boolean(query.trim() || status || shipFrom || shipTo || pickup || receiver))}
+          </p>
+        ) : null}
       </div>
       <div className="pager">
-        <span>{data ? `${rows.length} of ${data.total}` : ""}</span>
+        <span>{data ? `Showing ${rows.length} of ${data.total}` : ""}</span>
         {data && rows.length < data.total ? (
           <button className="btn secondary" type="button" onClick={() => setPage((value) => value + 1)}>
             Load more
@@ -427,10 +469,10 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
           >
             <div className="dialog-head">
               <div>
-                <h2 id="load-title">{editing ? "EDIT LOAD" : "NEW LOAD"}</h2>
-                <p className="sub">{editing ? "Update load details." : "Submit a load to Select."}</p>
+                <h2 id="load-title">{editing ? "Edit load" : "New load"}</h2>
+                <p className="sub">{editing ? "Update this load, then save." : "Tell Select what you need moved."}</p>
               </div>
-              <button className="icon-btn" type="button" aria-label="Close" onClick={() => { setCreating(false); setEditing(null); }}>
+              <button className="icon-btn" type="button" aria-label="Close" title="Close" onClick={() => { setCreating(false); setEditing(null); }}>
                 ✕
               </button>
             </div>
@@ -484,7 +526,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
               </div>
             )}
             {editing && editing.pendingReviewCount > 0 && (
-              <p className="hold">{editing.pendingReviewCount} page(s) are held for Select review and are not visible yet.</p>
+              <p className="hold">{fileSummary(editing)}. Select reviews those pages before they show up.</p>
             )}
             {editing && <PhotoGallery orderId={editing.id} loadNumber={editing.loadNumber} canUpload={role === "admin"} />}
             <div className="actions">
