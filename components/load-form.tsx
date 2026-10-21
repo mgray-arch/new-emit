@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Timeline from "@/components/timeline";
 import { formatWhen } from "@/lib/dates";
+import { formatLoadNumber } from "@/lib/load-number";
 import {
   RATE_REASONS,
   STATUS_LABEL,
@@ -382,7 +383,7 @@ export default function LoadForm({
             </a>
           )}
           <div className="mini" style={{ marginTop: 8 }}>
-            Select load {order.loadNumber} · created by {order.createdBy}
+            Select load {formatLoadNumber(order.loadNumber)} · created by {order.createdBy}
           </div>
         </section>
       )}

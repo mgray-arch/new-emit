@@ -1,4 +1,5 @@
 import { serializeCustomerOrder, trackingUrlFor } from "@/lib/customer-view";
+import { parseSelectLoadNumber } from "@/lib/load-number";
 import { legacyStops, resolvedRoute } from "@/lib/stops";
 import type { CustomerOrder, PortalStatus, TrackingStage } from "@/lib/types";
 import { STAGE_LABEL, TRACKING_STAGES } from "@/lib/types";
@@ -130,7 +131,7 @@ export function mapSamDetailToCustomer(raw: unknown): CustomerOrder {
   return serializeCustomerOrder({
     id: String(order.id ?? order.orderId ?? ""),
     salesOrderNumber: pickSalesOrder(order),
-    loadNumber: String(load.loadNumber ?? ""),
+    loadNumber: parseSelectLoadNumber(load.loadNumber),
     portalStatus: mapTransitToPortal(transit, order.voided === true),
     trackingStage,
     timeline,
@@ -211,6 +212,15 @@ export function toSamCreatePayload(input: OrderInput, actor: Session): Record<st
  * Not called until SAM credentials exist. Editing stops in the portal writes the
  * mock store today. The live call replaces every stop on the load with `toSamStops`.
  */
+/**
+ * The Select load number on a SAM order payload, already checked against the
+ * 458934-1 shape. Future sync passes this to syncSelectLoadNumberFromSam.
+ * Carrier pay on the same payload is ignored.
+ */
+export function selectLoadNumberFromSam(raw: unknown): string | null {
+  return parseSelectLoadNumber(firstLoad(asRecord(raw)).loadNumber);
+}
+
 export function toSamStopReplacement(loadNumber: string, input: OrderInput): Record<string, unknown> {
   return { loadNumber, stops: toSamStops(input) };
 }

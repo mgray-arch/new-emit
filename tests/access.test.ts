@@ -26,7 +26,7 @@ async function enchantedToken(): Promise<string> {
 }
 
 describe("sign-in providers", () => {
-  it("sends EMIT staff to Microsoft and Select admins to Google", () => {
+  it("keeps optional Microsoft for EMIT staff and Google for Select admins", () => {
     expect(identityFromMicrosoft("m.gray@emit.com")).toEqual({ ok: true, role: "customer", email: "m.gray@emit.com" });
     expect(identityFromMicrosoft("mgray@goselect.com")).toMatchObject({ ok: false });
     expect(identityFromMicrosoft("someone@goselect.com")).toMatchObject({ ok: false });
@@ -45,7 +45,10 @@ describe("sign-in providers", () => {
     expect(identityFromGoogle({ email: "other@goselect.com", emailVerified: true, hostedDomain: "goselect.com" })).toMatchObject({
       ok: false,
     });
-    expect(identityFromGoogle({ email: "m.gray@emit.com", emailVerified: true, hostedDomain: null })).toMatchObject({ ok: false });
+    expect(identityFromGoogle({ email: "m.gray@emit.com", emailVerified: true, hostedDomain: null })).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/password/i),
+    });
     expect(identityFromGoogle({ email: "mgray@goselect.com", emailVerified: false, hostedDomain: "goselect.com" })).toMatchObject({
       ok: false,
     });

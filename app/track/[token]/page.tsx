@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Timeline from "@/components/timeline";
 import { formatDay, formatWhen } from "@/lib/dates";
+import { formatLoadNumber } from "@/lib/load-number";
 import { STAGE_LABEL, STATUS_LABEL, type PublicTracking } from "@/lib/types";
 
 export default function TrackPage() {
@@ -37,7 +38,7 @@ export default function TrackPage() {
       {data && (
         <>
           <h1 style={{ letterSpacing: "0.04em", fontSize: 22 }}>
-            {data.salesOrderNumber} · {data.loadNumber}
+            {data.salesOrderNumber} · {formatLoadNumber(data.loadNumber)}
           </h1>
           <p className="lede">
             {STAGE_LABEL[data.trackingStage]} · {STATUS_LABEL[data.portalStatus]}

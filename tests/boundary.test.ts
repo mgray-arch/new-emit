@@ -34,6 +34,9 @@ describe("boundaries", () => {
     expect(isPublicPath("/api/ask")).toBe(false);
     expect(isPublicPath("/login")).toBe(true);
     expect(isPublicPath("/api/auth/login")).toBe(true);
+    expect(isPublicPath("/api/auth/providers")).toBe(true);
+    expect(isPublicPath("/api/admin/users")).toBe(false);
+    expect(isPublicPath("/api/account/password")).toBe(false);
     expect(isPublicPath("/api/auth/google")).toBe(true);
     expect(isPublicPath("/api/auth/google/callback")).toBe(true);
     expect(isPublicPath("/api/admin/receivers")).toBe(false);

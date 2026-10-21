@@ -92,7 +92,8 @@ export interface CustomerDocument {
 export interface CustomerOrder {
   id: string;
   salesOrderNumber: string;
-  loadNumber: string;
+  /** Null until a Select admin (or a future SAM sync) stores the real SAM load number. */
+  loadNumber: string | null;
   portalStatus: PortalStatus;
   trackingStage: TrackingStage;
   timeline: TimelineEvent[];
@@ -120,7 +121,7 @@ export interface CustomerOrder {
 }
 
 export interface PublicTracking {
-  loadNumber: string;
+  loadNumber: string | null;
   salesOrderNumber: string;
   portalStatus: PortalStatus;
   trackingStage: TrackingStage;
@@ -145,20 +146,9 @@ export interface Session {
   role: PortalRole;
 }
 
-export interface OrderConfirmation {
-  salesOrderNumber: string;
-  loadNumber: string;
-  emailedTo: string;
-  subject: string;
-  body: string;
-  sender: string | null;
-  delivered: boolean;
-  createdAt: string;
-}
-
 export interface AssistantReference {
   salesOrderNumber: string;
-  loadNumber: string;
+  loadNumber: string | null;
   trackingUrl: string;
   trackingStage: TrackingStage;
   latestEta: string | null;
@@ -189,7 +179,7 @@ export interface ReviewItem {
   id: string;
   loadId: string;
   salesOrderNumber: string;
-  loadNumber: string;
+  loadNumber: string | null;
   kind: string;
   screenResult: "block" | "uncertain";
   screenReason: string;

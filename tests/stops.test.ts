@@ -64,8 +64,8 @@ describe("stop sequence", () => {
     expect(body.order.stops.map((stop: { id: string }) => stop.id)).toEqual(["a", "b", "c"]);
     expect(body.order.origin.city).toBe("Sheridan");
     expect(body.order.destination.company).toBe("Kodiak Gas Services");
-    expect(body.confirmation.body).toContain("1. Pickup");
-    expect(body.confirmation.body).toContain("3. Drop");
+    expect(body.order.loadNumber).toBeNull();
+    expect(body.confirmation).toBeUndefined();
     expectNoSecrets(body);
 
     const reordered = await patchOrder(

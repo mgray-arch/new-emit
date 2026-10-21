@@ -62,7 +62,11 @@ function requireRoute(value: { origin?: unknown; destination?: unknown; stops?: 
 export const orderInputSchema = z.object(orderFields).superRefine((value, ctx) => requireRoute(value, ctx, "create"));
 
 export const orderPatchSchema = z
-  .object({ ...orderFields, salesOrderNumber: orderFields.salesOrderNumber.optional() })
+  .object({
+    ...orderFields,
+    salesOrderNumber: orderFields.salesOrderNumber.optional(),
+    loadNumber: z.string().trim().max(40).nullable().optional(),
+  })
   .partial()
   .superRefine((value, ctx) => requireRoute(value, ctx, "patch"));
 

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Timeline from "@/components/timeline";
 import { formatDay, formatWhen } from "@/lib/dates";
+import { formatLoadNumber } from "@/lib/load-number";
 import { STAGE_LABEL, STATUS_LABEL, type PortalStatus, type TimelineEvent, type TrackingStage } from "@/lib/types";
 
 interface ReceiverPhoto {
@@ -15,7 +16,7 @@ interface ReceiverPhoto {
 interface ReceiverLoad {
   id: string;
   salesOrderNumber: string;
-  loadNumber: string;
+  loadNumber: string | null;
   portalStatus: PortalStatus;
   trackingStage: TrackingStage;
   timeline: TimelineEvent[];
@@ -63,7 +64,7 @@ export default function ReceiverLinkPage() {
       {loads.map((load) => (
         <article className="receiver-card" key={load.id}>
           <h2>
-            {load.salesOrderNumber} · {load.loadNumber}
+            {load.salesOrderNumber} · {formatLoadNumber(load.loadNumber)}
           </h2>
           <p className="lede">
             {STAGE_LABEL[load.trackingStage]} · {STATUS_LABEL[load.portalStatus]}
