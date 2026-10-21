@@ -3,7 +3,8 @@ import type { SqlArg } from "@/lib/db";
 import type { PortalContext } from "@/lib/db";
 import { CUSTOMER_LOAD_COLUMNS, withTransaction } from "@/lib/db";
 import { serializeCustomerOrder, trackingUrlFor } from "@/lib/customer-view";
-import { denverDate } from "@/lib/dates";
+import { addDaysISO, denverDate, weekRange } from "@/lib/dates";
+import type { LoadTab } from "@/lib/load-list";
 import { listCustomerDocuments } from "@/lib/documents";
 import { PortalError } from "@/lib/http";
 import type { CustomerOrder, PortalStatus, Session, TimelineEvent, TrackingStage } from "@/lib/types";
@@ -21,6 +22,13 @@ export interface OrderFilter {
   page?: number;
   pageSize?: number;
   receiverCompany?: string | null;
+  /** Pickup yard company, matched to the origin. */
+  pickup?: string | null;
+  tab?: LoadTab | null;
+  /** Group by pickup date. The dashboard uses this. Other callers keep the older order. */
+  grouped?: boolean;
+  /** Internal. The CSV export asks for every matching row. */
+  exportAll?: boolean;
 }
 
 export interface OrderPage {
@@ -145,7 +153,47 @@ function deliversTo(row: { destination_json: string; stops_json: string | null }
   }
 }
 
-function buildWhere(filter: OrderFilter): { sql: string; params: SqlArg[] } {
+const DELIVERED_ON = `COALESCE(NULLIF(must_deliver_date, ''), NULLIF(ship_date, ''), substr(updated_at, 1, 10))`;
+
+function attentionReasonSql(): { sql: string; params: (today: string) => SqlArg[] } {
+  return {
+    sql: `(
+      load_number IS NULL OR trim(load_number) = ''
+      OR pending_review_count > 0
+      OR (tracking_stage IN ('at_pickup', 'in_transit') AND (tracking_link IS NULL OR trim(tracking_link) = ''))
+      OR (tracking_stage != 'delivered' AND NULLIF(must_deliver_date, '') IS NOT NULL AND must_deliver_date < ?)
+    )`,
+    params: (today) => [today],
+  };
+}
+
+function tabClause(tab: LoadTab, today: string): { sql: string; params: SqlArg[] } {
+  const reasons = attentionReasonSql();
+  if (tab === "history") {
+    return {
+      sql: `(portal_status = 'cancelled' OR (tracking_stage = 'delivered' AND ${DELIVERED_ON} < date(?, '-6 days')))`,
+      params: [today],
+    };
+  }
+  if (tab === "attention") {
+    return {
+      sql: `(portal_status != 'cancelled' AND NOT (tracking_stage = 'delivered' AND ${DELIVERED_ON} < date(?, '-6 days')) AND ${reasons.sql})`,
+      params: [today, ...reasons.params(today)],
+    };
+  }
+  if (tab === "delivered") {
+    return {
+      sql: `(portal_status != 'cancelled' AND tracking_stage = 'delivered' AND ${DELIVERED_ON} >= date(?, '-6 days') AND NOT ${reasons.sql})`,
+      params: [today, ...reasons.params(today)],
+    };
+  }
+  return {
+    sql: `(portal_status != 'cancelled' AND tracking_stage != 'delivered' AND NOT ${reasons.sql})`,
+    params: reasons.params(today),
+  };
+}
+
+function buildWhere(filter: OrderFilter, today: string): { sql: string; params: SqlArg[] } {
   const clauses: string[] = [];
   const params: SqlArg[] = [];
   if (filter.status) {
@@ -159,6 +207,15 @@ function buildWhere(filter: OrderFilter): { sql: string; params: SqlArg[] } {
   if (filter.shipTo) {
     clauses.push("ship_date <= ?");
     params.push(filter.shipTo);
+  }
+  if (filter.pickup && filter.pickup.trim()) {
+    clauses.push(`LOWER(json_extract(origin_json, '$.company')) = LOWER(?)`);
+    params.push(filter.pickup.trim());
+  }
+  if (filter.tab) {
+    const tab = tabClause(filter.tab, today);
+    clauses.push(tab.sql);
+    params.push(...tab.params);
   }
   if (filter.receiverCompany) {
     clauses.push(`(
@@ -181,15 +238,36 @@ function buildWhere(filter: OrderFilter): { sql: string; params: SqlArg[] } {
   return { sql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
 }
 
+function groupOrderSql(): string {
+  return `ORDER BY
+    CASE
+      WHEN ship_date IS NULL OR ship_date = '' THEN 5
+      WHEN ship_date < ? THEN 0
+      WHEN ship_date = ? THEN 1
+      WHEN ship_date = ? THEN 2
+      WHEN ship_date <= ? THEN 3
+      ELSE 4
+    END,
+    CASE WHEN ship_date < ? THEN ship_date END DESC,
+    ship_date ASC,
+    sales_order_number ASC`;
+}
+
 export async function listOrders(ctx: PortalContext, filter: OrderFilter = {}): Promise<OrderPage> {
-  const pageSize = Math.min(50, Math.max(1, filter.pageSize ?? 8));
+  const cap = filter.exportAll ? 5000 : 50;
+  const pageSize = Math.min(cap, Math.max(1, filter.pageSize ?? 8));
   const page = Math.max(1, filter.page ?? 1);
-  const where = buildWhere(filter);
-  const totalRow = await ctx.db.prepare(`SELECT COUNT(*) AS n FROM loads ${where.sql}`).get(...where.params);
   const today = denverDate(ctx.now());
+  const tomorrow = addDaysISO(today, 1);
+  const { end: weekEnd } = weekRange(ctx.now());
+  const where = buildWhere(filter, today);
+  const totalRow = await ctx.db.prepare(`SELECT COUNT(*) AS n FROM loads ${where.sql}`).get(...where.params);
+  const grouped = Boolean(filter.grouped || filter.tab);
   const rows = (await ctx.db
     .prepare(
-      `${LIST_SQL_HEAD} ${where.sql}
+      grouped
+        ? `${LIST_SQL_HEAD} ${where.sql} ${groupOrderSql()} LIMIT ? OFFSET ?`
+        : `${LIST_SQL_HEAD} ${where.sql}
        ORDER BY ship_date IS NULL,
          CASE WHEN ship_date >= ? THEN 0 ELSE 1 END,
          CASE WHEN ship_date >= ? THEN ship_date END ASC,
@@ -197,12 +275,80 @@ export async function listOrders(ctx: PortalContext, filter: OrderFilter = {}): 
          sales_order_number ASC
        LIMIT ? OFFSET ?`,
     )
-    .all(...where.params, today, today, pageSize, (page - 1) * pageSize)) as unknown as LoadRow[];
+    .all(
+      ...(grouped
+        ? [...where.params, today, today, tomorrow, weekEnd, today, pageSize, (page - 1) * pageSize]
+        : [...where.params, today, today, pageSize, (page - 1) * pageSize]),
+    )) as unknown as LoadRow[];
   return {
     orders: await Promise.all(rows.map((row) => rowToOrder(ctx, row, false))),
     total: Number(totalRow?.n ?? 0),
     page,
     pageSize,
+  };
+}
+
+export interface LoadBoard {
+  orders: CustomerOrder[];
+  total: number;
+  page: number;
+  pageSize: number;
+  counts: Record<LoadTab, number>;
+  today: string;
+  tomorrow: string;
+  weekEnd: string;
+  scope: "tab" | "all";
+  tab: LoadTab;
+  receivers: string[];
+}
+
+async function countTabs(ctx: PortalContext, filter: OrderFilter, today: string): Promise<Record<LoadTab, number>> {
+  const tabs: LoadTab[] = ["attention", "active", "delivered", "history"];
+  const pieces = tabs.map((tab) => {
+    const clause = tabClause(tab, today);
+    return { sql: `SUM(CASE WHEN ${clause.sql} THEN 1 ELSE 0 END) AS ${tab}`, params: clause.params };
+  });
+  const where = buildWhere({ ...filter, tab: null }, today);
+  const row = await ctx.db
+    .prepare(`SELECT ${pieces.map((piece) => piece.sql).join(", ")} FROM loads ${where.sql}`)
+    .get(...pieces.flatMap((piece) => piece.params), ...where.params);
+  return {
+    attention: Number(row?.attention ?? 0),
+    active: Number(row?.active ?? 0),
+    delivered: Number(row?.delivered ?? 0),
+    history: Number(row?.history ?? 0),
+  };
+}
+
+/** Dashboard list. A search ignores the selected tab so one box finds any load. */
+export async function listBoard(ctx: PortalContext, filter: OrderFilter & { tab?: LoadTab | null }): Promise<LoadBoard> {
+  const today = denverDate(ctx.now());
+  const tomorrow = addDaysISO(today, 1);
+  const { end: weekEnd } = weekRange(ctx.now());
+  const tab: LoadTab = filter.tab ?? "attention";
+  const searching = Boolean(filter.q && filter.q.trim());
+  const page = await listOrders(ctx, {
+    ...filter,
+    tab: searching ? null : tab,
+    grouped: true,
+  });
+  const names = await ctx.db
+    .prepare(
+      `SELECT DISTINCT json_extract(destination_json, '$.company') AS company
+       FROM loads
+       WHERE json_extract(destination_json, '$.company') IS NOT NULL
+       ORDER BY company`,
+    )
+    .all();
+  return {
+    ...page,
+    counts: await countTabs(ctx, filter, today),
+    today,
+    tomorrow,
+    weekEnd,
+    scope: searching ? "all" : "tab",
+    tab,
+    receivers: names.map((row) => String(row.company)).filter(Boolean),
   };
 }
 

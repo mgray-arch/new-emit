@@ -9,11 +9,11 @@ The notes below also describe the demo seed and the screening rules. Demo load n
 1. **Live status and tracking.** Every order has a timeline (Submitted, Booked, At Pickup, In Transit, Delivered), a latest ETA, and a public tracking link. SO2196 is Select load 900196-1, Hot Shot, Sheridan, WY to Oklahoma City, OK, in transit, ship 2026-10-14 14:30, must deliver 2026-10-16, ETA Oct 15, 2026, 3:00 PM America/Denver.
 2. **Order confirmation.** Submitting an order stores it in the portal and shows it on screen. That screen is the confirmation. No email is sent, and there is no outbox. The Select load number stays blank until a Select admin enters the real SAM number (`458934-1` style). EMIT sees Pending until then.
 3. **Ask about an SO.** "where is SO2196?" answers from shipment data. "what are you paying the truck?" is refused and does not include a dollar amount. With no AI key, the built-in answerer is used. If `AI_API_KEY` is set, the model receives only the customer-safe JSON.
-4. **Search, pagination, mobile.** Search matches SO or city. Page size is 8. Upcoming ship dates are listed first. Below 980px the table becomes stacked cards.
+4. **Search, tabs, mobile.** One search box finds a load in any tab by Select load number, EMIT order number, city, or receiver. Tabs are Needs Attention, Active, Delivered (last 7 days), and History. Delivered loads older than that, and cancelled loads, sit in History. History exports to CSV without carrier pay, and without EMIT's cost for a regular EMIT user. The list is grouped by pickup date and loads 25 at a time.
 
 Saved delivery locations are searched from the drop stop. Pickup yards stay the one-tap list. A one-off pickup is not added to that list. Duplicate docks are caught in the form and again on the server. A drop whose company matches a receiver is linked to that receiver.
 
-`npm test` — 49 tests passed, including location duplicate detection.
+`npm test` — 55 tests passed, including location duplicate detection and the load-list tabs.
 
 ## Security
 

@@ -8,10 +8,18 @@ import TrackLink from "@/components/track-link";
 import TrackingLinkField from "@/components/tracking-link-field";
 import { formatDay } from "@/lib/dates";
 import {
+  LOAD_TABS,
+  LOAD_TAB_LABEL,
+  PICKUP_GROUP_LABEL,
+  attentionReasons,
+  pickupGroup,
+  type LoadTab,
+  type PickupGroup,
+} from "@/lib/load-list";
+import {
   STATUS_LABEL,
   canSeePricing,
   formatLoadNumber,
-  formatPlace,
   type CustomerDocument,
   type CustomerOrder,
   type PortalRole,
@@ -23,83 +31,31 @@ interface ListResponse {
   total: number;
   page: number;
   pageSize: number;
-  stats: Record<PortalStatus | "total", number>;
+  counts: Record<LoadTab, number>;
+  today: string;
+  tomorrow: string;
+  weekEnd: string;
+  scope: "tab" | "all";
+  tab: LoadTab;
+  receivers: string[];
 }
 
-const STATS: Array<{ key: PortalStatus | "total"; label: string; color: string; icon: string }> = [
-  { key: "total", label: "Total Loads", color: "var(--orange)", icon: "box" },
-  { key: "being_prepared", label: "Being Prepared", color: "var(--gold)", icon: "clock" },
-  { key: "ready_to_ship", label: "Ready to Ship", color: "var(--green)", icon: "check" },
-  { key: "shipped", label: "Shipped", color: "var(--blue)", icon: "truck" },
-  { key: "cancelled", label: "Cancelled", color: "var(--red)", icon: "x" },
-];
-
-function Icon({ name, color }: { name: string; color: string }) {
-  const common = { width: 18, height: 18, fill: "none", stroke: color, strokeWidth: 1.8 };
-  if (name === "clock") {
-    return (
-      <svg {...common} viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="8" />
-        <path d="M12 8v5l3 2" />
-      </svg>
-    );
-  }
-  if (name === "check") {
-    return (
-      <svg {...common} viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="8" />
-        <path d="M8 12.5l2.5 2.5L16 9" />
-      </svg>
-    );
-  }
-  if (name === "truck") {
-    return (
-      <svg {...common} viewBox="0 0 24 24">
-        <path d="M3 7h11v8H3zM14 10h4l3 3v2h-7z" />
-        <circle cx="7" cy="17" r="1.5" />
-        <circle cx="17" cy="17" r="1.5" />
-      </svg>
-    );
-  }
-  if (name === "x") {
-    return (
-      <svg {...common} viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="8" />
-        <path d="M9 9l6 6M15 9l-6 6" />
-      </svg>
-    );
-  }
-  return (
-    <svg {...common} viewBox="0 0 24 24">
-      <path d="M4 8l8-4 8 4-8 4-8-4zM4 8v8l8 4 8-4V8" />
-    </svg>
-  );
-}
-
-function DateStack({ date, time }: { date: string | null; time?: string | null }) {
-  if (!date) return <span className="mini">—</span>;
-  const [year] = date.split("-");
-  return (
-    <span className="datestack">
-      <span>{formatDay(date)},</span>
-      <span>
-        {year}
-        {time ? ` ${time}` : ""}
-      </span>
-    </span>
-  );
-}
+const PAGE_SIZE = 25;
 
 export default function Dashboard({ startNew = false }: { startNew?: boolean }) {
   const sites = useSites();
+  const [tab, setTab] = useState<LoadTab>("attention");
   const [status, setStatus] = useState<string>("");
   const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
   const [shipFrom, setShipFrom] = useState("");
   const [shipTo, setShipTo] = useState("");
-  const [showDates, setShowDates] = useState(false);
+  const [pickup, setPickup] = useState("");
+  const [receiver, setReceiver] = useState("");
   const [page, setPage] = useState(1);
   const [data, setData] = useState<ListResponse | null>(null);
+  const [rows, setRows] = useState<CustomerOrder[]>([]);
+  const [reload, setReload] = useState(0);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<CustomerOrder | null>(null);
   const [creating, setCreating] = useState(startNew);
@@ -131,24 +87,31 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
 
   useEffect(() => {
     const params = new URLSearchParams();
+    params.set("tab", tab);
     if (status) params.set("status", status);
     if (query.trim()) params.set("q", query.trim());
     if (shipFrom) params.set("shipFrom", shipFrom);
     if (shipTo) params.set("shipTo", shipTo);
+    if (pickup) params.set("pickup", pickup);
+    if (receiver) params.set("receiver", receiver);
     params.set("page", String(page));
+    params.set("pageSize", String(PAGE_SIZE));
     fetch(`/api/orders?${params}`)
       .then(async (response) => {
         if (!response.ok) throw new Error("Could not load orders");
         return response.json();
       })
-      .then((body) => {
+      .then((body: ListResponse) => {
         setData(body);
+        setRows((current) => {
+          if (page === 1) return body.orders;
+          const seen = new Set(current.map((order) => order.id));
+          return [...current, ...body.orders.filter((order) => !seen.has(order.id))];
+        });
         setError("");
       })
       .catch(() => setError("Could not load orders"));
-  }, [status, query, shipFrom, shipTo, page, submitted, editing]);
-
-  const stats = data?.stats ?? { total: 0, being_prepared: 0, ready_to_ship: 0, shipped: 0, cancelled: 0 };
+  }, [tab, status, query, shipFrom, shipTo, pickup, receiver, page, reload]);
 
   async function openEdit(id: string) {
     const response = await fetch(`/api/orders/${id}`);
@@ -231,6 +194,8 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
         setEditing(body.order);
         setDraft(draftFromOrder(body.order));
       }
+      setPage(1);
+      setReload((value) => value + 1);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Could not save");
     } finally {
@@ -244,12 +209,8 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ portalStatus }),
     });
-    setPage(page);
-    setData((current) => (current ? { ...current } : current));
-    const params = new URLSearchParams({ page: String(page) });
-    if (status) params.set("status", status);
-    const response = await fetch(`/api/orders?${params}`);
-    if (response.ok) setData(await response.json());
+    setPage(1);
+    setReload((value) => value + 1);
   }
 
   async function upload(slot: "attachment" | "bol", file: File) {
@@ -271,39 +232,82 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     );
   }
 
-  const rangeLabel = useMemo(() => {
-    if (!data) return "";
-    if (data.total === 0) return "No loads";
-    const from = (data.page - 1) * data.pageSize + 1;
-    const to = Math.min(data.total, data.page * data.pageSize);
-    return `Showing ${from}–${to} of ${data.total}`;
-  }, [data]);
+  const counts = data?.counts ?? { attention: 0, active: 0, delivered: 0, history: 0 };
+  const groups = useMemo(() => {
+    if (!data) return [];
+    const blocks: Array<{ id: PickupGroup; orders: CustomerOrder[] }> = [];
+    for (const order of rows) {
+      const id = pickupGroup(order.shipDate, data.today, data.tomorrow, data.weekEnd);
+      const last = blocks[blocks.length - 1];
+      if (!last || last.id !== id) blocks.push({ id, orders: [order] });
+      else last.orders.push(order);
+    }
+    return blocks;
+  }, [rows, data]);
+
+  function exportHistory() {
+    const params = new URLSearchParams();
+    params.set("tab", "history");
+    if (status) params.set("status", status);
+    if (query.trim()) params.set("q", query.trim());
+    if (shipFrom) params.set("shipFrom", shipFrom);
+    if (shipTo) params.set("shipTo", shipTo);
+    if (pickup) params.set("pickup", pickup);
+    if (receiver) params.set("receiver", receiver);
+    window.location.href = `/api/orders/export?${params}`;
+  }
 
   return (
     <main className="page">
       <h1>BROKER DASHBOARD</h1>
       <p className="lede">View and track all incoming shipment loads</p>
-      <section className="stats">
-        {STATS.map((stat) => (
+      <div className="tabs" role="tablist" aria-label="Load lists">
+        {LOAD_TABS.map((item) => (
           <button
-            key={stat.key}
-            className={`stat ${status === (stat.key === "total" ? "" : stat.key) && (stat.key === "total" ? !status : true) ? "on" : ""}`}
-            style={{ borderLeftColor: stat.color, ["--accent" as string]: stat.color }}
+            key={item}
+            className={tab === item ? "tab on" : "tab"}
+            type="button"
+            role="tab"
+            aria-selected={tab === item}
             onClick={() => {
-              setStatus(stat.key === "total" ? "" : stat.key);
+              setTab(item);
               setPage(1);
             }}
-            type="button"
           >
-            <div className="ico">
-              <Icon name={stat.icon} color={stat.color} />
-            </div>
-            <strong>{stats[stat.key] ?? 0}</strong>
-            <em>{stat.label}</em>
+            <strong>{counts[item]}</strong>
+            <span>{LOAD_TAB_LABEL[item]}</span>
           </button>
         ))}
-      </section>
+      </div>
       <div className="filters">
+        <input
+          className="search board-search"
+          placeholder="Search load number, order, city, or receiver"
+          value={q}
+          onChange={(event) => {
+            setQ(event.target.value);
+            setPage(1);
+          }}
+          aria-label="Search loads"
+        />
+        <input aria-label="Pickup from" type="date" value={shipFrom} onChange={(event) => { setShipFrom(event.target.value); setPage(1); }} />
+        <input aria-label="Pickup to" type="date" value={shipTo} onChange={(event) => { setShipTo(event.target.value); setPage(1); }} />
+        <select aria-label="Pickup site" value={pickup} onChange={(event) => { setPickup(event.target.value); setPage(1); }}>
+          <option value="">All pickup sites</option>
+          {sites.map((site) => (
+            <option key={site.id} value={site.company}>
+              {site.company}
+            </option>
+          ))}
+        </select>
+        <select aria-label="Receiver" value={receiver} onChange={(event) => { setReceiver(event.target.value); setPage(1); }}>
+          <option value="">All receivers</option>
+          {(data?.receivers ?? []).map((company) => (
+            <option key={company} value={company}>
+              {company}
+            </option>
+          ))}
+        </select>
         <select
           aria-label="Status"
           value={status}
@@ -312,32 +316,13 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
             setPage(1);
           }}
         >
-          <option value="">All Statuses</option>
+          <option value="">All statuses</option>
           {Object.entries(STATUS_LABEL).map(([value, label]) => (
             <option key={value} value={value}>
               {label}
             </option>
           ))}
         </select>
-        <button className="btn secondary" type="button" onClick={() => setShowDates((value) => !value)}>
-          Ship date range
-        </button>
-        {showDates && (
-          <>
-            <input aria-label="Ship from" type="date" value={shipFrom} onChange={(event) => { setShipFrom(event.target.value); setPage(1); }} />
-            <input aria-label="Ship to" type="date" value={shipTo} onChange={(event) => { setShipTo(event.target.value); setPage(1); }} />
-          </>
-        )}
-        <input
-          className="search"
-          placeholder="Search SO or city"
-          value={q}
-          onChange={(event) => {
-            setQ(event.target.value);
-            setPage(1);
-          }}
-          aria-label="Search by SO or city"
-        />
         <button
           className="btn"
           type="button"
@@ -351,132 +336,85 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
         >
           New load
         </button>
+        {tab === "history" && (
+          <button className="btn secondary" type="button" onClick={exportHistory}>
+            Export CSV
+          </button>
+        )}
       </div>
+      {data?.scope === "all" && query.trim() ? <p className="mini">Showing matches from every tab.</p> : null}
       {error && <p className="error">{error}</p>}
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              {["PO / Order #", "Select load", "Origin", "Destination", "Truck Type", "Transit", "Ship Date/Time", "Must Deliver", "Truck ETA", "Status", ...(showPricing ? ["Cost"] : []), "Notes", "Files", "BOL", "Created By"].map((heading) => (
-                <th key={heading}>{heading}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {data?.orders.map((order) => (
-              <tr
-                key={order.id}
-                className="click-row"
-                tabIndex={0}
-                aria-label={`Open ${order.salesOrderNumber}`}
-                onClick={(event) => {
-                  const target = event.target as HTMLElement;
-                  if (target.closest("a, button, select, input, label, option")) return;
-                  void openEdit(order.id);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && event.target === event.currentTarget) void openEdit(order.id);
-                }}
-              >
-                <td>
-                  <span className="so">{order.salesOrderNumber}</span>
-                </td>
-                <td className={order.loadNumber ? undefined : "pending"}>
-                  {formatLoadNumber(order.loadNumber)}
-                  <TrackLink href={order.trackingLink} />
-                </td>
-                <td>
-                  <div className="company">{order.origin.company}</div>
-                  <div className="addr">{formatPlace(order.origin).replace(`${order.origin.company}, `, "")}</div>
-                </td>
-                <td>
-                  <div className="company">{order.destination.company}</div>
-                  <div className="addr">{formatPlace(order.destination).replace(`${order.destination.company}, `, "")}</div>
-                  {order.stops.length > 2 && <div className="mini">{order.stops.length} stops</div>}
-                </td>
-                <td>{order.truckType || "—"}</td>
-                <td>{order.transit || "—"}</td>
-                <td>
-                  <DateStack date={order.shipDate} time={order.shipTime} />
-                </td>
-                <td>
-                  <DateStack date={order.mustDeliverDate} />
-                </td>
-                <td>
-                  <DateStack date={order.truckEta} />
-                </td>
-                <td>
-                  <select aria-label={`Status for ${order.salesOrderNumber}`} value={order.portalStatus} onChange={(event) => changeStatus(order, event.target.value as PortalStatus)}>
-                    {Object.entries(STATUS_LABEL).map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                {showPricing && (
-                  <td>{order.customerCost == null ? "—" : order.customerCost.toLocaleString("en-US", { style: "currency", currency: "USD" })}</td>
-                )}
-                <td className="notes">{order.comments || "—"}</td>
-                <td>
-                  <div>{order.attachmentCount}</div>
-                  {order.pendingReviewCount > 0 && <div className="hold">{order.pendingReviewCount} in review</div>}
-                </td>
-                <td>{order.bolCount}</td>
-                <td>{order.createdBy}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="load-cards">
-        {data?.orders.map((order) => (
-          <article
-            className="load-card clickable"
-            key={order.id}
-            tabIndex={0}
-            aria-label={`Open ${order.salesOrderNumber}`}
-            onClick={(event) => {
-              const target = event.target as HTMLElement;
-              if (target.closest("a, button, select, input, label")) return;
-              void openEdit(order.id);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && event.target === event.currentTarget) void openEdit(order.id);
-            }}
-          >
-            <h3>{order.salesOrderNumber}</h3>
-            <div className="pill">{STATUS_LABEL[order.portalStatus]}</div>
-            <p className={order.loadNumber ? "mini" : "mini pending"}>Select load {formatLoadNumber(order.loadNumber)}</p>
-            <p>
-              {order.origin.city}, {order.origin.state} → {order.destination.city}, {order.destination.state}
-              {order.stops.length > 2 ? ` · ${order.stops.length} stops` : ""}
-            </p>
-            <p className="mini">
-              Ship {order.shipDate || "—"} {order.shipTime || ""} · ETA {order.latestEta ? formatDay(order.latestEta.slice(0, 10)) : order.truckEta || "—"}
-            </p>
-            {showPricing && (
-              <p className="mini">{order.customerCost == null ? "Cost not set" : order.customerCost.toLocaleString("en-US", { style: "currency", currency: "USD" })}</p>
-            )}
-            <TrackLink href={order.trackingLink} />
-          </article>
+      <div className="board">
+        {groups.map((group) => (
+          <section key={group.id}>
+            <div className="group-head" role="heading" aria-level={2}>
+              {PICKUP_GROUP_LABEL[group.id]}
+            </div>
+            {group.orders.map((order) => {
+              const reasons = data ? attentionReasons(order, data.today) : [];
+              return (
+                <article
+                  key={order.id}
+                  className="load-row"
+                  tabIndex={0}
+                  aria-label={`Open ${order.salesOrderNumber}`}
+                  onClick={(event) => {
+                    const target = event.target as HTMLElement;
+                    if (target.closest("a, button, select, input, label, option")) return;
+                    void openEdit(order.id);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && event.target === event.currentTarget) void openEdit(order.id);
+                  }}
+                >
+                  <div className="load-row-top">
+                    <strong className="so">{order.salesOrderNumber}</strong>
+                    <span className="pill">{STATUS_LABEL[order.portalStatus]}</span>
+                  </div>
+                  <div className={order.loadNumber ? "mini" : "mini pending"}>
+                    Select load {formatLoadNumber(order.loadNumber)}
+                    {order.shipDate ? ` · Ship ${formatDay(order.shipDate)}${order.shipTime ? ` ${order.shipTime}` : ""}` : ""}
+                  </div>
+                  <div>
+                    {order.origin.company} · {order.origin.city}, {order.origin.state}
+                    {" → "}
+                    {order.destination.company} · {order.destination.city}, {order.destination.state}
+                    {order.stops.length > 2 ? ` · ${order.stops.length} stops` : ""}
+                  </div>
+                  {reasons.length > 0 && <div className="hold">{reasons.join(" · ")}</div>}
+                  <div className="load-row-actions">
+                    <TrackLink href={order.trackingLink} />
+                    {showPricing && (
+                      <span className="mini">
+                        {order.customerCost == null ? "Cost not set" : order.customerCost.toLocaleString("en-US", { style: "currency", currency: "USD" })}
+                      </span>
+                    )}
+                    <select
+                      aria-label={`Status for ${order.salesOrderNumber}`}
+                      value={order.portalStatus}
+                      onChange={(event) => changeStatus(order, event.target.value as PortalStatus)}
+                    >
+                      {Object.entries(STATUS_LABEL).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </article>
+              );
+            })}
+          </section>
         ))}
+        {data && rows.length === 0 ? <p className="mini">No loads in this list.</p> : null}
       </div>
       <div className="pager">
-        <span>{rangeLabel}</span>
-        <div>
-          <button className="btn secondary" type="button" disabled={!data || data.page <= 1} onClick={() => setPage((value) => value - 1)}>
-            Previous
+        <span>{data ? `${rows.length} of ${data.total}` : ""}</span>
+        {data && rows.length < data.total ? (
+          <button className="btn secondary" type="button" onClick={() => setPage((value) => value + 1)}>
+            Load more
           </button>
-          <button
-            className="btn secondary"
-            type="button"
-            disabled={!data || data.page * data.pageSize >= data.total}
-            onClick={() => setPage((value) => value + 1)}
-          >
-            Next
-          </button>
-        </div>
+        ) : null}
       </div>
       {(creating || editing) && (
         <div className="backdrop" role="presentation" onMouseDown={() => { setCreating(false); setEditing(null); }}>

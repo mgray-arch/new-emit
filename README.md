@@ -149,6 +149,14 @@ Pickup stops keep the EMIT yards as large one-tap choices. Other pickup location
 
 A drop is linked to a receiver when the company name matches, so the receiver page still finds the load.
 
+## Load lists
+
+The dashboard is four lists: **Needs Attention** (no Select load number, files in review, an in-transit load with no tracking link, or a past-due delivery), **Active**, **Delivered** for the last 7 days, and **History**. A delivered load moves to History on its own after those 7 days. Cancelled loads are in History too.
+
+One search box looks through every list for a Select load number, an EMIT order number, a city, or a receiver. Date range, pickup site, receiver, and status narrow whichever list you are in. Loads are grouped by pickup date. The page loads 25 at a time.
+
+History can be exported as CSV. The file never includes carrier pay. A regular EMIT user does not get EMIT's cost or the rate reason in that file. Select admins and EMIT admins do.
+
 ## Tracking links
 
 Each load has a tracking link, separate from the portal status page. A Select admin pastes the public SAM or MacroPoint URL on the load. EMIT users and receivers get a Track button when it is set. The link has to be http or https. Clearing the field removes the button.
