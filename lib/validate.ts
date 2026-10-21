@@ -6,6 +6,7 @@ const dateField = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a YYYY-MM-DD date
 export const placeSchema = z.object({
   company: z.string().trim().min(1, "Company is required").max(120),
   address1: z.string().trim().min(1, "Address is required").max(200),
+  address2: z.string().trim().max(120).optional(),
   city: z.string().trim().min(1, "City is required").max(80),
   state: z
     .string()
@@ -21,6 +22,11 @@ export const stopSchema = z.object({
   id: z.string().trim().min(1).max(80).optional(),
   kind: z.enum(["pickup", "drop"]),
   place: placeSchema,
+  locationId: z.string().trim().max(80).nullable().optional(),
+  saveAsNew: z.boolean().optional(),
+  contact: z.string().trim().max(120).optional(),
+  phone: z.string().trim().max(40).optional(),
+  notes: z.string().trim().max(500).optional(),
 });
 
 const orderFields = {
@@ -96,6 +102,25 @@ export const receiverPatchSchema = z.object({
   company: z.string().trim().min(2).max(160).optional(),
   contactEmails: z.array(contactEmail).max(30).optional(),
   enabled: z.boolean().optional(),
+});
+
+export const locationPatchSchema = z.object({
+  company: z.string().trim().min(1).max(120),
+  address1: z.string().trim().min(1).max(200),
+  address2: z.string().trim().max(120).optional().default(""),
+  city: z.string().trim().min(1).max(80),
+  state: z
+    .string()
+    .trim()
+    .length(2)
+    .transform((value) => value.toUpperCase()),
+  postalCode: z.string().trim().max(12).optional().default(""),
+  country: z.string().trim().max(2).optional().default("US"),
+  contact: z.string().trim().max(120).optional().default(""),
+  phone: z.string().trim().max(40).optional().default(""),
+  notes: z.string().trim().max(500).optional().default(""),
+  receiverId: z.string().trim().max(80).nullable().optional(),
+  active: z.boolean().optional(),
 });
 
 export type OrderInput = z.infer<typeof orderInputSchema>;

@@ -52,6 +52,7 @@ export const STAGE_LABEL: Record<TrackingStage, string> = {
 export interface Place {
   company: string;
   address1: string;
+  address2?: string;
   city: string;
   state: string;
   postalCode: string;
@@ -65,6 +66,8 @@ export interface Stop {
   id: string;
   kind: StopKind;
   place: Place;
+  /** Saved drop this stop was filled from. Empty for a one-off pickup. */
+  locationId?: string | null;
 }
 
 /** Public tracking lists the sequence without street addresses. */
@@ -92,7 +95,8 @@ export interface CustomerDocument {
 export interface CustomerOrder {
   id: string;
   salesOrderNumber: string;
-  loadNumber: string;
+  /** Real Select (SAM) load number, or null until a Select admin or a future SAM sync enters it. */
+  loadNumber: string | null;
   portalStatus: PortalStatus;
   trackingStage: TrackingStage;
   timeline: TimelineEvent[];
@@ -106,21 +110,34 @@ export interface CustomerOrder {
   mustDeliverDate: string | null;
   truckEta: string | null;
   latestEta: string | null;
+  /** Portal status page. This is not the carrier's public share link. */
   trackingUrl: string;
-  customerCost: number | null;
-  rateReason: RateReason | null;
+  /** SAM / MacroPoint public share link. Null until a Select admin or a future SAM sync sets it. */
+  trackingLink: string | null;
+  /** EMIT's own cost. Omitted entirely for regular EMIT users. */
+  customerCost?: number | null;
+  /** Omitted entirely for regular EMIT users. */
+  rateReason?: RateReason | null;
   comments: string;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
   attachmentCount: number;
   bolCount: number;
-  pendingReviewCount: number;
+  /** Pages held for Select. Omitted for every EMIT user, including EMIT admins. */
+  pendingReviewCount?: number;
   documents: CustomerDocument[];
+  /** Select only. Omitted for every EMIT role and for view-as. */
+  samBuildStatus?: "building" | "failed" | null;
+  samBuildError?: string | null;
+  /** Select only. When the build was requested, so a stuck build can be retried. */
+  samBuildAt?: string | null;
+  /** Select only. Present when SAM_LOAD_URL_TEMPLATE can build a link. */
+  samUrl?: string | null;
 }
 
 export interface PublicTracking {
-  loadNumber: string;
+  loadNumber: string | null;
   salesOrderNumber: string;
   portalStatus: PortalStatus;
   trackingStage: TrackingStage;
@@ -134,31 +151,67 @@ export interface PublicTracking {
   shipDate: string | null;
   mustDeliverDate: string | null;
   truckType: TruckType | null;
+  trackingLink: string | null;
 }
 
-export type PortalRole = "customer" | "admin";
+/** customer = add loads, no pricing. emit_viewer = view only. emit_admin = full access. admin = Select. */
+export type PortalRole = "customer" | "emit_viewer" | "emit_admin" | "admin";
+
+/** The one permission a Select admin assigns. Pricing is included only in full access. */
+export type EmitPermission = "view" | "add" | "full";
+
+export const EMIT_PERMISSIONS = ["view", "add", "full"] as const;
+
+export const PERMISSION_LABEL: Record<EmitPermission, string> = {
+  view: "View only",
+  add: "Add loads",
+  full: "Full access",
+};
+
+/** Select staff, and EMIT full access, see what Select charges EMIT. Nobody at EMIT sees carrier pay. */
+export function canSeePricing(role: string | null | undefined): boolean {
+  return role === "admin" || role === "emit_admin";
+}
+
+/** View only can look. Add loads and full access can create and edit. Select can too, unless they are viewing as view only. */
+export function canAddLoads(role: string | null | undefined): boolean {
+  return role === "admin" || role === "emit_admin" || role === "customer";
+}
+
+/** Saved delivery locations. Full access and Select. Pickup sites stay with Select. */
+export function canManageLocations(role: string | null | undefined): boolean {
+  return role === "admin" || role === "emit_admin";
+}
+
+export function permissionFromRole(role: string | null | undefined): EmitPermission | null {
+  if (role === "emit_viewer") return "view";
+  if (role === "customer") return "add";
+  if (role === "emit_admin") return "full";
+  return null;
+}
+
+export function roleFromPermission(permission: EmitPermission): PortalRole {
+  if (permission === "view") return "emit_viewer";
+  if (permission === "full") return "emit_admin";
+  return "customer";
+}
 
 export interface Session {
   userId: string;
   email: string;
   name: string;
   role: PortalRole;
-}
-
-export interface OrderConfirmation {
-  salesOrderNumber: string;
-  loadNumber: string;
-  emailedTo: string;
-  subject: string;
-  body: string;
-  sender: string | null;
-  delivered: boolean;
-  createdAt: string;
+  /** Bumped when the password changes so older cookies stop working. */
+  passwordEpoch?: number;
+  /** The signed-in role. Equals role unless Select is previewing an EMIT role. */
+  actorRole?: PortalRole;
+  /** Set only for a Select admin who is previewing an EMIT role. */
+  viewAs?: PortalRole | null;
 }
 
 export interface AssistantReference {
   salesOrderNumber: string;
-  loadNumber: string;
+  loadNumber: string | null;
   trackingUrl: string;
   trackingStage: TrackingStage;
   latestEta: string | null;
@@ -189,7 +242,7 @@ export interface ReviewItem {
   id: string;
   loadId: string;
   salesOrderNumber: string;
-  loadNumber: string;
+  loadNumber: string | null;
   kind: string;
   screenResult: "block" | "uncertain";
   screenReason: string;
@@ -202,9 +255,15 @@ export interface ReviewItem {
   createdAt: string;
 }
 
+/** The number EMIT should see. Pending means Select has not entered the SAM load number yet. */
+export function formatLoadNumber(loadNumber: string | null | undefined): string {
+  const value = loadNumber?.trim();
+  return value ? value : "Pending";
+}
+
 export function formatPlace(place: Place): string {
   const cityLine = [place.city, place.state].filter(Boolean).join(", ");
-  return [place.company, place.address1, cityLine, place.postalCode].filter(Boolean).join(", ");
+  return [place.company, place.address1, place.address2, cityLine, place.postalCode].filter(Boolean).join(", ");
 }
 
 export function mapsUrl(place: Place): string {

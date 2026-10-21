@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { PortalError } from "@/lib/http";
 
 /**
  * Document and photo bytes. Vercel Blob when BLOB_READ_WRITE_TOKEN is set.
@@ -38,7 +39,10 @@ export async function writeStoredBytes(
     return `memory:${key}`;
   }
   if (process.env.VERCEL && !blobConfigured()) {
-    throw new Error("BLOB_READ_WRITE_TOKEN is required on Vercel");
+    throw new PortalError(
+      "BLOB_READ_WRITE_TOKEN is not set for this deployment. Add it for Preview in Vercel and redeploy to upload files. Sign-in does not need it.",
+      503,
+    );
   }
   if (blobConfigured()) {
     const { put } = await import("@vercel/blob");

@@ -1,96 +1,208 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import PhotoGallery from "@/components/photo-gallery";
+import SamBuildButton from "@/components/sam-build-button";
+import SelectLoadField from "@/components/select-load-field";
 import Shell from "@/components/shell";
+import StatusPill from "@/components/status-pill";
 import Timeline from "@/components/timeline";
-import { formatWhen } from "@/lib/dates";
-import { STATUS_LABEL, formatPlace, type CustomerOrder, type OrderConfirmation } from "@/lib/types";
+import TrackLink from "@/components/track-link";
+import TrackingLinkField from "@/components/tracking-link-field";
+import { denverDate, formatDay, formatWhen } from "@/lib/dates";
+import { displayStatus, fileSummary } from "@/lib/load-list";
+import { toast } from "@/lib/toast";
+import { canAddLoads, canSeePricing, formatLoadNumber, formatPlace, type CustomerOrder, type PortalRole } from "@/lib/types";
 
 export default function OrderPage() {
   const params = useParams<{ id: string }>();
   const [order, setOrder] = useState<CustomerOrder | null>(null);
-  const [confirmation, setConfirmation] = useState<OrderConfirmation | null>(null);
-  const [canUpload, setCanUpload] = useState(false);
+  const [role, setRole] = useState<PortalRole | null>(null);
+  const [problem, setProblem] = useState("");
 
   useEffect(() => {
     fetch("/api/me")
       .then((response) => (response.ok ? response.json() : null))
-      .then((body) => setCanUpload(body?.role === "admin"))
-      .catch(() => setCanUpload(false));
+      .then((body) => setRole(body?.role ?? null))
+      .catch(() => setRole(null));
   }, []);
+
+  const canUpload = role === "admin";
+  const showPricing = canSeePricing(role);
 
   useEffect(() => {
     if (!params.id) return;
     fetch(`/api/orders/${params.id}`)
-      .then((response) => (response.ok ? response.json() : null))
+      .then(async (response) => {
+        if (response.status === 404) {
+          setProblem("We couldn't find that load. It may have been removed, or the link is wrong.");
+          return null;
+        }
+        if (!response.ok) {
+          setProblem("We couldn't open this load. Refresh the page and try again.");
+          return null;
+        }
+        return response.json();
+      })
       .then((body) => {
         if (!body) return;
         setOrder(body.order);
-        setConfirmation(body.confirmation);
-      });
+        setProblem("");
+      })
+      .catch(() => setProblem("We couldn't open this load. Refresh the page and try again."));
   }, [params.id]);
+
+  const today = denverDate(new Date());
 
   return (
     <Shell>
       <main className="page">
-        {!order && <p className="mini">Loading shipment…</p>}
+        <p>
+          <Link href="/" className="text-link">
+            Back to loads
+          </Link>
+        </p>
+        {problem && <p className="empty">{problem}</p>}
+        {!order && !problem && <p className="mini">Loading this load…</p>}
         {order && (
           <>
-            <h1>{order.salesOrderNumber}</h1>
+            <div className="load-row-top">
+              <h1 className="lane">
+                {order.origin.city}, {order.origin.state} → {order.destination.city}, {order.destination.state}
+              </h1>
+              <StatusPill status={displayStatus(order, today)} />
+            </div>
             <p className="lede">
-              Select load {order.loadNumber} · {STATUS_LABEL[order.portalStatus]}
+              {order.salesOrderNumber} · Select load {formatLoadNumber(order.loadNumber)}
             </p>
-            {confirmation && (
-              <div className="confirm">
-                <strong>Order confirmed</strong>
-                <div className="pair">
-                  <span>{confirmation.salesOrderNumber}</span>
-                  <span>→</span>
-                  <b>{confirmation.loadNumber}</b>
-                </div>
-                <pre className="email-preview">{confirmation.body}</pre>
+            <div className="date-grid">
+              <div className="date-pair">
+                <span className="k">Pickup</span>
+                <span>{order.shipDate ? `${formatDay(order.shipDate)}${order.shipTime ? `, ${order.shipTime}` : ""}` : "Not set"}</span>
               </div>
+              <div className="date-pair">
+                <span className="k">Delivery</span>
+                <span>{order.mustDeliverDate ? formatDay(order.mustDeliverDate) : "Not set"}</span>
+              </div>
+            </div>
+            {!order.loadNumber && (
+              <p className="mini">Select has not entered the load number yet. This page is the confirmation. No email is sent.</p>
             )}
-            <Timeline order={order} />
-            <p>Latest ETA: {order.latestEta ? formatWhen(order.latestEta) : "Not posted yet"}</p>
-            <a className="track-link" href={order.trackingUrl}>
-              Public tracking link
-            </a>
-            <PhotoGallery orderId={order.id} loadNumber={order.loadNumber} canUpload={canUpload} />
-            <ol className="stop-list">
-              {order.stops.map((stop) => (
-                <li key={stop.id}>
-                  <strong>{stop.kind === "pickup" ? "Pickup" : "Drop"}</strong>
-                  <div className="company">{stop.place.company}</div>
-                  <div className="addr">{formatPlace(stop.place)}</div>
-                </li>
-              ))}
-            </ol>
-            <div className="grid-2" style={{ marginTop: 16 }}>
-              <div>
-                <div className="label">Origin</div>
-                <div className="company">{order.origin.company}</div>
-                <div className="addr">{formatPlace(order.origin)}</div>
-              </div>
-              <div>
-                <div className="label">Destination</div>
-                <div className="company">{order.destination.company}</div>
-                <div className="addr">{formatPlace(order.destination)}</div>
-              </div>
+            <div className="load-row-actions">
+              {role === "admin" ? (
+                <SamBuildButton
+                  order={order}
+                  onUpdated={(next) => {
+                    setOrder(next);
+                  }}
+                />
+              ) : null}
+              <TrackLink href={order.trackingLink} />
+              {canAddLoads(role) ? (
+                <Link className="btn secondary" href={`/?edit=${order.id}`}>
+                  Edit load
+                </Link>
+              ) : null}
             </div>
-            <p className="mini" style={{ marginTop: 16 }}>
-              {order.truckType || "Truck type not set"} · {order.transit || "Transit not set"} · Created by {order.createdBy}
-            </p>
-            {order.pendingReviewCount > 0 && <p className="hold">{order.pendingReviewCount} page(s) held for Select review.</p>}
-            <div className="refs">
-              {order.documents.map((doc) => (
-                <a key={doc.id} href={`/api/documents/${doc.id}`}>
-                  {doc.kind === "bol" ? "BOL" : "File"} · {doc.filename}
+
+            <section className="detail-section">
+              <h2>Progress</h2>
+              <Timeline order={order} />
+              <p className="mini">Latest ETA: {order.latestEta ? formatWhen(order.latestEta) : "Not posted yet"}</p>
+            </section>
+
+            <section className="detail-section">
+              <h2>Stops</h2>
+              {order.stops.length === 0 ? (
+                <p className="empty">No stops on this load yet.</p>
+              ) : (
+                <ol className="stop-list">
+                  {order.stops.map((stop) => (
+                    <li key={stop.id}>
+                      <strong>{stop.kind === "pickup" ? "Pickup" : "Delivery"}</strong>
+                      <div className="company">{stop.place.company}</div>
+                      <div className="addr">{formatPlace(stop.place)}</div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </section>
+
+            <section className="detail-section">
+              <h2>Documents and photos</h2>
+              <p className="mini">
+                {fileSummary({ ...order, pendingReviewCount: role === "admin" ? order.pendingReviewCount : 0 })}
+              </p>
+              {role === "admin" && (order.pendingReviewCount ?? 0) > 0 && <p className="hold">{order.pendingReviewCount} in review</p>}
+              {order.documents.length === 0 ? (
+                <p className="empty">No documents yet. Add a BOL or another file from Edit load.</p>
+              ) : (
+                <div className="refs">
+                  {order.documents.map((doc) => (
+                    <a key={doc.id} href={`/api/documents/${doc.id}`}>
+                      {doc.kind === "bol" ? "BOL" : "File"} · {doc.filename}
+                    </a>
+                  ))}
+                </div>
+              )}
+              <PhotoGallery orderId={order.id} loadNumber={order.loadNumber} canUpload={canUpload} />
+            </section>
+
+            <section className="detail-section">
+              <h2>Tracking</h2>
+              {canUpload && (
+                <>
+                  <SelectLoadField
+                    orderId={order.id}
+                    loadNumber={order.loadNumber}
+                    onUpdated={(next) => {
+                      setOrder(next);
+                      toast("Select load number saved.");
+                    }}
+                  />
+                  <TrackingLinkField
+                    orderId={order.id}
+                    trackingLink={order.trackingLink}
+                    onUpdated={(next) => {
+                      setOrder(next);
+                      toast("Tracking link saved.");
+                    }}
+                  />
+                </>
+              )}
+              {order.trackingLink ? (
+                <p className="mini">Live tracking is the Track button above.</p>
+              ) : (
+                <p className="empty">No live tracking link yet. Select adds one when the truck is on the way.</p>
+              )}
+              <p>
+                <a className="track-link" href={order.trackingUrl} title="Shareable status page">
+                  Shareable status page
                 </a>
-              ))}
-            </div>
+              </p>
+              <p className="mini">
+                {order.truckType || "Truck type not set"} · {order.transit || "Transit not set"} · Created by {order.createdBy}
+              </p>
+            </section>
+
+            <section className="detail-section">
+              <h2>Notes</h2>
+              {order.comments ? <p className="note">{order.comments}</p> : <p className="empty">No notes on this load.</p>}
+            </section>
+
+            {showPricing && (
+              <section className="detail-section">
+                <h2>EMIT cost</h2>
+                <p>
+                  {order.customerCost == null
+                    ? "Not set yet."
+                    : order.customerCost.toLocaleString("en-US", { style: "currency", currency: "USD" })}
+                  {order.rateReason ? ` · ${order.rateReason}` : ""}
+                </p>
+              </section>
+            )}
           </>
         )}
       </main>

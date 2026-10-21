@@ -1,9 +1,9 @@
 /**
  * Who may sign in, and through which provider.
- * EMIT staff use Microsoft. Select staff use Google.
- * Receivers do not sign in. They open a private link.
- * Select never uses Microsoft. EMIT never uses Google.
- * The only admins are the Select addresses in SELECT_ADMIN_EMAILS.
+ * EMIT staff use email and password. Microsoft Entra is optional and not required.
+ * Select admins use Google. Receivers do not sign in. They open a private link.
+ * Select admins are the addresses in SELECT_ADMIN_EMAILS.
+ * An EMIT admin is a portal role a Select admin sets on the Users page. It is not an identity-provider role.
  */
 
 export type SignInRole = "customer" | "admin";
@@ -56,6 +56,22 @@ function isEmitStaff(email: string): boolean {
   return emitAllowedEmails().includes(email) || emitDomains().includes(domainOf(email));
 }
 
+/** An address a Select admin may turn into an EMIT password user. Never a Select admin. */
+export function canProvisionEmitUser(email: string): IdentityDecision {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized.includes("@")) return { ok: false, error: "Enter an email address." };
+  if (isSelectEmail(normalized)) {
+    return { ok: false, error: "Select staff sign in with Google. This page is for EMIT staff." };
+  }
+  if (!isEmitStaff(normalized)) {
+    return {
+      ok: false,
+      error: "That email is not an EMIT staff address. Add the domain to EMIT_EMAIL_DOMAINS or the address to EMIT_ALLOWED_EMAILS.",
+    };
+  }
+  return { ok: true, role: "customer", email: normalized };
+}
+
 /** Microsoft (Entra ID). EMIT staff only. Never grants Select admin or a receiver. */
 export function identityFromMicrosoft(email: string): IdentityDecision {
   const normalized = email.trim().toLowerCase();
@@ -89,7 +105,7 @@ export function identityFromGoogle(input: {
     return { ok: false, error: "This Google account is not in the Select Workspace." };
   }
   if (isEmitStaff(normalized)) {
-    return { ok: false, error: "EMIT signs in with Microsoft, not Google." };
+    return { ok: false, error: "EMIT signs in with email and password, not Google." };
   }
   if (!adminEmails().includes(normalized)) {
     return { ok: false, error: "This Google account is not a Select portal admin." };

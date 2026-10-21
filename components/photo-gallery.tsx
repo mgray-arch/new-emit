@@ -20,7 +20,7 @@ export default function PhotoGallery({
   canUpload,
 }: {
   orderId: string;
-  loadNumber: string;
+  loadNumber: string | null;
   canUpload: boolean;
 }) {
   const [photos, setPhotos] = useState<PhotoItem[]>([]);
@@ -32,7 +32,7 @@ export default function PhotoGallery({
   async function refresh() {
     const response = await fetch(`/api/orders/${orderId}/photos`);
     if (!response.ok) {
-      setError("Could not load carrier photos");
+      setError("We couldn't load the photos. Refresh the page and try again.");
       return;
     }
     const body = await response.json();
@@ -51,7 +51,7 @@ export default function PhotoGallery({
         }
       })
       .catch(() => {
-        if (!cancelled) setError("Could not load carrier photos");
+        if (!cancelled) setError("We couldn't load the photos. Refresh the page and try again.");
       });
     return () => {
       cancelled = true;
@@ -59,6 +59,7 @@ export default function PhotoGallery({
   }, [orderId]);
 
   async function upload(file: File) {
+    if (!loadNumber) return;
     setBusy(true);
     setNotice("");
     setError("");
@@ -70,13 +71,13 @@ export default function PhotoGallery({
       form.set("receivedAt", new Date().toISOString());
       const response = await fetch("/api/ingest/carrier-photos", { method: "POST", body: form });
       const body = await response.json();
-      if (!response.ok) throw new Error(body.error || "Could not attach photo");
+      if (!response.ok) throw new Error(body.error || "We couldn't add that photo. Try a JPEG or PNG.");
       if (body.duplicate) setNotice("That image is already on this load.");
       else if (!body.visibleToCustomer) setNotice("Held from EMIT. It looked like a rate confirmation.");
       else setNotice("Photo attached.");
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not attach photo");
+      setError(err instanceof Error ? err.message : "We couldn't add that photo. Try a JPEG or PNG.");
     } finally {
       setBusy(false);
     }
@@ -85,10 +86,10 @@ export default function PhotoGallery({
   return (
     <section className="photo-gallery" aria-label="Carrier photos">
       <div className="label">Carrier photos</div>
-      <p className="mini">Images from the carrier. PDFs and documents are not accepted here.</p>
+      <p className="mini">Photos of the freight. PDFs and documents go in Documents, not here.</p>
       {error && <p className="error">{error}</p>}
       {notice && <p className="mini">{notice}</p>}
-      {photos.length === 0 ? <p className="mini">No carrier photos yet.</p> : null}
+      {photos.length === 0 ? <p className="mini">No photos yet.</p> : null}
       <div className="photo-grid">
         {photos.map((photo) => (
           <figure className={photo.held ? "photo-card held" : "photo-card"} key={photo.id}>
@@ -101,12 +102,15 @@ export default function PhotoGallery({
                 {photo.source} · {formatWhen(photo.receivedAt)}
               </div>
               {photo.subject ? <div>{photo.subject}</div> : null}
-              {photo.held ? <div className="held-flag">Held — not shown to EMIT</div> : null}
+              {photo.held ? <div className="held-flag">Waiting for Select to review this photo</div> : null}
             </figcaption>
           </figure>
         ))}
       </div>
-      {canUpload && (
+      {canUpload && !loadNumber && (
+        <p className="mini">Photos can be attached after a Select admin enters the SAM load number.</p>
+      )}
+      {canUpload && loadNumber && (
         <div className="photo-upload">
           <input
             aria-label="Photo source"

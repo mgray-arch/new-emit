@@ -123,13 +123,20 @@ export interface IngestResult {
 
 export async function ingestDocument(
   ctx: PortalContext,
-  input: { loadId: string; filename: string; bytes: Uint8Array; slot: "attachment" | "bol" },
+  input: {
+    loadId: string;
+    filename: string;
+    bytes: Uint8Array;
+    slot: "attachment" | "bol";
+    uploadedBy?: string | null;
+  },
 ): Promise<IngestResult> {
   if (input.bytes.byteLength === 0) throw new PortalError("That file is empty");
   if (input.bytes.byteLength > MAX_BYTES) throw new PortalError("Files must be 8 MB or smaller");
   const filename = safeFilename(input.filename);
   const kind = sniff(input.bytes, filename);
   const slot = input.slot === "bol" ? "bol" : "attachment";
+  const uploadedBy = input.uploadedBy?.trim() ? input.uploadedBy.trim().slice(0, 80) : null;
   const createdAt = ctx.now().toISOString();
 
   type Page = { bytes: Uint8Array; text: string | null; mediaType: string };
@@ -171,10 +178,10 @@ export async function ingestDocument(
       if (item.screened.decision === "pass") {
         await ctx.db
           .prepare(
-            `INSERT INTO customer_documents (id, load_id, kind, filename, media_type, storage_key, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO customer_documents (id, load_id, kind, filename, media_type, storage_key, created_at, uploaded_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           )
-          .run(item.id, input.loadId, slot, filename, item.page.mediaType, item.storageKey, createdAt);
+          .run(item.id, input.loadId, slot, filename, item.page.mediaType, item.storageKey, createdAt, uploadedBy);
         releasedIds.push(item.id);
         continue;
       }
@@ -183,8 +190,8 @@ export async function ingestDocument(
         .prepare(
           `INSERT INTO internal_documents (
              id, load_id, kind, screen_result, screen_reason, review_status, filename, media_type,
-             page_index, page_count, text_excerpt, storage_key, created_at
-           ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)`,
+             page_index, page_count, text_excerpt, storage_key, created_at, uploaded_by
+           ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           item.id,
@@ -199,6 +206,7 @@ export async function ingestDocument(
           item.page.text ? item.page.text.slice(0, 600) : null,
           item.storageKey,
           createdAt,
+          uploadedBy,
         );
       heldIds.push(item.id);
     }
@@ -267,7 +275,7 @@ export async function listReviewQueue(ctx: PortalContext): Promise<ReviewItem[]>
     id: String(row.id),
     loadId: String(row.load_id),
     salesOrderNumber: String(row.sales_order_number ?? ""),
-    loadNumber: String(row.load_number ?? ""),
+    loadNumber: row.load_number == null || row.load_number === "" ? null : String(row.load_number),
     kind: String(row.kind),
     screenResult: row.screen_result === "block" ? "block" : "uncertain",
     screenReason: String(row.screen_reason ?? ""),
@@ -290,7 +298,7 @@ export async function reviewDocument(
 ): Promise<{ reviewedBy: string; reviewedAt: string; reviewStatus: "approved" | "rejected" }> {
   const row = await ctx.db
     .prepare(
-      `SELECT id, load_id, review_status, filename, media_type, storage_key, kind, screen_result
+      `SELECT id, load_id, review_status, filename, media_type, storage_key, kind, screen_result, uploaded_by
        FROM internal_documents WHERE id = ?`,
     )
     .get(id);
@@ -316,10 +324,19 @@ export async function reviewDocument(
       const customerKind = row.kind === "bol" ? "bol" : "attachment";
       await ctx.db
         .prepare(
-          `INSERT INTO customer_documents (id, load_id, kind, filename, media_type, storage_key, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO customer_documents (id, load_id, kind, filename, media_type, storage_key, created_at, uploaded_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(customerId, String(row.load_id), customerKind, String(row.filename), String(row.media_type), customerKey, now);
+        .run(
+          customerId,
+          String(row.load_id),
+          customerKind,
+          String(row.filename),
+          String(row.media_type),
+          customerKey,
+          now,
+          row.uploaded_by == null ? null : String(row.uploaded_by),
+        );
     }
     await ctx.db
       .prepare(

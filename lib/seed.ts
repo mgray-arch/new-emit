@@ -6,6 +6,7 @@ import type { PortalContext } from "@/lib/db";
 import { withTransaction } from "@/lib/db";
 import { ingestDocument } from "@/lib/documents";
 import { ingestCarrierPhoto, solidPng } from "@/lib/photos";
+import { backfillDropLocations } from "@/lib/locations";
 import { demoTrackingToken, timelineThrough } from "@/lib/orders";
 import type { Place, PortalStatus, RateReason, TrackingStage, TransitOption, TruckType } from "@/lib/types";
 
@@ -84,7 +85,7 @@ const spitzer: Place = {
 
 interface SeedLoad {
   salesOrderNumber: string;
-  loadNumber: string;
+  loadNumber: string | null;
   portalStatus: PortalStatus;
   trackingStage: TrackingStage;
   origin: Place;
@@ -534,6 +535,24 @@ const LOADS: SeedLoad[] = [
     comments: "Left yesterday after a short detention.",
     createdBy: "M. Gray",
   },
+  {
+    salesOrderNumber: "SO-PENDING",
+    loadNumber: null,
+    portalStatus: "being_prepared",
+    trackingStage: "submitted",
+    origin: allen,
+    destination: johnson,
+    truckType: "Hot Shot",
+    transit: "Normal",
+    shipOffset: 1,
+    shipTime: "09:00",
+    deliverOffset: 3,
+    etaOffset: null,
+    customerCost: 1750,
+    rateReason: null,
+    comments: "Waiting for Select to build this in SAM.",
+    createdBy: "M. Gray",
+  },
 ];
 
 const SITES = [allen, north, pen, vectis];
@@ -581,6 +600,8 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
       `INSERT INTO users (id, email, name, role, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
     );
     await insertUser.run(randomUUID(), "m.gray@emit.example", "M. Gray", "customer", hash, createdAt);
+    await insertUser.run(randomUUID(), "viewer@emit.example", "View Only", "emit_viewer", hash, createdAt);
+    await insertUser.run(randomUUID(), "lead@emit.example", "EMIT Lead", "emit_admin", hash, createdAt);
     await insertUser.run(randomUUID(), "mgray@goselect.com", "Mike Gray", "admin", hash, createdAt);
     await insertUser.run(randomUUID(), "dmartin@goselect.com", "Drew Martin", "admin", hash, createdAt);
     await ctx.db
@@ -637,7 +658,7 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
         deliver,
         deliver,
         latestEta,
-        demoTrackingToken(load.loadNumber),
+        demoTrackingToken(load.loadNumber ?? load.salesOrderNumber),
         load.customerCost == null ? null : Math.round(load.customerCost * 100),
         load.rateReason,
         load.comments,
@@ -721,4 +742,6 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
     receivedAt: "2026-10-14T18:40:00Z",
     subject: "Arrived at Enchanted Rock",
   });
+
+  await backfillDropLocations(ctx);
 }
