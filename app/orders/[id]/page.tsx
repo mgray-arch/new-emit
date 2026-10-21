@@ -76,10 +76,16 @@ export default function OrderPage() {
             <p className="lede">
               {order.salesOrderNumber} · Select load {formatLoadNumber(order.loadNumber)}
             </p>
-            <p className="load-dates">
-              <span>Pickup {order.shipDate ? `${formatDay(order.shipDate)}${order.shipTime ? `, ${order.shipTime}` : ""}` : "not set"}</span>
-              <span>Delivery {order.mustDeliverDate ? formatDay(order.mustDeliverDate) : "not set"}</span>
-            </p>
+            <div className="date-grid">
+              <div className="date-pair">
+                <span className="k">Pickup</span>
+                <span>{order.shipDate ? `${formatDay(order.shipDate)}${order.shipTime ? `, ${order.shipTime}` : ""}` : "Not set"}</span>
+              </div>
+              <div className="date-pair">
+                <span className="k">Delivery</span>
+                <span>{order.mustDeliverDate ? formatDay(order.mustDeliverDate) : "Not set"}</span>
+              </div>
+            </div>
             {!order.loadNumber && (
               <p className="mini">Select has not entered the load number yet. This page is the confirmation. No email is sent.</p>
             )}
@@ -102,11 +108,9 @@ export default function OrderPage() {
                 <p className="empty">No stops on this load yet.</p>
               ) : (
                 <ol className="stop-list">
-                  {order.stops.map((stop, index) => (
+                  {order.stops.map((stop) => (
                     <li key={stop.id}>
-                      <strong>
-                        {index + 1}. {stop.kind === "pickup" ? "Pickup" : "Delivery"}
-                      </strong>
+                      <strong>{stop.kind === "pickup" ? "Pickup" : "Delivery"}</strong>
                       <div className="company">{stop.place.company}</div>
                       <div className="addr">{formatPlace(stop.place)}</div>
                     </li>

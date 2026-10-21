@@ -15,13 +15,17 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
   const [demo, setDemo] = useState(false);
-  const [theme, setTheme] = useState<"light" | "dark">("dark");
+  const [theme, setTheme] = useState<"light" | "dark">("light");
   const [toastMessage, setToastMessage] = useState("");
+  const [menu, setMenu] = useState(false);
 
   useEffect(() => {
-    const stored = document.documentElement.dataset.theme === "light" ? "light" : "dark";
-    setTheme(stored);
+    setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
   }, []);
+
+  useEffect(() => {
+    setMenu(false);
+  }, [pathname]);
 
   useEffect(() => {
     let timer = 0;
@@ -70,50 +74,46 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     .slice(0, 2)
     .toUpperCase();
 
+  const links = [
+    { href: "/", label: "Loads", on: pathname === "/" },
+    { href: "/ask", label: "Ask", on: pathname === "/ask", title: "Ask about an order" },
+    ...(me?.role === "admin" || me?.role === "emit_admin"
+      ? [{ href: "/locations", label: "Locations", on: pathname === "/locations" }]
+      : []),
+    ...(me?.role === "admin"
+      ? [
+          { href: "/admin", label: "Review", on: pathname === "/admin" },
+          { href: "/admin/users", label: "Users", on: pathname.startsWith("/admin/users") },
+          { href: "/admin/settings", label: "Settings", on: pathname.startsWith("/admin/settings") },
+        ]
+      : []),
+    { href: "/account", label: "Password", on: pathname === "/account" },
+  ];
+
   return (
-    <>
-      <header className="topbar">
+    <div className="app-shell">
+      {menu ? <button className="nav-scrim" type="button" aria-label="Close menu" onClick={() => setMenu(false)} /> : null}
+      <aside className={menu ? "sidenav open" : "sidenav"}>
         <Link href="/" className="brand">
           <img src="/brand/emit-logo.png" alt="EMIT" />
           <div>
-            <div className="brand-name">EMIT LOAD ORDER PORTAL</div>
-            <div className="brand-sub">Load Entry</div>
+            <div className="brand-name">EMIT</div>
+            <div className="brand-sub">Load portal</div>
           </div>
         </Link>
-        <div className="top-actions">
-          <Link href="/" className={pathname === "/" ? "active" : ""}>
-            Dashboard
-          </Link>
-          <Link href="/ask" className={pathname === "/ask" ? "active" : ""}>
-            Ask about an SO
-          </Link>
-          {(me?.role === "admin" || me?.role === "emit_admin") && (
-            <Link href="/locations" className={pathname === "/locations" ? "active" : ""}>
-              Locations
+        <nav className="sidenav-links" aria-label="Main">
+          {links.map((link) => (
+            <Link key={link.href} href={link.href} className={link.on ? "active" : ""} title={link.title}>
+              {link.label}
             </Link>
-          )}
-          {me?.role === "admin" && (
-            <>
-              <Link href="/admin" className={pathname === "/admin" ? "active" : ""}>
-                Review
-              </Link>
-              <Link href="/admin/users" className={pathname.startsWith("/admin/users") ? "active" : ""}>
-                Users
-              </Link>
-              <Link href="/admin/settings" className={pathname.startsWith("/admin/settings") ? "active" : ""}>
-                Settings
-              </Link>
-            </>
-          )}
-          <Link href="/account" className={pathname === "/account" ? "active" : ""}>
-            Password
-          </Link>
+          ))}
+        </nav>
+        <div className="sidenav-foot">
           <button
             className="logout"
             type="button"
             onClick={toggleTheme}
             title={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
-            aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
           >
             {theme === "light" ? "Dark mode" : "Light mode"}
           </button>
@@ -121,21 +121,31 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             <span className="avatar" title={me?.name || "Your account"}>
               {initials}
             </span>
-            {me?.name || "…"}
+            <span className="who-name">{me?.name || "…"}</span>
           </span>
           <button className="logout" onClick={logout} type="button" title="Sign out">
-            Logout
+            Log out
           </button>
         </div>
-      </header>
-      <div className="accent-line" />
-      {demo && <div className="demo-bar">Test environment · simulated shipments, not live SAM data</div>}
-      {children}
+      </aside>
+      <div className="app-main">
+        <header className="mobile-bar">
+          <button className="logout" type="button" onClick={() => setMenu(true)} aria-label="Open menu">
+            Menu
+          </button>
+          <Link href="/" className="brand">
+            <img src="/brand/emit-logo.png" alt="EMIT" />
+            <span className="brand-name">Loads</span>
+          </Link>
+        </header>
+        {demo && <div className="demo-bar">Test environment. These shipments are not live SAM data.</div>}
+        {children}
+      </div>
       {toastMessage ? (
         <div className="toast" role="status">
           {toastMessage}
         </div>
       ) : null}
-    </>
+    </div>
   );
 }

@@ -60,9 +60,9 @@ function LoginForm() {
     <div className="login-wrap">
       <form className="login-card" onSubmit={submit}>
         <img src="/brand/emit-logo.png" alt="EMIT" style={{ height: 42 }} />
-        <h1>EMIT LOAD ORDER PORTAL</h1>
+        <h1>Sign in</h1>
         <p className="lede">
-          EMIT staff sign in with the email and password from Select. Select staff sign in with Google. Receivers use a private link and do not sign in.
+          EMIT uses the email and password from Select. Select staff use Google. Receivers open a private link and do not sign in here.
         </p>
         {demoHint && (
           <div className="demo-hint">

@@ -289,8 +289,25 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
 
   return (
     <main className="page">
-      <h1>Loads</h1>
-      <p className="lede">What needs a look, what is moving, and what already delivered.</p>
+      <div className="page-head">
+        <div>
+          <h1>Loads</h1>
+          <p className="lede">What needs a look, what is moving, and what already delivered.</p>
+        </div>
+        <button
+          className="btn"
+          type="button"
+          onClick={() => {
+            setCreating(true);
+            setEditing(null);
+            setDraft(emptyDraft());
+            setSubmitted(null);
+            setFormError("");
+          }}
+        >
+          New load
+        </button>
+      </div>
       {showTips && (
         <aside className="tips">
           <strong>A few tips</strong>
@@ -327,62 +344,67 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
         ))}
       </div>
       <div className="filters">
-        <input
-          className="search board-search"
-          placeholder="Search load number, order, city, or receiver"
-          value={q}
-          onChange={(event) => {
-            setQ(event.target.value);
-            setPage(1);
-          }}
-          aria-label="Search loads"
-        />
-        <input aria-label="Pickup from" type="date" value={shipFrom} onChange={(event) => { setShipFrom(event.target.value); setPage(1); }} />
-        <input aria-label="Pickup to" type="date" value={shipTo} onChange={(event) => { setShipTo(event.target.value); setPage(1); }} />
-        <select aria-label="Pickup site" value={pickup} onChange={(event) => { setPickup(event.target.value); setPage(1); }}>
-          <option value="">All pickup sites</option>
-          {sites.map((site) => (
-            <option key={site.id} value={site.company}>
-              {site.company}
-            </option>
-          ))}
-        </select>
-        <select aria-label="Receiver" value={receiver} onChange={(event) => { setReceiver(event.target.value); setPage(1); }}>
-          <option value="">All receivers</option>
-          {(data?.receivers ?? []).map((company) => (
-            <option key={company} value={company}>
-              {company}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="Status"
-          value={status}
-          onChange={(event) => {
-            setStatus(event.target.value);
-            setPage(1);
-          }}
-        >
-          <option value="">All statuses</option>
-          {Object.entries(STATUS_LABEL).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-        <button
-          className="btn"
-          type="button"
-          onClick={() => {
-            setCreating(true);
-            setEditing(null);
-            setDraft(emptyDraft());
-            setSubmitted(null);
-            setFormError("");
-          }}
-        >
-          New load
-        </button>
+        <label className="filter" style={{ flex: "1 1 220px" }}>
+          <span>Search</span>
+          <input
+            className="search board-search"
+            placeholder="Load number, order, city, or receiver"
+            value={q}
+            onChange={(event) => {
+              setQ(event.target.value);
+              setPage(1);
+            }}
+            aria-label="Search loads"
+          />
+        </label>
+        <label className="filter">
+          <span>Pickup from</span>
+          <input aria-label="Pickup from" type="date" value={shipFrom} onChange={(event) => { setShipFrom(event.target.value); setPage(1); }} />
+        </label>
+        <label className="filter">
+          <span>Pickup to</span>
+          <input aria-label="Pickup to" type="date" value={shipTo} onChange={(event) => { setShipTo(event.target.value); setPage(1); }} />
+        </label>
+        <label className="filter">
+          <span>Pickup site</span>
+          <select aria-label="Pickup site" value={pickup} onChange={(event) => { setPickup(event.target.value); setPage(1); }}>
+            <option value="">All sites</option>
+            {sites.map((site) => (
+              <option key={site.id} value={site.company}>
+                {site.company}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="filter">
+          <span>Receiver</span>
+          <select aria-label="Receiver" value={receiver} onChange={(event) => { setReceiver(event.target.value); setPage(1); }}>
+            <option value="">All receivers</option>
+            {(data?.receivers ?? []).map((company) => (
+              <option key={company} value={company}>
+                {company}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="filter">
+          <span>Status</span>
+          <select
+            aria-label="Status"
+            value={status}
+            onChange={(event) => {
+              setStatus(event.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">All statuses</option>
+            {Object.entries(STATUS_LABEL).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
         {tab === "history" && (
           <button className="btn secondary" type="button" onClick={exportHistory}>
             Export CSV
@@ -421,9 +443,15 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                     </div>
                     <StatusPill status={displayStatus(order, today)} />
                   </div>
-                  <div className="load-dates">
-                    <span>Pickup {order.shipDate ? `${formatDay(order.shipDate)}${order.shipTime ? `, ${order.shipTime}` : ""}` : "not set"}</span>
-                    <span>Delivery {order.mustDeliverDate ? formatDay(order.mustDeliverDate) : "not set"}</span>
+                  <div className="date-grid">
+                    <div className="date-pair">
+                      <span className="k">Pickup</span>
+                      <span>{order.shipDate ? `${formatDay(order.shipDate)}${order.shipTime ? `, ${order.shipTime}` : ""}` : "Not set"}</span>
+                    </div>
+                    <div className="date-pair">
+                      <span className="k">Delivery</span>
+                      <span>{order.mustDeliverDate ? formatDay(order.mustDeliverDate) : "Not set"}</span>
+                    </div>
                   </div>
                   <div className="load-meta">
                     {order.salesOrderNumber} · Select load {formatLoadNumber(order.loadNumber)}
