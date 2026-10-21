@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { PortalContext } from "@/lib/db";
 import { ingestDocument, safeFilename } from "@/lib/documents";
 import { PortalError } from "@/lib/http";
@@ -6,6 +6,31 @@ import { parseSelectLoadNumber } from "@/lib/select-load";
 
 /** Recorded on every file this endpoint stores. */
 export const BOT_UPLOADER = "Select bot";
+
+const MIN_KEY_LENGTH = 16;
+
+function tokenMatches(presented: string, expected: string): boolean {
+  const actual = Buffer.from(presented);
+  const wanted = Buffer.from(expected);
+  if (actual.length !== wanted.length) {
+    timingSafeEqual(wanted, wanted);
+    return false;
+  }
+  return timingSafeEqual(actual, wanted);
+}
+
+/** Bearer key only. A session cookie is not enough, and a short or missing key never matches. */
+export function botKeyMatches(req: Request): boolean {
+  const expected = process.env.BOT_UPLOAD_KEY ?? "";
+  const header = req.headers.get("authorization") ?? "";
+  const presented = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
+  if (expected.length < MIN_KEY_LENGTH) {
+    const standIn = "x".repeat(MIN_KEY_LENGTH);
+    tokenMatches(presented || standIn, standIn);
+    return false;
+  }
+  return tokenMatches(presented, expected);
+}
 
 /** Uploads accepted from one IP in the window below. Failures count too. */
 export const BOT_UPLOAD_LIMIT = 60;
