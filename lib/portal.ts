@@ -23,7 +23,16 @@ export async function readyPortal(): Promise<PortalContext> {
   const ctx = await getPortalContext();
   const g = globalThis as GlobalSeed;
   if (process.env.PORTAL_TEST_MODE === "1" && g.__portalTest) return ctx;
-  if (!g.__portalSeed) g.__portalSeed = seedIfEmpty(ctx).then(() => backfillDropLocations(ctx));
+  if (!g.__portalSeed) {
+    let pending!: Promise<void>;
+    pending = seedIfEmpty(ctx)
+      .then(() => backfillDropLocations(ctx))
+      .catch((error: unknown) => {
+        if (g.__portalSeed === pending) delete g.__portalSeed;
+        throw error;
+      });
+    g.__portalSeed = pending;
+  }
   await g.__portalSeed;
   return ctx;
 }

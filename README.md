@@ -94,6 +94,8 @@ Use a **second Turso database** for Preview. If Preview points at the production
 12. **Deployments** → the latest Preview deployment → **Redeploy**. Environment changes do not apply to a deployment that is already built.
 13. Open the preview URL. Sign in as `m.gray@emit.example` / `Emit-Demo-2026`.
 
+A new preview updates the preview database when its server starts. Accounts and loads stay. Refresh the Loads page after the deployment is Ready. Signing out is not required.
+
 If a name is still missing, the sign-in page lists it. Redeploy after you save the variable.
 
 Leave these blank unless you are turning that feature on:
