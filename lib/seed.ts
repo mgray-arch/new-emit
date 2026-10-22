@@ -597,13 +597,14 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
 
   await withTransaction(ctx.db, async () => {
     const insertUser = ctx.db.prepare(
-      `INSERT INTO users (id, email, name, role, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO users (id, email, name, role, permission, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
     );
-    await insertUser.run(randomUUID(), "m.gray@emit.example", "M. Gray", "customer", hash, createdAt);
-    await insertUser.run(randomUUID(), "viewer@emit.example", "View Only", "emit_viewer", hash, createdAt);
-    await insertUser.run(randomUUID(), "lead@emit.example", "EMIT Lead", "emit_admin", hash, createdAt);
-    await insertUser.run(randomUUID(), "mgray@goselect.com", "Mike Gray", "admin", hash, createdAt);
-    await insertUser.run(randomUUID(), "dmartin@goselect.com", "Drew Martin", "admin", hash, createdAt);
+    await insertUser.run(randomUUID(), "m.gray@emit.example", "M. Gray", "customer", "add", hash, createdAt);
+    await insertUser.run(randomUUID(), "viewer@emit.example", "View Only", "customer", "view", hash, createdAt);
+    await insertUser.run(randomUUID(), "pricing@emit.example", "See Pricing", "customer", "pricing", hash, createdAt);
+    await insertUser.run(randomUUID(), "lead@emit.example", "EMIT Lead", "emit_admin", "full", hash, createdAt);
+    await insertUser.run(randomUUID(), "mgray@goselect.com", "Mike Gray", "admin", null, hash, createdAt);
+    await insertUser.run(randomUUID(), "dmartin@goselect.com", "Drew Martin", "admin", null, hash, createdAt);
     await ctx.db
       .prepare(
         `INSERT INTO receivers (id, company, contact_emails, access_token, enabled, created_at, updated_at)

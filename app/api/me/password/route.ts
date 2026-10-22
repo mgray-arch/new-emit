@@ -1,5 +1,5 @@
 import { errorResponse, json } from "@/lib/http";
-import { isSession, requireSession } from "@/lib/guard";
+import { isSession, rejectIfViewingAs, requireSession } from "@/lib/guard";
 import { changeOwnPassword } from "@/lib/passwords";
 import { readyPortal } from "@/lib/portal";
 import { sessionCookie, signSession } from "@/lib/session";
@@ -17,6 +17,8 @@ export async function POST(req: Request) {
   try {
     const session = await requireSession(req);
     if (!isSession(session)) return session;
+    const readonly = rejectIfViewingAs(session);
+    if (readonly) return readonly;
     const body = bodySchema.parse(await req.json());
     const ctx = await readyPortal();
     const next = await changeOwnPassword(ctx, session, body.currentPassword, body.newPassword);

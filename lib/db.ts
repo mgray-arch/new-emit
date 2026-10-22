@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL,
   role TEXT NOT NULL CHECK(role IN ('customer', 'emit_viewer', 'emit_admin', 'admin')),
+  permission TEXT CHECK(permission IS NULL OR permission IN ('view', 'add', 'pricing', 'full')),
   password_hash TEXT,
   active INTEGER NOT NULL DEFAULT 1,
   password_changed_at TEXT,
@@ -357,6 +358,7 @@ export async function openDatabase(file?: string): Promise<SqlDatabase> {
   await migrateUserAccount(db);
   await migrateEmitAdminRole(db);
   await migrateEmitViewerRole(db);
+  await migrateEmitPermissions(db);
   await migrateSamBuild(db);
   await migrateDocumentUploaders(db);
   await db.exec(`DROP TABLE IF EXISTS outbox`);
@@ -586,6 +588,20 @@ interface UserRebuild {
   marker: string;
   table: string;
   check: string;
+}
+
+/**
+ * Permission is separate from EMIT admin vs regular.
+ * Older rows: view-only role, add-loads customer, and full-access admin get the matching permission.
+ * The role itself stays so an existing view-only account does not change shape under a live session.
+ */
+async function migrateEmitPermissions(db: SqlDatabase): Promise<void> {
+  await ensureColumn(db, "users", "permission", "TEXT");
+  await db.exec(`
+    UPDATE users SET permission = 'view' WHERE role = 'emit_viewer' AND permission IS NULL;
+    UPDATE users SET permission = 'add' WHERE role = 'customer' AND permission IS NULL;
+    UPDATE users SET permission = 'full' WHERE role = 'emit_admin' AND permission IS NULL;
+  `);
 }
 
 /** View only is a fourth EMIT role. Existing add-loads users stay `customer`. Full access stays `emit_admin`. */

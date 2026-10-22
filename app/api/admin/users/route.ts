@@ -12,7 +12,8 @@ const createSchema = z.object({
   email: z.string().trim().email().max(200),
   password: z.string().max(200).optional(),
   generatePassword: z.boolean().optional(),
-  permission: z.enum(["view", "add", "full"]).optional(),
+  access: z.enum(["admin", "regular"]).optional(),
+  permission: z.enum(["view", "add", "pricing", "full"]).optional(),
 });
 
 export async function GET(req: Request) {

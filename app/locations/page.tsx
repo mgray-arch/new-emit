@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import Shell from "@/components/shell";
-import type { Site } from "@/lib/types";
+import { canManageLocations, type Site, type ViewAsPreview } from "@/lib/types";
 
 interface SavedLocation {
   id: string;
@@ -23,7 +23,12 @@ interface SavedLocation {
 }
 
 export default function LocationsPage() {
-  const [role, setRole] = useState<string | null>(null);
+  const [me, setMe] = useState<{
+    role?: string;
+    permission?: "view" | "add" | "pricing" | "full" | null;
+    readOnly?: boolean;
+    viewAs?: ViewAsPreview | null;
+  } | null>(null);
   const [locations, setLocations] = useState<SavedLocation[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
   const [query, setQuery] = useState("");
@@ -42,7 +47,7 @@ export default function LocationsPage() {
       }),
       fetch("/api/sites").then((response) => (response.ok ? response.json() : { sites: [] })),
     ]);
-    setRole(me?.role ?? null);
+    setMe(me);
     if (drops.forbidden) {
       setLocations([]);
       setError("Locations are managed by Select or an EMIT user with full access.");
@@ -134,7 +139,9 @@ export default function LocationsPage() {
     await load();
   }
 
-  const canEdit = role === "admin" || role === "emit_admin";
+  const isAdminRole = me?.role === "admin" || me?.role === "emit_admin";
+  const readOnly = Boolean(me?.readOnly);
+  const canEdit = canManageLocations(me) && !readOnly;
 
   return (
     <Shell>
@@ -143,7 +150,7 @@ export default function LocationsPage() {
         <p className="lede">Saved delivery locations. Search by company, city, or street.</p>
         {error ? <p className="error">{error}</p> : null}
         {notice ? <p className="mini">{notice}</p> : null}
-        {canEdit && (
+        {isAdminRole && (
           <>
             <input
               className="search loc-search"
@@ -205,11 +212,12 @@ export default function LocationsPage() {
                           {location.receiverCompany ? ` · Receiver ${location.receiverCompany}` : ""}
                           {location.active ? "" : " · Inactive"}
                         </span>
+                        {readOnly ? <p className="mini">Read-only preview. An EMIT admin who is not view only can edit these.</p> : null}
                         <div className="loc-actions">
-                          <button className="btn secondary" type="button" onClick={() => setEditing(location)}>
+                          <button className="btn secondary" type="button" disabled={!canEdit} onClick={() => setEditing(location)}>
                             Edit
                           </button>
-                          <button className="btn secondary" type="button" onClick={() => void setActive(location, !location.active)}>
+                          <button className="btn secondary" type="button" disabled={!canEdit} onClick={() => void setActive(location, !location.active)}>
                             {location.active ? "Deactivate" : "Activate"}
                           </button>
                           <select
@@ -226,7 +234,7 @@ export default function LocationsPage() {
                                 </option>
                               ))}
                           </select>
-                          <button className="btn secondary" type="button" onClick={() => void merge(location.id)}>
+                          <button className="btn secondary" type="button" disabled={!canEdit} onClick={() => void merge(location.id)}>
                             Merge
                           </button>
                         </div>
@@ -252,7 +260,7 @@ export default function LocationsPage() {
             </article>
           ))}
         </div>
-        {role === "admin" ? (
+        {me?.role === "admin" && !readOnly ? (
           <Link className="text-link" href="/admin/settings">
             Edit pickup sites
           </Link>

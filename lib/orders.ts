@@ -450,7 +450,8 @@ function routeFrom(input: { origin?: OrderInput["origin"]; destination?: OrderIn
 export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: Session): Promise<{
   order: CustomerOrder;
 }> {
-  if (!canAddLoads(actor.role)) throw new PortalError("This account can view loads but cannot add them.", 403);
+  if (actor.viewAs) throw new PortalError("View-as is read-only. Switch back to Select view to change anything.", 403);
+  if (!canAddLoads(actor)) throw new PortalError("This account can view loads but cannot add them.", 403);
   const now = ctx.now().toISOString();
   const id = randomUUID();
   const token = randomBytes(24).toString("base64url");
@@ -458,7 +459,7 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
   const trackingStage = advanceStage("submitted", portalStatus);
   const timeline = timelineThrough(trackingStage, now);
   const drafted = routeFrom(input);
-  const seePricing = canSeePricing(actor.role);
+  const seePricing = canSeePricing(actor);
   const customerCost = seePricing ? input.customerCost : undefined;
   const rateReason = seePricing ? input.rateReason : undefined;
   let route = drafted;
@@ -507,7 +508,8 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
 }
 
 export async function updateOrder(ctx: PortalContext, id: string, patch: OrderPatch, actor: Session): Promise<CustomerOrder> {
-  if (!canAddLoads(actor.role)) throw new PortalError("This account can view loads but cannot change them.", 403);
+  if (actor.viewAs) throw new PortalError("View-as is read-only. Switch back to Select view to change anything.", 403);
+  if (!canAddLoads(actor)) throw new PortalError("This account can view loads but cannot change them.", 403);
   const existing = (await ctx.db.prepare(`${LIST_SQL_HEAD} WHERE id = ?`).get(id)) as LoadRow | undefined;
   if (!existing) throw new PortalError("Order not found", 404);
   const current = await rowToOrder(ctx, existing, false);
@@ -530,7 +532,7 @@ export async function updateOrder(ctx: PortalContext, id: string, patch: OrderPa
         }),
       });
   const now = ctx.now().toISOString();
-  const seePricing = canSeePricing(actor.role);
+  const seePricing = canSeePricing(actor);
   let route = drafted;
   await withTransaction(ctx.db, async () => {
     const syncedStops = await syncStopLocations(ctx, drafted.stops, actor.name, patch.stops ?? drafted.stops, current.stops);

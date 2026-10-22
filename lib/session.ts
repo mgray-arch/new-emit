@@ -1,7 +1,7 @@
 import { jwtVerify, SignJWT } from "jose";
 import { safeNextPath } from "@/lib/paths";
 import { requestOrigin } from "@/lib/public-url";
-import type { Session } from "@/lib/types";
+import { isEmitPermission, type EmitAccess, type EmitPermission, type Session, type ViewAsPreview } from "@/lib/types";
 
 export { safeNextPath };
 
@@ -79,8 +79,30 @@ export function clearSessionCookie(): string {
   return `${COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${secure}`;
 }
 
-/** Select staff preview an EMIT role. Ignored unless the signed-in role is admin. */
+/** Select staff preview an EMIT role. Ignored unless the signed-in role is admin. The preview cannot write. */
 export const VIEW_AS_COOKIE = "portal_view_as";
+
+const LEGACY_VIEW_AS: Record<string, ViewAsPreview> = {
+  emit_admin: { access: "admin", permission: "full" },
+  customer: { access: "regular", permission: "add" },
+  emit_viewer: { access: "regular", permission: "view" },
+};
+
+export function encodeViewAs(preview: ViewAsPreview): string {
+  return `${preview.access}:${preview.permission}`;
+}
+
+/** Cookie values from this build, plus the three older role names. */
+export function parseViewAs(value: string | null | undefined): ViewAsPreview | null {
+  if (!value) return null;
+  const legacy = LEGACY_VIEW_AS[value];
+  if (legacy) return legacy;
+  const [access, permission] = value.split(":");
+  if ((access === "admin" || access === "regular") && isEmitPermission(permission)) {
+    return { access: access as EmitAccess, permission: permission as EmitPermission };
+  }
+  return null;
+}
 
 export function viewAsCookie(role: string): string {
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";

@@ -16,21 +16,31 @@ import { displayStatus, fileSummary } from "@/lib/load-list";
 import { toast } from "@/lib/toast";
 import { canAddLoads, canSeePricing, formatLoadNumber, formatPlace, type CustomerOrder, type PortalRole } from "@/lib/types";
 
+interface Me {
+  role: PortalRole;
+  permission?: "view" | "add" | "pricing" | "full" | null;
+  readOnly?: boolean;
+}
+
 export default function OrderPage() {
   const params = useParams<{ id: string }>();
   const [order, setOrder] = useState<CustomerOrder | null>(null);
-  const [role, setRole] = useState<PortalRole | null>(null);
+  const [me, setMe] = useState<Me | null>(null);
   const [problem, setProblem] = useState("");
 
   useEffect(() => {
     fetch("/api/me")
       .then((response) => (response.ok ? response.json() : null))
-      .then((body) => setRole(body?.role ?? null))
-      .catch(() => setRole(null));
+      .then((body) => setMe(body))
+      .catch(() => setMe(null));
   }, []);
 
-  const canUpload = role === "admin";
-  const showPricing = canSeePricing(role);
+  const role = me?.role ?? null;
+  const readOnly = Boolean(me?.readOnly);
+  const selectView = role === "admin" && !readOnly;
+  const canUpload = selectView;
+  const showPricing = canSeePricing(me);
+  const allowLoads = canAddLoads(me);
 
   useEffect(() => {
     if (!params.id) return;
@@ -91,7 +101,7 @@ export default function OrderPage() {
               <p className="mini">Select has not entered the load number yet. This page is the confirmation. No email is sent.</p>
             )}
             <div className="load-row-actions">
-              {role === "admin" ? (
+              {selectView ? (
                 <SamBuildButton
                   order={order}
                   onUpdated={(next) => {
@@ -100,10 +110,16 @@ export default function OrderPage() {
                 />
               ) : null}
               <TrackLink href={order.trackingLink} />
-              {canAddLoads(role) ? (
-                <Link className="btn secondary" href={`/?edit=${order.id}`}>
-                  Edit load
-                </Link>
+              {allowLoads ? (
+                readOnly ? (
+                  <button className="btn secondary" type="button" disabled title="Read-only preview">
+                    Edit load
+                  </button>
+                ) : (
+                  <Link className="btn secondary" href={`/?edit=${order.id}`}>
+                    Edit load
+                  </Link>
+                )
               ) : null}
             </div>
 
@@ -133,9 +149,9 @@ export default function OrderPage() {
             <section className="detail-section">
               <h2>Documents and photos</h2>
               <p className="mini">
-                {fileSummary({ ...order, pendingReviewCount: role === "admin" ? order.pendingReviewCount : 0 })}
+                {fileSummary({ ...order, pendingReviewCount: selectView ? order.pendingReviewCount : 0 })}
               </p>
-              {role === "admin" && (order.pendingReviewCount ?? 0) > 0 && <p className="hold">{order.pendingReviewCount} in review</p>}
+              {selectView && (order.pendingReviewCount ?? 0) > 0 && <p className="hold">{order.pendingReviewCount} in review</p>}
               {order.documents.length === 0 ? (
                 <p className="empty">No documents yet. Add a BOL or another file from Edit load.</p>
               ) : (

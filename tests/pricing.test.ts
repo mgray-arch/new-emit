@@ -178,10 +178,25 @@ describe("pricing follows the EMIT admin role", () => {
     const users = await listUsers(new Request("http://portal.test/api/admin/users", { headers: { cookie: admin } }));
     const listed = (await users.json()).users.find((user: { email: string }) => user.email === row.email);
     expect(listed.emitAdmin).toBe(true);
+    expect(listed.access).toBe("admin");
     expect(listed.role).toBeUndefined();
 
+    const stillHidden = await listOrdersRoute(new Request("http://portal.test/api/orders?q=SO2196", { headers: { cookie: asStaff } }));
+    expect("customerCost" in (await stillHidden.json()).orders[0]).toBe(false);
+
+    const priced = await patchUser(
+      new Request(`http://portal.test/api/admin/users/${row.id}`, {
+        method: "PATCH",
+        headers: headers(admin),
+        body: JSON.stringify({ permission: "pricing" }),
+      }),
+      { params: Promise.resolve({ id: row.id }) },
+    );
+    expect((await priced.json()).user).toMatchObject({ emitAdmin: true, permission: "pricing", access: "admin" });
     const after = await listOrdersRoute(new Request("http://portal.test/api/orders?q=SO2196", { headers: { cookie: asStaff } }));
-    expect((await after.json()).orders[0].customerCost).toBe(1500);
+    const shown = (await after.json()).orders[0];
+    expect(shown.customerCost).toBe(1500);
+    expect(JSON.stringify(shown)).not.toMatch(/carrierPay|carrier_pay|8765/);
     const stillBlocked = await reviewQueue(new Request("http://portal.test/api/admin/review", { headers: { cookie: asStaff } }));
     expect(stillBlocked.status).toBe(403);
 
@@ -196,8 +211,10 @@ describe("pricing follows the EMIT admin role", () => {
       }),
       { params: Promise.resolve({ id: row.id }) },
     );
-    expect((await demoted.json()).user.emitAdmin).toBe(false);
-    const hiddenAgain = await listOrdersRoute(new Request("http://portal.test/api/orders?q=SO2196", { headers: { cookie: asStaff } }));
-    expect("customerCost" in (await hiddenAgain.json()).orders[0]).toBe(false);
+    expect((await demoted.json()).user).toMatchObject({ emitAdmin: false, access: "regular", permission: "pricing" });
+    const stillPriced = await listOrdersRoute(new Request("http://portal.test/api/orders?q=SO2196", { headers: { cookie: asStaff } }));
+    const kept = (await stillPriced.json()).orders[0];
+    expect(kept.customerCost).toBe(1500);
+    expect(JSON.stringify(kept)).not.toMatch(/carrierPay|carrier_pay|8765/);
   });
 });

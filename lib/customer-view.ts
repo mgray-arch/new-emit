@@ -22,7 +22,7 @@ import {
 import { portalPublicUrl } from "@/lib/public-url";
 import { redactSensitiveText } from "@/lib/sensitive";
 import { samLoadUrl } from "@/lib/sam-link";
-import { canSeePricing } from "@/lib/types";
+import { canSeePricing, resolveAccess, type Viewer } from "@/lib/types";
 import { parseTrackingLink } from "@/lib/tracking-link";
 
 /**
@@ -171,13 +171,14 @@ export function serializeCustomerOrder(value: unknown, options?: CustomerViewOpt
   return order;
 }
 
-/** The order shape that may be sent to this viewer. Regular EMIT users get no pricing keys. No EMIT user gets the review count or the SAM build controls. */
-export function presentCustomerOrder(order: CustomerOrder, role: string | null | undefined): CustomerOrder {
+/** The order shape that may be sent to this viewer. See pricing and full access get EMIT's cost. Nobody at EMIT gets carrier pay, the review count, or the SAM build controls. */
+export function presentCustomerOrder(order: CustomerOrder, viewer: Viewer): CustomerOrder {
+  const access = resolveAccess(viewer);
   const view = serializeCustomerOrder(order, {
-    includePricing: canSeePricing(role),
-    includeReview: role === "admin",
+    includePricing: canSeePricing(access),
+    includeReview: access.select,
   });
-  if (role === "admin") {
+  if (access.select) {
     if (order.samBuildStatus === "building" || order.samBuildStatus === "failed") view.samBuildStatus = order.samBuildStatus;
     if (order.samBuildError) view.samBuildError = order.samBuildError;
     if (order.samBuildAt) view.samBuildAt = order.samBuildAt;

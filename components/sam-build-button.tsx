@@ -45,27 +45,34 @@ export default function SamBuildButton({
 
   if (order.loadNumber) {
     const label = `SAM ${order.loadNumber}`;
-    if (order.samUrl) {
-      return (
-        <a className="btn secondary" href={order.samUrl} target="_blank" rel="noreferrer">
-          {label}
-        </a>
-      );
-    }
-    return (
+    const link = order.samUrl ? (
+      <a className="btn secondary" href={order.samUrl} target="_blank" rel="noreferrer">
+        {label}
+      </a>
+    ) : (
       <button className="btn secondary" type="button" disabled title="The SAM link is not configured on this site yet.">
         {label}
       </button>
+    );
+    return (
+      <span className="sam-build" data-sam-state="built">
+        <span className="sam-state">Built</span>
+        {link}
+      </span>
     );
   }
 
   const started = order.samBuildAt ? Date.parse(order.samBuildAt) : NaN;
   const stale = order.samBuildStatus === "building" && Number.isFinite(started) && Date.now() - started > 2 * 60 * 1000;
   const building = pending || (order.samBuildStatus === "building" && !stale);
+  const failed = !building && (order.samBuildStatus === "failed" || Boolean(error));
+  const state = building ? "building" : failed ? "failed" : "not-built";
+  const stateLabel = building ? "Building" : failed ? "Failed" : "Not built";
   return (
-    <span className="sam-build">
+    <span className="sam-build" data-sam-state={state}>
+      <span className="sam-state">{stateLabel}</span>
       <button className="btn" type="button" onClick={build} disabled={building}>
-        {building ? "Building in SAM…" : order.samBuildStatus === "failed" ? "Try build again" : "Build load in SAM"}
+        {building ? "Building in SAM…" : failed ? "Try build again" : "Build load in SAM"}
       </button>
       {(error || order.samBuildError) && !building ? <span className="error">{error || order.samBuildError}</span> : null}
     </span>

@@ -8,6 +8,7 @@ import { safeNextPath } from "@/lib/paths";
 interface DemoHint {
   emit: string;
   emitViewer?: string;
+  emitPricing?: string;
   emitFull?: string;
   select: string[];
   password: string;
@@ -69,13 +70,14 @@ function LoginForm() {
       <form className="login-card" onSubmit={submit}>
         <BrandLogo height={42} />
         <h1>Sign in</h1>
-        <p className="lede">Two different sign-ins. EMIT staff use email and password. Select staff use Google. Receivers open a private link and do not sign in here.</p>
+        <p className="lede">Two different sign-ins. EMIT admins and regular EMIT users use the first one. Select staff use the second. Receivers open a private link and do not sign in here.</p>
         {demoHint && (
           <div className="demo-hint">
             <strong>Test sign-in</strong>
-            <p>EMIT add loads: {demoHint.emit}</p>
-            {demoHint.emitViewer ? <p>EMIT view only: {demoHint.emitViewer}</p> : null}
-            {demoHint.emitFull ? <p>EMIT full access: {demoHint.emitFull}</p> : null}
+            <p>EMIT regular, add loads: {demoHint.emit}</p>
+            {demoHint.emitViewer ? <p>EMIT regular, view only: {demoHint.emitViewer}</p> : null}
+            {demoHint.emitPricing ? <p>EMIT regular, see pricing: {demoHint.emitPricing}</p> : null}
+            {demoHint.emitFull ? <p>EMIT admin, full access: {demoHint.emitFull}</p> : null}
             <p>Select: {demoHint.select.join(", ")}</p>
             <p>Password for every test account: {demoHint.password}</p>
           </div>
@@ -95,9 +97,12 @@ function LoginForm() {
               "Microsoft sign-in is optional and is not configured. EMIT staff use email and password."}
           </p>
         )}
-        <section className="login-section" aria-labelledby="emit-sign-in">
-          <h2 id="emit-sign-in">EMIT staff</h2>
-          <p className="lede">For EMIT people Select has already added: view only, add loads, and full access. Use the email and password from Select.</p>
+        <section className="login-section login-emit" aria-labelledby="emit-sign-in">
+          <p className="login-kicker">EMIT staff</p>
+          <h2 id="emit-sign-in">EMIT admins and regular users</h2>
+          <p className="lede">
+            Both EMIT admins and regular EMIT users sign in here, with the email Select added and the password Select gave you. Do not use the Select Google button. EMIT IT is not involved.
+          </p>
           <div className="field">
             <label htmlFor="email">EMIT email</label>
             <input id="email" type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required />
@@ -129,9 +134,10 @@ function LoginForm() {
             </button>
           )}
         </section>
-        <section className="login-section" aria-labelledby="select-sign-in">
+        <section className="login-section login-select" aria-labelledby="select-sign-in">
+          <p className="login-kicker">For Select</p>
           <h2 id="select-sign-in">Select staff</h2>
-          <p className="lede">For Select people, including staff beyond the first two admins. This is not an EMIT sign-in.</p>
+          <p className="lede">Mike, Drew, and other Select admins sign in with Google. EMIT admins and regular EMIT users do not use this.</p>
           {google ? (
             <button
               className="btn secondary"
@@ -145,8 +151,7 @@ function LoginForm() {
             </button>
           ) : (
             <>
-              <p className="lede">Google sign-in isn't set up on this site yet. Use email and password.</p>
-              <p className="lede">A Select account that already has a password uses the form above.</p>
+              <p className="lede">Google sign-in isn't set up on this site yet. A Select account that already has a password can use the form above. EMIT people always use that form.</p>
             </>
           )}
         </section>

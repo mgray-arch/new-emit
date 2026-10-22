@@ -8,16 +8,18 @@ interface EmitUser {
   email: string;
   name: string;
   active: boolean;
-  permission: "view" | "add" | "full";
+  access: "admin" | "regular";
+  permission: "view" | "add" | "pricing" | "full";
   emitAdmin: boolean;
   hasPassword: boolean;
   createdAt: string;
 }
 
 const PERMISSIONS: Array<{ value: EmitUser["permission"]; label: string; detail: string }> = [
-  { value: "view", label: "View only", detail: "No pricing. Cannot add loads." },
-  { value: "add", label: "Add loads", detail: "Can add loads. No pricing." },
-  { value: "full", label: "Full access", detail: "Sees what Select charges EMIT, and can add loads." },
+  { value: "view", label: "View only", detail: "Can look at loads. Cannot add loads. No pricing." },
+  { value: "add", label: "Add loads", detail: "Can add and edit loads. No pricing." },
+  { value: "pricing", label: "See pricing", detail: "Sees the price EMIT pays Select. Cannot add loads. Never carrier pay." },
+  { value: "full", label: "Full access", detail: "Can add loads and see the price EMIT pays. Never carrier pay." },
 ];
 
 export default function UsersPage() {
@@ -29,6 +31,7 @@ export default function UsersPage() {
   const [error, setError] = useState("");
   const [sharedPassword, setSharedPassword] = useState("");
   const [permission, setPermission] = useState<EmitUser["permission"]>("add");
+  const [access, setAccess] = useState<EmitUser["access"]>("regular");
   const [resetFor, setResetFor] = useState<string | null>(null);
   const [resetPassword, setResetPassword] = useState("");
 
@@ -65,6 +68,7 @@ export default function UsersPage() {
         email,
         password: generate ? undefined : password,
         generatePassword: generate,
+        access,
         permission,
       }),
     });
@@ -96,20 +100,22 @@ export default function UsersPage() {
     await load();
   }
 
-  async function savePermission(user: EmitUser, next: EmitUser["permission"]) {
+  async function saveUser(user: EmitUser, patch: { access?: EmitUser["access"]; permission?: EmitUser["permission"] }) {
     setError("");
     const response = await fetch(`/api/admin/users/${user.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ permission: next }),
+      body: JSON.stringify(patch),
     });
     const body = await response.json();
     if (!response.ok) {
       setError(body.error || "Could not update that user");
       return;
     }
-    const label = PERMISSIONS.find((item) => item.value === next)?.label ?? next;
-    setMessage(`${user.email} is now ${label}.`);
+    const nextPermission = patch.permission ?? user.permission;
+    const nextAccess = patch.access ?? user.access;
+    const label = PERMISSIONS.find((item) => item.value === nextPermission)?.label ?? nextPermission;
+    setMessage(`${user.email} is ${nextAccess === "admin" ? "an EMIT admin" : "a regular EMIT user"} with ${label}.`);
     await load();
   }
 
@@ -140,7 +146,7 @@ export default function UsersPage() {
       <main className="page">
         <h1>EMIT users</h1>
         <p className="lede">
-          Only Select can add someone here. EMIT admins cannot change permissions. An email that is not on this list cannot sign in as EMIT. Each person gets one level: view only, add loads, or full access. Full access sees what Select charges EMIT. Carrier pay stays hidden from everyone at EMIT.
+          Only Select can add someone here. An email that is not on this list cannot sign in as EMIT. Each person is an EMIT admin or a regular user, and has one permission. See pricing and full access show the price EMIT pays Select. They never show carrier pay. An EMIT admin can manage saved locations unless the permission is view only.
         </p>
         {error && <p className="error">{error}</p>}
         {message && <p className="mini">{message}</p>}
@@ -163,6 +169,13 @@ export default function UsersPage() {
               <label htmlFor="new-email">Email</label>
               <input id="new-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
             </div>
+          </div>
+          <div className="field">
+            <label htmlFor="new-access">Access</label>
+            <select id="new-access" value={access} onChange={(event) => setAccess(event.target.value as EmitUser["access"])}>
+              <option value="regular">Regular EMIT user</option>
+              <option value="admin">EMIT admin</option>
+            </select>
           </div>
           <div className="field">
             <label htmlFor="new-permission">Permission</label>
@@ -202,11 +215,22 @@ export default function UsersPage() {
             </h2>
             <p className="mini">{user.email}</p>
             <label className="field">
+              <span>Access for {user.email}</span>
+              <select
+                aria-label={`Access for ${user.email}`}
+                value={user.access}
+                onChange={(event) => saveUser(user, { access: event.target.value as EmitUser["access"] })}
+              >
+                <option value="regular">Regular EMIT user</option>
+                <option value="admin">EMIT admin</option>
+              </select>
+            </label>
+            <label className="field">
               <span>Permission for {user.email}</span>
               <select
                 aria-label={`Permission for ${user.email}`}
                 value={user.permission}
-                onChange={(event) => savePermission(user, event.target.value as EmitUser["permission"])}
+                onChange={(event) => saveUser(user, { permission: event.target.value as EmitUser["permission"] })}
               >
                 {PERMISSIONS.map((item) => (
                   <option key={item.value} value={item.value}>

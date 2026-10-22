@@ -4,13 +4,15 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { BrandLogo } from "@/components/brand-logo";
+import { PERMISSION_LABEL, type EmitPermission, type ViewAsPreview } from "@/lib/types";
 
 interface Me {
   name: string;
   email: string;
   role: "customer" | "emit_viewer" | "emit_admin" | "admin";
   actorRole?: "customer" | "emit_viewer" | "emit_admin" | "admin";
-  viewAs?: "customer" | "emit_viewer" | "emit_admin" | null;
+  viewAs?: ViewAsPreview | null;
+  readOnly?: boolean;
 }
 
 export default function Shell({ children }: { children: React.ReactNode }) {
@@ -70,11 +72,12 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     router.refresh();
   }
 
-  async function setView(role: string) {
+  async function setView(access: "select" | "admin" | "regular", permission?: EmitPermission) {
+    const nextPermission = permission ?? me?.viewAs?.permission ?? (access === "admin" ? "full" : "add");
     const response = await fetch("/api/view-as", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ role: role === "admin" ? null : role }),
+      body: JSON.stringify(access === "select" ? { access: null } : { access, permission: nextPermission }),
     });
     if (!response.ok) return;
     window.location.href = "/";
@@ -123,15 +126,36 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         </nav>
         <div className="sidenav-foot">
           {me?.actorRole === "admin" ? (
-            <label className="view-as">
-              <span>View as</span>
-              <select aria-label="View as" value={me.viewAs || "admin"} onChange={(event) => void setView(event.target.value)}>
-                <option value="admin">Select view</option>
-                <option value="emit_admin">View as EMIT admin</option>
-                <option value="customer">View as EMIT regular user</option>
-                <option value="emit_viewer">View as view only</option>
-              </select>
-            </label>
+            <div className="view-as">
+              <label>
+                <span>View as</span>
+                <select
+                  aria-label="View as"
+                  value={me.viewAs?.access ?? "select"}
+                  onChange={(event) => void setView(event.target.value as "select" | "admin" | "regular")}
+                >
+                  <option value="select">Select view</option>
+                  <option value="admin">View as EMIT admin</option>
+                  <option value="regular">View as EMIT regular user</option>
+                </select>
+              </label>
+              {me.viewAs ? (
+                <label>
+                  <span>Permission</span>
+                  <select
+                    aria-label="Permission to preview"
+                    value={me.viewAs.permission}
+                    onChange={(event) => void setView(me.viewAs?.access ?? "regular", event.target.value as EmitPermission)}
+                  >
+                    {(Object.keys(PERMISSION_LABEL) as EmitPermission[]).map((permission) => (
+                      <option key={permission} value={permission}>
+                        {PERMISSION_LABEL[permission]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+            </div>
           ) : null}
           <button
             className="logout"
@@ -166,13 +190,10 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         {me?.viewAs ? (
           <div className="view-as-bar" role="status">
             <span>
-              {me.viewAs === "emit_admin"
-                ? "Viewing as an EMIT admin. You see EMIT's cost and can add loads. Carrier pay stays hidden."
-                : me.viewAs === "emit_viewer"
-                  ? "Viewing as view only. You cannot add loads, and pricing is hidden."
-                  : "Viewing as an EMIT regular user. You can add loads. Pricing is hidden."}
+              Read-only. Viewing as {me.viewAs.access === "admin" ? "an EMIT admin" : "a regular EMIT user"} with{" "}
+              {PERMISSION_LABEL[me.viewAs.permission]}. You see what that account sees. Nothing is saved. Carrier pay stays hidden.
             </span>
-            <button className="btn secondary" type="button" onClick={() => void setView("admin")}>
+            <button className="btn secondary" type="button" onClick={() => void setView("select")}>
               Back to Select view
             </button>
           </div>

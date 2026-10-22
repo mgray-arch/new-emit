@@ -1,17 +1,29 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Shell from "@/components/shell";
 
 export default function AccountPage() {
+  const [readOnly, setReadOnly] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
 
+  useEffect(() => {
+    fetch("/api/me")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body) => setReadOnly(Boolean(body?.readOnly)))
+      .catch(() => setReadOnly(false));
+  }, []);
+
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (readOnly) {
+      setError("View-as is read-only. Switch back to Select view to change anything.");
+      return;
+    }
     setPending(true);
     setMessage("");
     setError("");
@@ -36,6 +48,7 @@ export default function AccountPage() {
       <main className="page">
         <h1>PASSWORD</h1>
         <p className="lede">Change the password for this EMIT account. Select admins who use Google do not have a password here.</p>
+        {readOnly ? <p className="error">View-as is read-only. This preview cannot change a password.</p> : null}
         <form onSubmit={submit} style={{ maxWidth: 420 }}>
           {error && <p className="error">{error}</p>}
           {message && <p className="mini">{message}</p>}
@@ -62,7 +75,7 @@ export default function AccountPage() {
               minLength={10}
             />
           </div>
-          <button className="btn" type="submit" disabled={pending}>
+          <button className="btn" type="submit" disabled={pending || readOnly}>
             {pending ? "Saving…" : "Change password"}
           </button>
         </form>

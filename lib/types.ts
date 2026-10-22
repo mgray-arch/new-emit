@@ -154,33 +154,95 @@ export interface PublicTracking {
   trackingLink: string | null;
 }
 
-/** customer = add loads, no pricing. emit_viewer = view only. emit_admin = full access. admin = Select. */
+/**
+ * customer = regular EMIT user. emit_viewer = older view-only rows, treated as regular.
+ * emit_admin = EMIT admin. admin = Select. Permission is stored separately.
+ */
 export type PortalRole = "customer" | "emit_viewer" | "emit_admin" | "admin";
 
-/** The one permission a Select admin assigns. Pricing is included only in full access. */
-export type EmitPermission = "view" | "add" | "full";
+/** What this EMIT person may do with loads and with EMIT's own price. Never carrier pay. */
+export type EmitPermission = "view" | "add" | "pricing" | "full";
 
-export const EMIT_PERMISSIONS = ["view", "add", "full"] as const;
+export type EmitAccess = "admin" | "regular";
+
+export const EMIT_PERMISSIONS = ["view", "add", "pricing", "full"] as const;
 
 export const PERMISSION_LABEL: Record<EmitPermission, string> = {
   view: "View only",
   add: "Add loads",
+  pricing: "See pricing",
   full: "Full access",
 };
 
-/** Select staff, and EMIT full access, see what Select charges EMIT. Nobody at EMIT sees carrier pay. */
-export function canSeePricing(role: string | null | undefined): boolean {
-  return role === "admin" || role === "emit_admin";
+/** Select is previewing one EMIT access plus one permission. The preview cannot write. */
+export interface ViewAsPreview {
+  access: EmitAccess;
+  permission: EmitPermission;
 }
 
-/** View only can look. Add loads and full access can create and edit. Select can too, unless they are viewing as view only. */
-export function canAddLoads(role: string | null | undefined): boolean {
-  return role === "admin" || role === "emit_admin" || role === "customer";
+export type Viewer =
+  | string
+  | {
+      role?: string | null;
+      permission?: EmitPermission | null;
+      viewAs?: ViewAsPreview | null;
+    }
+  | null
+  | undefined;
+
+export interface ResolvedAccess {
+  role: string;
+  permission: EmitPermission | null;
+  /** Real Select session, not a view-as preview. */
+  select: boolean;
+  viewAs: ViewAsPreview | null;
 }
 
-/** Saved delivery locations. Full access and Select. Pickup sites stay with Select. */
-export function canManageLocations(role: string | null | undefined): boolean {
-  return role === "admin" || role === "emit_admin";
+export function isEmitPermission(value: string | null | undefined): value is EmitPermission {
+  return value === "view" || value === "add" || value === "pricing" || value === "full";
+}
+
+/** Effective rules for a session, a legacy role string, or a Select view-as preview. */
+export function resolveAccess(viewer: Viewer): ResolvedAccess {
+  if (viewer && typeof viewer === "object" && viewer.viewAs) {
+    return {
+      role: viewer.viewAs.access === "admin" ? "emit_admin" : "customer",
+      permission: viewer.viewAs.permission,
+      select: false,
+      viewAs: viewer.viewAs,
+    };
+  }
+  const role = typeof viewer === "string" ? viewer : (viewer?.role ?? "");
+  if (role === "admin") return { role: "admin", permission: null, select: true, viewAs: null };
+  if (!role) return { role: "", permission: null, select: false, viewAs: null };
+  const explicit = viewer && typeof viewer === "object" ? viewer.permission : undefined;
+  const permission = isEmitPermission(explicit) ? explicit : permissionFromRole(role);
+  return { role, permission, select: false, viewAs: null };
+}
+
+/** Customer price only: what EMIT pays Select. Carrier pay is never included by this check. */
+export function canSeePricing(viewer: Viewer): boolean {
+  const access = resolveAccess(viewer);
+  if (access.select) return true;
+  return access.permission === "pricing" || access.permission === "full";
+}
+
+/** View only and see pricing can look. Add loads and full access can create and edit. */
+export function canAddLoads(viewer: Viewer): boolean {
+  const access = resolveAccess(viewer);
+  if (access.select) return true;
+  return access.permission === "add" || access.permission === "full";
+}
+
+/**
+ * Saved delivery locations. EMIT admins can manage them unless they are view only.
+ * See pricing does not by itself grant this. Pickup sites stay with Select.
+ * View-as still reports the capability so the preview matches the role; writes are rejected separately.
+ */
+export function canManageLocations(viewer: Viewer): boolean {
+  const access = resolveAccess(viewer);
+  if (access.select) return true;
+  return access.role === "emit_admin" && access.permission !== "view";
 }
 
 export function permissionFromRole(role: string | null | undefined): EmitPermission | null {
@@ -190,10 +252,14 @@ export function permissionFromRole(role: string | null | undefined): EmitPermiss
   return null;
 }
 
+/** Legacy mapping when a caller sends only a permission. Full access stays an EMIT admin. */
 export function roleFromPermission(permission: EmitPermission): PortalRole {
-  if (permission === "view") return "emit_viewer";
   if (permission === "full") return "emit_admin";
   return "customer";
+}
+
+export function accessFromRole(role: string | null | undefined): EmitAccess {
+  return role === "emit_admin" ? "admin" : "regular";
 }
 
 export interface Session {
@@ -203,10 +269,12 @@ export interface Session {
   role: PortalRole;
   /** Bumped when the password changes so older cookies stop working. */
   passwordEpoch?: number;
+  /** EMIT permission from the user row. Null for Select. Ignored while viewAs is set. */
+  permission?: EmitPermission | null;
   /** The signed-in role. Equals role unless Select is previewing an EMIT role. */
   actorRole?: PortalRole;
-  /** Set only for a Select admin who is previewing an EMIT role. */
-  viewAs?: PortalRole | null;
+  /** Set only for a Select admin who is previewing an EMIT role. The preview is read-only. */
+  viewAs?: ViewAsPreview | null;
 }
 
 export interface AssistantReference {

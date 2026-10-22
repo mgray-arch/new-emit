@@ -33,6 +33,12 @@ import {
   type PortalRole,
 } from "@/lib/types";
 
+interface Me {
+  role: PortalRole;
+  permission?: "view" | "add" | "pricing" | "full" | null;
+  readOnly?: boolean;
+}
+
 interface ListResponse {
   orders: CustomerOrder[];
   total: number;
@@ -92,7 +98,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   const [editing, setEditing] = useState<CustomerOrder | null>(null);
   const [creating, setCreating] = useState(startNew);
   const [draft, setDraft] = useState<Draft>(emptyDraft());
-  const [role, setRole] = useState<PortalRole | null>(null);
+  const [me, setMe] = useState<Me | null>(null);
   const [showTips, setShowTips] = useState(false);
   const [submitted, setSubmitted] = useState<CustomerOrder | null>(null);
   const [saving, setSaving] = useState(false);
@@ -106,24 +112,29 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   useEffect(() => {
     fetch("/api/me")
       .then((response) => (response.ok ? response.json() : null))
-      .then((body) => setRole(body?.role ?? null))
-      .catch(() => setRole(null));
-    const edit = new URLSearchParams(window.location.search).get("edit");
-    if (edit) void openEdit(edit);
+      .then((body: Me | null) => {
+        setMe(body);
+        const edit = new URLSearchParams(window.location.search).get("edit");
+        if (edit && body && !body.readOnly && canAddLoads(body)) void openEdit(edit);
+      })
+      .catch(() => setMe(null));
   }, []);
 
-  useEffect(() => {
-    if (role === "emit_viewer") setCreating(false);
-  }, [role]);
+  const role = me?.role ?? null;
+  const readOnly = Boolean(me?.readOnly);
+  const showPricing = canSeePricing(me);
+  const allowLoads = canAddLoads(me);
+  const selectView = role === "admin" && !readOnly;
 
   useEffect(() => {
-    if (role !== "customer" && role !== "emit_admin" && role !== "emit_viewer") return;
+    if (!allowLoads || readOnly) setCreating(false);
+  }, [allowLoads, readOnly]);
+
+  useEffect(() => {
+    if (!role || role === "admin") return;
     if (window.localStorage.getItem("emit-tips-v1") === "1") return;
     setShowTips(true);
   }, [role]);
-
-  const showPricing = canSeePricing(role);
-  const allowLoads = canAddLoads(role);
 
   const replaceOrder = useCallback((next: CustomerOrder) => {
     setRows((current) => current.map((item) => (item.id === next.id ? next : item)));
@@ -176,6 +187,10 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   }
 
   async function save() {
+    if (readOnly) {
+      setFormError("View-as is read-only. Switch back to Select view to change anything.");
+      return;
+    }
     if (!draft.stops.some((stop) => stop.kind === "pickup") || !draft.stops.some((stop) => stop.kind === "drop")) {
       setFormError("Add at least one pickup and one drop.");
       return;
@@ -256,6 +271,10 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   }
 
   async function upload(slot: "attachment" | "bol", file: File) {
+    if (readOnly) {
+      setFormError("View-as is read-only. Switch back to Select view to change anything.");
+      return;
+    }
     if (!editing) return;
     const form = new FormData();
     form.set("file", file);
@@ -307,6 +326,8 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
           <button
             className="btn"
             type="button"
+            disabled={readOnly}
+            title={readOnly ? "Read-only preview" : undefined}
             onClick={() => {
               setCreating(true);
               setEditing(null);
@@ -469,12 +490,12 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                     {order.stops.length > 2 ? ` · ${order.stops.length} stops` : ""} · {fileSummary({ ...order, pendingReviewCount: 0 })}
                   </div>
                   {reasons.length > 0 && <div className="hold">{reasons.join(" · ")}</div>}
-                  {role === "admin" && (order.pendingReviewCount ?? 0) > 0 ? (
+                  {selectView && (order.pendingReviewCount ?? 0) > 0 ? (
                     <div className="hold">{order.pendingReviewCount} in review</div>
                   ) : null}
                   {order.comments ? <Note text={order.comments} /> : null}
                   <div className="load-row-actions">
-                    {role === "admin" ? <SamBuildButton order={order} onUpdated={replaceOrder} /> : null}
+                    {selectView ? <SamBuildButton order={order} onUpdated={replaceOrder} /> : null}
                     <TrackLink href={order.trackingLink} />
                     {showPricing && (
                       <span className="load-meta">
@@ -532,7 +553,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                 </p>
               </div>
             )}
-            {role === "admin" && editing && (
+            {selectView && editing && (
               <>
                 <SamBuildButton order={editing} onUpdated={replaceOrder} />
                 <SelectLoadField
@@ -569,15 +590,15 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                 </div>
               </div>
             )}
-            {role === "admin" && editing && (editing.pendingReviewCount ?? 0) > 0 && (
+            {selectView && editing && (editing.pendingReviewCount ?? 0) > 0 && (
               <p className="hold">{editing.pendingReviewCount} in review</p>
             )}
-            {editing && <PhotoGallery orderId={editing.id} loadNumber={editing.loadNumber} canUpload={role === "admin"} />}
+            {editing && <PhotoGallery orderId={editing.id} loadNumber={editing.loadNumber} canUpload={selectView} />}
             <div className="actions">
               <button className="btn secondary" type="button" onClick={() => { setCreating(false); setEditing(null); }}>
                 Close
               </button>
-              <button className="btn" type="button" disabled={saving} onClick={save}>
+              <button className="btn" type="button" disabled={saving || readOnly} onClick={save}>
                 {saving ? "Saving…" : editing ? "Save changes" : "Submit order"}
               </button>
             </div>

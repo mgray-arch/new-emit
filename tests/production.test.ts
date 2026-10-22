@@ -583,12 +583,12 @@ describe("Select load numbers", () => {
   });
 
   it("builds public links from the custom domain", () => {
-    process.env.PORTAL_PUBLIC_URL = "https://emit-select.com/";
-    expect(portalPublicUrl()).toBe("https://emit-select.com");
+    process.env.PORTAL_PUBLIC_URL = "https://portal.example.com/";
+    expect(portalPublicUrl()).toBe("https://portal.example.com");
     delete process.env.PORTAL_PUBLIC_URL;
     process.env.VERCEL_ENV = "production";
-    process.env.VERCEL_PROJECT_PRODUCTION_URL = "emit-select.com";
+    process.env.VERCEL_PROJECT_PRODUCTION_URL = "portal.example.com";
     process.env.VERCEL_URL = "emit-portal-abc123.vercel.app";
-    expect(portalPublicUrl()).toBe("https://emit-select.com");
+    expect(portalPublicUrl()).toBe("https://portal.example.com");
   });
 });

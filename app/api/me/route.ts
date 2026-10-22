@@ -12,8 +12,10 @@ export async function GET(req: Request) {
       name: session.name,
       email: session.email,
       role: session.role,
+      permission: session.permission ?? null,
       actorRole: session.actorRole ?? session.role,
       viewAs: session.viewAs ?? null,
+      readOnly: Boolean(session.viewAs),
     });
   } catch (error) {
     return errorResponse(error);

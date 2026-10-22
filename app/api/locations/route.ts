@@ -1,4 +1,4 @@
-import { isSession, requireLocationEditor, requireSession } from "@/lib/guard";
+import { isSession, requireLocationReader, requireSession } from "@/lib/guard";
 import { errorResponse, json } from "@/lib/http";
 import { listManagedLocations, searchLocations, type LocationKind } from "@/lib/locations";
 import { readyPortal } from "@/lib/portal";
@@ -10,7 +10,7 @@ export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
     const manage = url.searchParams.get("manage") === "1";
-    const session = manage ? await requireLocationEditor(req) : await requireSession(req);
+    const session = manage ? await requireLocationReader(req) : await requireSession(req);
     if (!isSession(session)) return session;
     const ctx = await readyPortal();
     if (manage) {

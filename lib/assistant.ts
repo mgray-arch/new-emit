@@ -4,7 +4,7 @@ import type { PortalContext } from "@/lib/db";
 import { weekRange } from "@/lib/dates";
 import { formatWhen } from "@/lib/dates";
 import type { AssistantAnswer, AssistantReference, CustomerOrder, TrackingStage } from "@/lib/types";
-import { STAGE_LABEL, STATUS_LABEL, canSeePricing } from "@/lib/types";
+import { STAGE_LABEL, STATUS_LABEL, canSeePricing, type Viewer } from "@/lib/types";
 
 const REFUSAL =
   "I can only answer questions about your EMIT shipments: status, dates, ETAs, and tracking. I don't have access to carrier pay, carrier rates, or rate confirmations.";
@@ -198,7 +198,7 @@ function answerLocally(question: string, orders: CustomerOrder[], now: Date, inc
 export async function answerQuestion(
   ctx: PortalContext,
   question: string,
-  role?: string | null,
+  role?: Viewer,
 ): Promise<AssistantAnswer> {
   const trimmed = question.trim();
   if (trimmed.length < 2) {

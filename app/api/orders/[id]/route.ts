@@ -16,7 +16,7 @@ export async function GET(req: Request, context: { params: Promise<{ id: string 
     const ctx = await readyPortal();
     const order = await getOrder(ctx, id);
     if (!order) return json({ error: "Order not found" }, 404);
-    return json({ order: presentCustomerOrder(order, session.role) });
+    return json({ order: presentCustomerOrder(order, session) });
   } catch (error) {
     return errorResponse(error);
   }
@@ -30,7 +30,7 @@ export async function PATCH(req: Request, context: { params: Promise<{ id: strin
     const ctx = await readyPortal();
     const patch = orderPatchSchema.parse(await req.json());
     const order = await updateOrder(ctx, id, patch, session);
-    return json({ order: presentCustomerOrder(order, session.role) });
+    return json({ order: presentCustomerOrder(order, session) });
   } catch (error) {
     return errorResponse(error);
   }

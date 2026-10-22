@@ -1,6 +1,6 @@
 /**
  * Origin used in tracking links and receiver links.
- * Set PORTAL_PUBLIC_URL to the custom domain (https://emit-select.com) in production.
+ * Set PORTAL_PUBLIC_URL to the public origin in production. The hostname is not hardcoded.
  * VERCEL_URL is the deployment hostname, not the custom domain, so it is only a fallback.
  */
 export function portalPublicUrl(): string {

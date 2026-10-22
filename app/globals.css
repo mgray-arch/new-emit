@@ -339,7 +339,13 @@ td select {
 }
 .login-section h2 { margin: 0; font-size: 18px; letter-spacing: -0.01em; line-height: 1.3; }
 .login-section .lede { margin: 0; }
-.view-as { display: grid; gap: 4px; color: var(--text); font-size: 14px; }
+.login-kicker { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.login-emit { border-color: #b75d27; }
+.login-emit .login-kicker { color: #e08a2f; }
+.login-select { border-color: #3d8bfd; }
+.login-select .login-kicker { color: #8eb6ff; }
+.view-as { display: grid; gap: 8px; color: var(--text); font-size: 14px; }
+.view-as label { display: grid; gap: 4px; }
 .view-as select {
   width: 100%;
   background: var(--bg-input);
@@ -365,6 +371,13 @@ td select {
   border-color: #7a5b10;
 }
 .sam-build { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sam-state {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
 .demo-hint { background: #241c14; border: 1px solid #4a3824; border-radius: 10px; padding: 10px 12px; color: #f0d3a4; font-size: 13px; margin: 12px 0; }
 .demo-hint p { margin: 3px 0; }
 .error { color: var(--danger); font-size: 15px; margin: 0 0 8px; }
@@ -683,6 +696,10 @@ html[data-theme="light"] .view-as select {
   border-color: #8d8072;
   color: #1c1916;
 }
+html[data-theme="light"] .login-emit { border-color: #8a4b1f; }
+html[data-theme="light"] .login-emit .login-kicker { color: #8a4b1f; }
+html[data-theme="light"] .login-select { border-color: #1d4e89; }
+html[data-theme="light"] .login-select .login-kicker { color: #1d4e89; }
 html[data-theme="light"] .confirm { background: #e7f6ee; border-color: #b7dcc6; color: #143d28; }
 html[data-theme="light"] .confirm strong { color: #143d28; }
 html[data-theme="light"] .step .dot,

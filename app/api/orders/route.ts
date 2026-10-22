@@ -35,7 +35,7 @@ export async function GET(req: Request) {
     });
     return json({
       ...board,
-      orders: board.orders.map((order) => presentCustomerOrder(order, session.role)),
+      orders: board.orders.map((order) => presentCustomerOrder(order, session)),
     });
   } catch (error) {
     return errorResponse(error);
@@ -49,7 +49,7 @@ export async function POST(req: Request) {
     const ctx = await readyPortal();
     const input = orderInputSchema.parse(await req.json());
     const result = await submitOrder(ctx, input, session);
-    return json({ order: presentCustomerOrder(result.order, session.role) }, 201);
+    return json({ order: presentCustomerOrder(result.order, session) }, 201);
   } catch (error) {
     return errorResponse(error);
   }

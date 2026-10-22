@@ -2,7 +2,7 @@ import bcrypt from "bcryptjs";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { PortalContext } from "@/lib/db";
 import { PortalError } from "@/lib/http";
-import type { PortalRole, Session } from "@/lib/types";
+import { isEmitPermission, permissionFromRole, type EmitPermission, type PortalRole, type Session } from "@/lib/types";
 
 /** Failed attempts against one email before that email is locked. */
 export const LOGIN_EMAIL_LIMIT = 5;
@@ -24,6 +24,7 @@ export interface UserRow {
   email: string;
   name: string;
   role: PortalRole;
+  permission?: EmitPermission | null;
   password_hash: string | null;
   active: number;
   password_changed_at: string | null;
@@ -68,7 +69,7 @@ export function clientIp(req: Request): string {
 export async function findUser(ctx: PortalContext, email: string): Promise<UserRow | null> {
   const row = (await ctx.db
     .prepare(
-      `SELECT id, email, name, role, password_hash, active, password_changed_at, password_epoch FROM users WHERE email = ?`,
+      `SELECT id, email, name, role, permission, password_hash, active, password_changed_at, password_epoch FROM users WHERE email = ?`,
     )
     .get(email.trim().toLowerCase())) as UserRow | undefined;
   return row ?? null;
@@ -77,7 +78,7 @@ export async function findUser(ctx: PortalContext, email: string): Promise<UserR
 export async function findUserById(ctx: PortalContext, id: string): Promise<UserRow | null> {
   const row = (await ctx.db
     .prepare(
-      `SELECT id, email, name, role, password_hash, active, password_changed_at, password_epoch FROM users WHERE id = ?`,
+      `SELECT id, email, name, role, permission, password_hash, active, password_changed_at, password_epoch FROM users WHERE id = ?`,
     )
     .get(id)) as UserRow | undefined;
   return row ?? null;
@@ -138,14 +139,25 @@ export async function loginWithPassword(
   await clearEmailFailures(ctx, normalized);
   return {
     ok: true,
-    session: {
-      userId: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      passwordEpoch: Number(user.password_epoch ?? 0),
-    },
+    session: sessionFromUser(user),
   };
+}
+
+export function sessionFromUser(user: UserRow): Session {
+  return {
+    userId: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    permission: storedPermission(user.role, user.permission),
+    passwordEpoch: Number(user.password_epoch ?? 0),
+  };
+}
+
+function storedPermission(role: string, permission: string | null | undefined): EmitPermission | null {
+  if (role === "admin") return null;
+  if (isEmitPermission(permission)) return permission;
+  return permissionFromRole(role);
 }
 
 /**
@@ -165,13 +177,7 @@ export async function assertSessionLive(
   }
   if (Number(user.active) === 0) return null;
   if (Number(user.password_epoch ?? 0) !== (session.passwordEpoch ?? 0)) return null;
-  return {
-    userId: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role,
-    passwordEpoch: Number(user.password_epoch ?? 0),
-  };
+  return sessionFromUser(user);
 }
 
 /** Microsoft sign-in returns customer. That must not change a permission Select already set. */
@@ -195,15 +201,16 @@ export async function upsertExternalUser(
     await ctx.db
       .prepare(`UPDATE users SET name = ?, role = ? WHERE id = ?`)
       .run(input.name || existing.name, role, existing.id);
-    return { userId: existing.id, email, name: input.name || existing.name, role };
+    return { userId: existing.id, email, name: input.name || existing.name, role, permission: storedPermission(role, existing.permission) };
   }
   const id = randomUUID();
+  const permission = input.role === "admin" ? null : storedPermission(input.role, null);
   await ctx.db
     .prepare(
-      `INSERT INTO users (id, email, name, role, password_hash, active, created_at) VALUES (?, ?, ?, ?, NULL, 1, ?)`,
+      `INSERT INTO users (id, email, name, role, permission, password_hash, active, created_at) VALUES (?, ?, ?, ?, ?, NULL, 1, ?)`,
     )
-    .run(id, email, input.name || email, input.role, new Date().toISOString());
-  return { userId: id, email, name: input.name || email, role: input.role };
+    .run(id, email, input.name || email, input.role, permission, new Date().toISOString());
+  return { userId: id, email, name: input.name || email, role: input.role, permission };
 }
 
 export async function setPasswordHash(ctx: PortalContext, userId: string, password: string): Promise<number> {
@@ -234,5 +241,5 @@ export async function changeOwnPassword(
   }
   if (currentPassword === newPassword) throw new PortalError("Choose a different password.");
   const passwordEpoch = await setPasswordHash(ctx, user.id, newPassword);
-  return { userId: user.id, email: user.email, name: user.name, role: user.role, passwordEpoch };
+  return { ...sessionFromUser({ ...user, password_epoch: passwordEpoch }), passwordEpoch };
 }

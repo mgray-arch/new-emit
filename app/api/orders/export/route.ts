@@ -32,9 +32,9 @@ export async function GET(req: Request) {
       page: 1,
       pageSize: 5000,
     });
-    const includePricing = canSeePricing(session.role);
+    const includePricing = canSeePricing(session);
     const csv = loadsToCsv(
-      page.orders.map((order) => presentCustomerOrder(order, session.role)),
+      page.orders.map((order) => presentCustomerOrder(order, session)),
       includePricing,
     );
     return new Response(csv, {
