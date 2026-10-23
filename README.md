@@ -116,6 +116,8 @@ Leave these blank unless you are turning that feature on:
 | `LOAD_BUILDER_SECRET` | Shared bearer secret, at least 16 characters. Sent to the webhook and required on the callback. |
 | `SAM_LOAD_URL_TEMPLATE` | Link for a stored SAM number. Must contain `{loadNumber}`. Example: `https://sam.example.com/loads/{loadNumber}`. Unset: the number shows and is not a link. |
 | `SAM_API_BASE_URL`, `SAM_API_TOKEN`, `SAM_CUSTOMER_ID` | Leave blank. The portal does not call the SAM API. |
+| `SLACK_NEW_LOADS_WEBHOOK_URL` | Slack incoming webhook for a new-load note. Unset: no Slack message is sent. The note does not include carrier pay. |
+| `SLACK_USER_ID_DREW`, `SLACK_USER_ID_AINSLEY` | Optional Slack member ids so the owner line @mentions that person. Unset: the note uses the names Drew and Ainsley. |
 
 Do not set `DEMO_USER_PASSWORD` in production. Do not set a Gmail client. Order mail has been removed.
 

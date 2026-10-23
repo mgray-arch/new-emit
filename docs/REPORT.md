@@ -126,7 +126,7 @@ The same SHA-256 on one load is one upload. A retry is 200 with `duplicate: true
 
 ## Data layer and SAM
 
-`lib/orders.ts` is the store the app uses today: list, get, submit, update, stats, all returning the customer-safe shape. Submit writes the order with a null Select load number. `lib/select-load.ts` is where an admin, or a future SAM sync, fills that number in. There is no email step and no Slack step.
+`lib/orders.ts` is the store the app uses today: list, get, submit, update, stats, all returning the customer-safe shape. Submit writes the order with a null Select load number. `lib/select-load.ts` is where an admin, or a future SAM sync, fills that number in. There is no email step. A new load posts to Slack only when `SLACK_NEW_LOADS_WEBHOOK_URL` is set. That note names the owner and who entered the load. It does not include carrier pay, and it is not sent to SAM.
 
 `lib/sam.ts` is the drop-in HTTP client. `pickCustomerRate` reads `customerRate` or `customerCharges.lineHaul` / `customerCharges.customerTotal` and never falls back to `carrierCost`. `toSamCreatePayload` does not include carrier fields. The paths (`/v1/customers/{id}/orders`) are a placeholder. The client is unit-tested with a fixture that includes carrier cost 8765.43 and customer rate 1500. It is not called by the running routes. Wiring it is the change to make when Mike's credentials and the real paths arrive. Until then, orders "in SAM" means rows in the portal database.
 

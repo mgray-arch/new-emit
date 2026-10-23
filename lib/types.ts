@@ -120,6 +120,10 @@ export interface CustomerOrder {
   rateReason?: RateReason | null;
   comments: string;
   createdBy: string;
+  /** Select only. The person who submitted the load. Null on older loads. */
+  enteredByName?: string | null;
+  /** Select only. Omitted for every EMIT role and for view-as. */
+  enteredByEmail?: string | null;
   createdAt: string;
   updatedAt: string;
   attachmentCount: number;

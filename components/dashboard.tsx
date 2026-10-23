@@ -10,6 +10,7 @@ import StatusPill from "@/components/status-pill";
 import TrackLink from "@/components/track-link";
 import TrackingLinkField from "@/components/tracking-link-field";
 import { formatDay } from "@/lib/dates";
+import { formatEnteredBy } from "@/lib/entered-by";
 import {
   LOAD_TABS,
   LOAD_TAB_LABEL,
@@ -489,6 +490,9 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                     {order.salesOrderNumber} · Select load {formatLoadNumber(order.loadNumber)}
                     {order.stops.length > 2 ? ` · ${order.stops.length} stops` : ""} · {fileSummary({ ...order, pendingReviewCount: 0 })}
                   </div>
+                  {selectView ? (
+                    <div className="load-meta">Entered by: {formatEnteredBy(order.enteredByName, order.enteredByEmail)}</div>
+                  ) : null}
                   {reasons.length > 0 && <div className="hold">{reasons.join(" · ")}</div>}
                   {selectView && (order.pendingReviewCount ?? 0) > 0 ? (
                     <div className="hold">{order.pendingReviewCount} in review</div>

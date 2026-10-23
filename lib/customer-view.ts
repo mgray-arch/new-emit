@@ -122,12 +122,15 @@ export interface CustomerViewOptions {
   includePricing?: boolean;
   /** False omits pendingReviewCount. Default true keeps stored orders intact for internal callers. */
   includeReview?: boolean;
+  /** False omits who submitted the load. Default false so EMIT and the assistant never receive it. */
+  includeEnteredBy?: boolean;
 }
 
 export function serializeCustomerOrder(value: unknown, options?: CustomerViewOptions): CustomerOrder {
   const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const includePricing = options?.includePricing !== false;
   const includeReview = options?.includeReview !== false;
+  const includeEnteredBy = options?.includeEnteredBy === true;
   const portalStatus = oneOf(raw.portalStatus, PORTAL_STATUSES) ?? "being_prepared";
   const trackingStage = oneOf(raw.trackingStage, TRACKING_STAGES) ?? "submitted";
   const documents = Array.isArray(raw.documents)
@@ -164,6 +167,10 @@ export function serializeCustomerOrder(value: unknown, options?: CustomerViewOpt
     documents,
   };
   if (includeReview) order.pendingReviewCount = numberOrZero(raw.pendingReviewCount);
+  if (includeEnteredBy) {
+    order.enteredByName = strOrNull(raw.enteredByName);
+    order.enteredByEmail = strOrNull(raw.enteredByEmail);
+  }
   if (includePricing) {
     order.customerCost = money(raw.customerCost);
     order.rateReason = oneOf(raw.rateReason, RATE_REASONS);
@@ -177,6 +184,7 @@ export function presentCustomerOrder(order: CustomerOrder, viewer: Viewer): Cust
   const view = serializeCustomerOrder(order, {
     includePricing: canSeePricing(access),
     includeReview: access.select,
+    includeEnteredBy: access.select,
   });
   if (access.select) {
     if (order.samBuildStatus === "building" || order.samBuildStatus === "failed") view.samBuildStatus = order.samBuildStatus;

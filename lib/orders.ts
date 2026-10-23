@@ -10,6 +10,7 @@ import { PortalError } from "@/lib/http";
 import type { CustomerOrder, PortalStatus, Session, TimelineEvent, TrackingStage } from "@/lib/types";
 import { STAGE_LABEL, TRACKING_STAGES, canAddLoads, canSeePricing } from "@/lib/types";
 import { syncStopLocations } from "@/lib/locations";
+import { notifyNewLoad } from "@/lib/slack-new-load";
 import { legacyStops, resolvedRoute } from "@/lib/stops";
 import type { OrderInput, OrderPatch } from "@/lib/validate";
 import type { Stop } from "@/lib/types";
@@ -69,6 +70,8 @@ interface LoadRow {
   rate_reason: string | null;
   comments: string;
   created_by: string;
+  entered_by_name: string | null;
+  entered_by_email: string | null;
   created_at: string;
   updated_at: string;
   pending_review_count: number;
@@ -114,13 +117,15 @@ async function rowToOrder(ctx: PortalContext, row: LoadRow, withDocuments: boole
     rateReason: row.rate_reason,
     comments: row.comments,
     createdBy: row.created_by,
+    enteredByName: row.entered_by_name,
+    enteredByEmail: row.entered_by_email,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     attachmentCount: row.attachment_count ?? 0,
     bolCount: row.bol_count ?? 0,
     pendingReviewCount: row.pending_review_count ?? 0,
     documents: withDocuments ? await listCustomerDocuments(ctx, row.id) : [],
-  });
+  }, { includeEnteredBy: true });
   const status = row.sam_build_status === "building" || row.sam_build_status === "failed" ? row.sam_build_status : null;
   return {
     ...order,
@@ -472,9 +477,9 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
            id, sales_order_number, load_number, portal_status, tracking_stage, timeline_json,
            origin_json, destination_json, stops_json, truck_type, transit, ship_date, ship_time,
            must_deliver_date, truck_eta, latest_eta, tracking_token, customer_cost_cents,
-           rate_reason, comments, created_by, created_at, updated_at, pending_review_count
+           rate_reason, comments, created_by, entered_by_name, entered_by_email, created_at, updated_at, pending_review_count
          ) VALUES (
-           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 0
+           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0
          )`,
       )
       .run(
@@ -498,12 +503,15 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
         rateReason ?? null,
         input.comments ?? "",
         actor.name,
+        actor.name.trim() || null,
+        actor.email.trim() || null,
         now,
         now,
       );
   });
   const order = await getOrder(ctx, id);
   if (!order) throw new PortalError("The order could not be saved", 500);
+  await notifyNewLoad(order, { name: actor.name, email: actor.email });
   return { order };
 }
 

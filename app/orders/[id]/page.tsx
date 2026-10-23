@@ -12,6 +12,7 @@ import Timeline from "@/components/timeline";
 import TrackLink from "@/components/track-link";
 import TrackingLinkField from "@/components/tracking-link-field";
 import { denverDate, formatDay, formatWhen } from "@/lib/dates";
+import { formatEnteredBy } from "@/lib/entered-by";
 import { displayStatus, fileSummary } from "@/lib/load-list";
 import { toast } from "@/lib/toast";
 import { canAddLoads, canSeePricing, formatLoadNumber, formatPlace, type CustomerOrder, type PortalRole } from "@/lib/types";
@@ -201,6 +202,9 @@ export default function OrderPage() {
               <p className="mini">
                 {order.truckType || "Truck type not set"} · {order.transit || "Transit not set"} · Created by {order.createdBy}
               </p>
+              {selectView ? (
+                <p className="mini">Entered by: {formatEnteredBy(order.enteredByName, order.enteredByEmail)}</p>
+              ) : null}
             </section>
 
             <section className="detail-section">
