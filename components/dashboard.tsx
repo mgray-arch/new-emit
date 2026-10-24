@@ -506,9 +506,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                     {order.salesOrderNumber} · Select load {formatLoadNumber(order.loadNumber)}
                     {order.stops.length > 2 ? ` · ${order.stops.length} stops` : ""} · {fileSummary({ ...order, pendingReviewCount: 0 })}
                   </div>
-                  {selectView ? (
-                    <div className="load-meta">Entered by: {formatEnteredBy(order.enteredByName, order.enteredByEmail)}</div>
-                  ) : null}
+                  <div className="load-meta">Entered by: {formatEnteredBy(order.enteredByName, order.enteredByEmail)}</div>
                   {reasons.length > 0 && <div className="hold">{reasons.join(" · ")}</div>}
                   {selectView && (order.pendingReviewCount ?? 0) > 0 ? (
                     <div className="hold">{order.pendingReviewCount} in review</div>

@@ -122,7 +122,7 @@ export interface CustomerViewOptions {
   includePricing?: boolean;
   /** False omits pendingReviewCount. Default true keeps stored orders intact for internal callers. */
   includeReview?: boolean;
-  /** False omits who submitted the load. Default false so EMIT and the assistant never receive it. */
+  /** False omits who submitted the load. Portal responses include it. The assistant leaves it off. */
   includeEnteredBy?: boolean;
 }
 
@@ -178,13 +178,13 @@ export function serializeCustomerOrder(value: unknown, options?: CustomerViewOpt
   return order;
 }
 
-/** The order shape that may be sent to this viewer. See pricing and full access get EMIT's cost. Nobody at EMIT gets carrier pay, the review count, or the SAM build controls. */
+/** The order shape that may be sent to this viewer. See pricing and full access get EMIT's cost. Every signed-in user gets who entered the load. Nobody at EMIT gets carrier pay, the review count, or the SAM build controls. */
 export function presentCustomerOrder(order: CustomerOrder, viewer: Viewer): CustomerOrder {
   const access = resolveAccess(viewer);
   const view = serializeCustomerOrder(order, {
     includePricing: canSeePricing(access),
     includeReview: access.select,
-    includeEnteredBy: access.select,
+    includeEnteredBy: true,
   });
   if (access.select) {
     if (order.samBuildStatus === "building" || order.samBuildStatus === "failed") view.samBuildStatus = order.samBuildStatus;

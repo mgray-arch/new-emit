@@ -205,9 +205,7 @@ export default function OrderPage() {
               <p className="mini">
                 {order.truckType || "Truck type not set"} · {order.transit || "Transit not set"} · Created by {order.createdBy}
               </p>
-              {selectView ? (
-                <p className="mini">Entered by: {formatEnteredBy(order.enteredByName, order.enteredByEmail)}</p>
-              ) : null}
+              <p className="mini">Entered by: {formatEnteredBy(order.enteredByName, order.enteredByEmail)}</p>
             </section>
 
             <section className="detail-section">

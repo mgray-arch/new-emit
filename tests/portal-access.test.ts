@@ -90,6 +90,8 @@ describe("EMIT permissions and view-as", () => {
       carrierPay: 8765.43,
       comments: "",
       createdBy: "M. Gray",
+      enteredByName: "Jane Doe",
+      enteredByEmail: "jane@emit.example",
       createdAt: "2026-10-14T18:00:00.000Z",
       updatedAt: "2026-10-14T18:00:00.000Z",
       attachmentCount: 0,
@@ -102,8 +104,24 @@ describe("EMIT permissions and view-as", () => {
     } as unknown as CustomerOrder;
     for (const role of ["customer", "emit_viewer", "emit_admin"]) {
       const view = presentCustomerOrder(stored, role);
+      expect(view.enteredByName).toBe("Jane Doe");
+      expect(view.enteredByEmail).toBe("jane@emit.example");
+      expect(view.pendingReviewCount).toBeUndefined();
       expect(JSON.stringify(view)).not.toMatch(/samBuild|samUrl|pendingReviewCount|carrierPay|8765/);
       expectNoSecrets(view);
+    }
+    for (const permission of ["view", "add", "pricing", "full"] as const) {
+      const view = presentCustomerOrder(stored, {
+        role: permission === "full" ? "emit_admin" : "customer",
+        permission,
+      });
+      expect(view.enteredByName).toBe("Jane Doe");
+      expect(view.enteredByEmail).toBe("jane@emit.example");
+      expect(view.pendingReviewCount).toBeUndefined();
+      expect(view.samBuildStatus).toBeUndefined();
+      if (permission === "pricing" || permission === "full") expect(view.customerCost).toBe(1500);
+      else expect(view.customerCost).toBeUndefined();
+      expect(JSON.stringify(view)).not.toMatch(/carrierPay|carrier_pay|8765/);
     }
     expect(presentCustomerOrder(stored, "customer").customerCost).toBeUndefined();
     expect(presentCustomerOrder(stored, "emit_viewer").customerCost).toBeUndefined();
@@ -113,10 +131,16 @@ describe("EMIT permissions and view-as", () => {
     expect(JSON.stringify(pricingOnly)).not.toMatch(/carrierPay|carrier_pay|8765/);
     expect(presentCustomerOrder(stored, { role: "emit_admin", permission: "view" }).customerCost).toBeUndefined();
     const preview = presentCustomerOrder(stored, { role: "admin", viewAs: { access: "regular", permission: "pricing" } });
+    expect(preview.enteredByName).toBe("Jane Doe");
+    expect(preview.enteredByEmail).toBe("jane@emit.example");
     expect(preview.customerCost).toBe(1500);
     expect(preview.pendingReviewCount).toBeUndefined();
     expect(preview.samBuildStatus).toBeUndefined();
     expect(JSON.stringify(preview)).not.toMatch(/carrierPay|carrier_pay|8765/);
+    const viewOnlyPreview = presentCustomerOrder(stored, { role: "admin", viewAs: { access: "admin", permission: "view" } });
+    expect(viewOnlyPreview.enteredByEmail).toBe("jane@emit.example");
+    expect(viewOnlyPreview.customerCost).toBeUndefined();
+    expect(viewOnlyPreview.pendingReviewCount).toBeUndefined();
     const select = presentCustomerOrder(stored, "admin");
     expect(select.customerCost).toBe(1500);
     expect(select.pendingReviewCount).toBe(4);

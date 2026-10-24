@@ -105,11 +105,13 @@ describe("new load slack text", () => {
     );
     expect(formatEnteredBy(null, null)).toBe("Unknown");
     expect(formatEnteredBy("M. Gray", null)).toBe("M. Gray");
+    expect(formatEnteredBy(null, "jane@emit.example")).toBe("jane@emit.example");
+    expect(formatEnteredBy("  ", "jane@emit.example")).toBe("jane@emit.example");
   });
 });
 
 describe("entered by on a new load", () => {
-  it("stores the signed-in person for Select, hides it from EMIT, and posts Slack only when configured", async () => {
+  it("stores the signed-in person and shows that name and email to EMIT and Select", async () => {
     const cookie = await sessionCookie(customerSession());
     const admin = await sessionCookie(adminSession());
     let posts: string[] = [];
@@ -135,8 +137,12 @@ describe("entered by on a new load", () => {
     expect(quiet.status).toBe(201);
     expect(posts).toHaveLength(0);
     const created = (await quiet.json()).order as CustomerOrder;
-    expect(created.enteredByEmail).toBeUndefined();
-    expect(JSON.stringify(created)).not.toMatch(/enteredByEmail|m\.gray@emit\.example/);
+    expect(created.enteredByName).toBe("M. Gray");
+    expect(created.enteredByEmail).toBe("m.gray@emit.example");
+    expect(formatEnteredBy(created.enteredByName, created.enteredByEmail)).toBe("M. Gray (m.gray@emit.example)");
+    expect(created.customerCost).toBeUndefined();
+    expect(created.pendingReviewCount).toBeUndefined();
+    expect(JSON.stringify(created)).not.toMatch(/carrierPay|carrier_pay|pendingReviewCount|samBuild/);
 
     process.env.SLACK_NEW_LOADS_WEBHOOK_URL = "https://hooks.slack.test/new-loads";
     process.env.SLACK_USER_ID_DREW = "UDREW123";
@@ -173,12 +179,55 @@ describe("entered by on a new load", () => {
       params: Promise.resolve({ id }),
     });
     const emitOrder = (await emitView.json()).order as CustomerOrder;
-    expect(emitOrder.enteredByName).toBeUndefined();
-    expect(emitOrder.enteredByEmail).toBeUndefined();
+    expect(emitOrder.enteredByName).toBe("M. Gray");
+    expect(emitOrder.enteredByEmail).toBe("m.gray@emit.example");
+    expect(emitOrder.customerCost).toBeUndefined();
+    expect(emitOrder.pendingReviewCount).toBeUndefined();
+    expect(JSON.stringify(emitOrder)).not.toMatch(/carrierPay|carrier_pay|8765|pendingReviewCount|samBuild/);
+
+    const viewer = await sessionCookie({
+      userId: "emit-viewer-1",
+      email: "viewer@emit.example",
+      name: "View Only",
+      role: "emit_viewer",
+    });
+    const viewerDetail = await getOrderRoute(new Request("http://portal.test/api/orders/" + id, { headers: headers(viewer) }), {
+      params: Promise.resolve({ id }),
+    });
+    const viewerOrder = (await viewerDetail.json()).order as CustomerOrder;
+    expect(formatEnteredBy(viewerOrder.enteredByName, viewerOrder.enteredByEmail)).toBe("M. Gray (m.gray@emit.example)");
+    expect(viewerOrder.customerCost).toBeUndefined();
+
+    const lead = await sessionCookie({
+      userId: "emit-admin-1",
+      email: "lead@emit.example",
+      name: "EMIT Lead",
+      role: "emit_admin",
+    });
+    const leadDetail = await getOrderRoute(new Request("http://portal.test/api/orders/" + id, { headers: headers(lead) }), {
+      params: Promise.resolve({ id }),
+    });
+    const leadOrder = (await leadDetail.json()).order as CustomerOrder;
+    expect(leadOrder.enteredByEmail).toBe("m.gray@emit.example");
+    expect(leadOrder.customerCost).toBeNull();
+    expect(leadOrder.pendingReviewCount).toBeUndefined();
 
     const preview = presentCustomerOrder(selectOrder, { role: "admin", viewAs: { access: "regular", permission: "add" } });
-    expect(preview.enteredByEmail).toBeUndefined();
-    expect(JSON.stringify(preview)).not.toMatch(/enteredByEmail|m\.gray@emit\.example/);
+    expect(preview.enteredByName).toBe("M. Gray");
+    expect(preview.enteredByEmail).toBe("m.gray@emit.example");
+    expect(preview.customerCost).toBeUndefined();
+    expect(preview.pendingReviewCount).toBeUndefined();
+    expect(JSON.stringify(preview)).not.toMatch(/carrierPay|carrier_pay|8765|pendingReviewCount|samBuild/);
+
+    const viewAs = await getOrderRoute(
+      new Request("http://portal.test/api/orders/" + id, { headers: headers(`${admin}; portal_view_as=regular:view`) }),
+      { params: Promise.resolve({ id }) },
+    );
+    const viewAsOrder = (await viewAs.json()).order as CustomerOrder;
+    expect(viewAsOrder.enteredByEmail).toBe("m.gray@emit.example");
+    expect(viewAsOrder.customerCost).toBeUndefined();
+    expect(viewAsOrder.pendingReviewCount).toBeUndefined();
+    expect(JSON.stringify(viewAsOrder)).not.toMatch(/carrierPay|carrier_pay|samBuild/);
 
     const payload = loadBuilderPayload({
       ...selectOrder,
