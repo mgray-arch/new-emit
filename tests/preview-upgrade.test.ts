@@ -128,7 +128,7 @@ describe("preview database upgrade", () => {
     const ctx: PortalContext = { db, now: () => new Date("2026-10-21T18:00:00Z") };
     for (const tab of ["attention", "active", "delivered", "history"] as const) {
       const board = await listBoard(ctx, { tab, page: 1, pageSize: 25 });
-      expect(board.counts.attention + board.counts.active + board.counts.delivered + board.counts.history).toBe(1);
+      expect((board.counts.attention ?? 0) + board.counts.active + board.counts.delivered + board.counts.history).toBe(1);
     }
     const attention = await listBoard(ctx, { tab: "attention", page: 1, pageSize: 25 });
     expect(attention.orders.map((order) => order.salesOrderNumber)).toEqual(["SO2196"]);
@@ -229,7 +229,14 @@ describe("preview database upgrade", () => {
       expect(response.status, JSON.stringify(body)).toBe(200);
       expect(body.orders).toHaveLength(1);
       expect(body.orders[0].salesOrderNumber).toBe("SO2196");
-      expect(body.counts.attention).toBe(1);
+      if (item.role === "admin" && !item.viewAs) {
+        expect(body.tab).toBe("attention");
+        expect(body.counts.attention).toBe(1);
+      } else {
+        expect(body.tab).toBe("active");
+        expect(body.counts).not.toHaveProperty("attention");
+        expect(body.counts.active).toBe(1);
+      }
       expect(Object.prototype.hasOwnProperty.call(body.orders[0], "customerCost")).toBe(item.pricing);
       expect(Object.prototype.hasOwnProperty.call(body.orders[0], "pendingReviewCount")).toBe(item.review);
       expect(Object.prototype.hasOwnProperty.call(body.orders[0], "samBuildStatus")).toBe(false);

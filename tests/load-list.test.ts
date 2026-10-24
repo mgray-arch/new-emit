@@ -64,6 +64,8 @@ describe("load lists", () => {
     expect(displayStatus({ ...base, trackingStage: "delivered", portalStatus: "shipped" }, today)).toBe("delivered");
     expect(displayStatus({ ...base, trackingStage: "submitted", portalStatus: "being_prepared", loadNumber: null }, today)).toBe("attention");
     expect(displayStatus({ ...base, trackingStage: "in_transit", trackingLink: null, portalStatus: "shipped" }, today)).toBe("attention");
+    expect(displayStatus({ ...base, trackingStage: "in_transit", trackingLink: null, portalStatus: "shipped" }, today, { needsAttention: false })).toBe("in_transit");
+    expect(displayStatus({ ...base, trackingStage: "submitted", portalStatus: "being_prepared", loadNumber: null }, today, { needsAttention: false })).toBe("pending");
     expect(displayStatus({ ...base, portalStatus: "cancelled" }, today)).toBe("cancelled");
     expect(fileSummary(base)).toBe("2 files");
     expect(fileSummary({ ...base, attachmentCount: 1, bolCount: 1, pendingReviewCount: 1 })).toBe("2 files, 1 awaiting review");
@@ -116,7 +118,7 @@ describe("load lists", () => {
     const found = await listBoard(ctx, { q: "900196-1", tab: "history", pageSize: 25 });
     expect(found.scope).toBe("all");
     expect(found.orders.some((order) => order.salesOrderNumber === "SO2196")).toBe(true);
-    expect(found.counts.attention + found.counts.active + found.counts.delivered + found.counts.history).toBe(found.total);
+    expect((found.counts.attention ?? 0) + found.counts.active + found.counts.delivered + found.counts.history).toBe(found.total);
 
     const allen = await listOrders(ctx, { tab: "active", pickup: "EMIT ALLEN", pageSize: 50 });
     expect(allen.total).toBeGreaterThan(0);
@@ -148,6 +150,90 @@ describe("load lists", () => {
     expect(body.orders.length).toBeGreaterThan(0);
     expect(body.orders.every((order: CustomerOrder) => !("customerCost" in order))).toBe(true);
     expectNoSecrets(body);
+  });
+
+  it("folds Needs Attention into Active or Delivered for EMIT and view-as, and keeps it for Select", async () => {
+    const all = await listOrders(ctx, { pageSize: 50 });
+    const selectTabs = await Promise.all(
+      (["attention", "active", "delivered", "history"] as const).map((tab) => listOrders(ctx, { tab, pageSize: 50 })),
+    );
+    const emitTabs = await Promise.all(
+      (["active", "delivered", "history"] as const).map((tab) =>
+        listOrders(ctx, { tab, includeAttention: false, pageSize: 50 }),
+      ),
+    );
+    const emitIds = emitTabs.flatMap((page) => page.orders.map((order) => order.id));
+    expect(emitIds).toHaveLength(all.total);
+    expect(new Set(emitIds).size).toBe(all.total);
+
+    const emitActive = new Set(emitTabs[0].orders.map((order) => order.id));
+    const emitDelivered = new Set(emitTabs[1].orders.map((order) => order.id));
+    expect(selectTabs[0].total).toBeGreaterThan(0);
+    for (const order of selectTabs[0].orders) {
+      expect(order.trackingStage === "delivered" ? emitDelivered.has(order.id) : emitActive.has(order.id)).toBe(true);
+    }
+    for (const order of selectTabs[1].orders) expect(emitActive.has(order.id)).toBe(true);
+
+    const asked = await listBoard(ctx, { tab: "attention", includeAttention: false, pageSize: 50 });
+    expect(asked.tab).toBe("active");
+    expect(asked.counts).not.toHaveProperty("attention");
+    expect(asked.orders.map((order) => order.id).sort()).toEqual([...emitActive].sort());
+
+    const selectBoard = await listBoard(ctx, { tab: "attention", pageSize: 50 });
+    expect(selectBoard.tab).toBe("attention");
+    expect(selectBoard.counts.attention).toBe(selectTabs[0].total);
+
+    async function board(cookie: string, query = "tab=attention&page=1&pageSize=50") {
+      const response = await listOrdersRoute(new Request(`http://portal.test/api/orders?${query}`, { headers: headers(cookie) }));
+      const payload = await response.json();
+      expect(response.status, JSON.stringify(payload)).toBe(200);
+      return payload;
+    }
+
+    const customer = await sessionCookie(customerSession());
+    const emitAdmin = await sessionCookie({
+      userId: "emit-admin-1",
+      email: "lead@emit.example",
+      name: "EMIT Lead",
+      role: "emit_admin",
+    });
+    const admin = await sessionCookie(adminSession());
+    const asCustomer = await board(customer);
+    const asEmitAdmin = await board(emitAdmin);
+    const asRegularPreview = await board(`${admin}; portal_view_as=regular:add`);
+    const asAdminPreview = await board(`${admin}; portal_view_as=admin:full`);
+    for (const payload of [asCustomer, asEmitAdmin, asRegularPreview, asAdminPreview]) {
+      expect(payload.tab).toBe("active");
+      expect(payload.counts).not.toHaveProperty("attention");
+      expect(JSON.stringify(payload)).not.toContain("Needs Attention");
+      expect(payload.orders.some((order: CustomerOrder) => order.salesOrderNumber === "SO2196")).toBe(true);
+      expect(payload.orders.some((order: CustomerOrder) => order.salesOrderNumber === "SO4429")).toBe(true);
+    }
+    const implicit = await board(customer, "page=1&pageSize=50");
+    expect(implicit.tab).toBe("active");
+    expect(implicit.counts).not.toHaveProperty("attention");
+
+    const asSelect = await board(admin);
+    expect(asSelect.tab).toBe("attention");
+    expect(asSelect.counts.attention).toBeGreaterThan(0);
+    expect(asSelect.orders.some((order: CustomerOrder) => order.salesOrderNumber === "SO2196")).toBe(true);
+    expect(asSelect.orders.some((order: CustomerOrder) => order.salesOrderNumber === "SO4429")).toBe(false);
+    const implicitSelect = await board(admin, "page=1&pageSize=50");
+    expect(implicitSelect.tab).toBe("attention");
+    expect(implicitSelect.counts.attention).toBe(asSelect.counts.attention);
+
+    const emitFile = await exportOrders(
+      new Request("http://portal.test/api/orders/export?tab=attention", { headers: headers(customer) }),
+    );
+    const emitCsv = await emitFile.text();
+    expect(emitCsv).toContain("SO2196");
+    expect(emitCsv).toContain("SO4429");
+    const selectFile = await exportOrders(
+      new Request("http://portal.test/api/orders/export?tab=attention", { headers: headers(admin) }),
+    );
+    const selectCsv = await selectFile.text();
+    expect(selectCsv).toContain("SO2196");
+    expect(selectCsv).not.toContain("SO4429");
   });
 
   it("moves a past-due load and a load with no Select number into Needs Attention", async () => {

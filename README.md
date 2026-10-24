@@ -214,7 +214,7 @@ A drop is linked to a receiver when the company name matches, so the receiver pa
 
 ## Load lists
 
-The dashboard is four lists: **Needs Attention** (no Select load number, files in review, an in-transit load with no tracking link, or a past-due delivery), **Active**, **Delivered** for the last 7 days, and **History**. A delivered load moves to History on its own after those 7 days. Cancelled loads are in History too.
+Select staff see four lists: **Needs Attention** (no Select load number, files in review, an in-transit load with no tracking link, or a past-due delivery), **Active**, **Delivered** for the last 7 days, and **History**. EMIT admins, regular EMIT users, and Select **View as** do not get that list, its count, or the Needs Attention badge. Those loads stay on Active or Delivered, so nothing is hidden from them. A delivered load moves to History on its own after those 7 days. Cancelled loads are in History too.
 
 Each load is a card: the lane in bold, pickup and delivery dates, a colored status, and Track when there is a link. Long notes stay on two lines until you expand them. Open a card for the four-step timeline (Ordered, Booked, Picked up, Delivered) and the stops, documents, tracking, and notes. Light mode is in the header. EMIT users see a short tip the first time.
 

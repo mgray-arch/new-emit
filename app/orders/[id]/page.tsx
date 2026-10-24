@@ -83,7 +83,7 @@ export default function OrderPage() {
               <h1 className="lane">
                 {order.origin.city}, {order.origin.state} → {order.destination.city}, {order.destination.state}
               </h1>
-              <StatusPill status={displayStatus(order, today)} />
+              <StatusPill status={displayStatus(order, today, { needsAttention: selectView })} />
             </div>
             <p className="lede">
               {order.salesOrderNumber} · Select load {formatLoadNumber(order.loadNumber)}

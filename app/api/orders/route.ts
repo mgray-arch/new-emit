@@ -5,7 +5,7 @@ import { LOAD_TABS, type LoadTab } from "@/lib/load-list";
 import { listBoard, submitOrder } from "@/lib/orders";
 import { readyPortal } from "@/lib/portal";
 import type { PortalStatus } from "@/lib/types";
-import { PORTAL_STATUSES } from "@/lib/types";
+import { PORTAL_STATUSES, resolveAccess } from "@/lib/types";
 import { orderInputSchema } from "@/lib/validate";
 
 export const runtime = "nodejs";
@@ -19,7 +19,12 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const status = url.searchParams.get("status");
     const tabParam = url.searchParams.get("tab");
-    const tab: LoadTab = (LOAD_TABS as readonly string[]).includes(tabParam || "") ? (tabParam as LoadTab) : "attention";
+    const selectStaff = resolveAccess(session).select;
+    const requested: LoadTab = (LOAD_TABS as readonly string[]).includes(tabParam || "")
+      ? (tabParam as LoadTab)
+      : selectStaff
+        ? "attention"
+        : "active";
     const page = Number(url.searchParams.get("page") || "1");
     const pageSize = Number(url.searchParams.get("pageSize") || "25");
     const board = await listBoard(ctx, {
@@ -29,7 +34,8 @@ export async function GET(req: Request) {
       shipTo: url.searchParams.get("shipTo"),
       pickup: url.searchParams.get("pickup"),
       receiverCompany: url.searchParams.get("receiver"),
-      tab,
+      tab: requested,
+      includeAttention: selectStaff,
       page: Number.isFinite(page) ? page : 1,
       pageSize: Number.isFinite(pageSize) ? pageSize : 25,
     });

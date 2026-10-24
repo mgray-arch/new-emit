@@ -1,8 +1,21 @@
 import type { CustomerOrder, TrackingStage } from "@/lib/types";
 
-/** Working queues. A load sits in exactly one of these. */
+/** Working queues. On the Select side a load sits in exactly one of these. */
 export const LOAD_TABS = ["attention", "active", "delivered", "history"] as const;
 export type LoadTab = (typeof LOAD_TABS)[number];
+
+/** EMIT and view-as have no Needs Attention list. Those loads stay on Active or Delivered. */
+export function visibleLoadTabs(selectStaff: boolean): LoadTab[] {
+  return selectStaff ? [...LOAD_TABS] : LOAD_TABS.filter((tab) => tab !== "attention");
+}
+
+/** Attention is omitted for EMIT and view-as. Select always receives it. */
+export type LoadTabCounts = {
+  active: number;
+  delivered: number;
+  history: number;
+  attention?: number;
+};
 
 export const LOAD_TAB_LABEL: Record<LoadTab, string> = {
   attention: "Needs Attention",
@@ -66,13 +79,15 @@ export const DISPLAY_STATUS_LABEL: Record<DisplayStatus, string> = {
   cancelled: "Cancelled",
 };
 
-/** The colored pill on a card. Needs Attention wins over the travel stage. */
+/** The colored pill on a card. For Select, Needs Attention wins over the travel stage. */
 export function displayStatus(
   order: Pick<CustomerOrder, "loadNumber" | "pendingReviewCount" | "trackingLink" | "trackingStage" | "mustDeliverDate" | "portalStatus">,
   today: string,
+  options?: { needsAttention?: boolean },
 ): DisplayStatus {
+  const needsAttention = options?.needsAttention !== false;
   if (order.portalStatus === "cancelled") return "cancelled";
-  if (attentionReasons(order, today).length) return "attention";
+  if (needsAttention && attentionReasons(order, today).length) return "attention";
   if (order.trackingStage === "delivered") return "delivered";
   if (order.trackingStage === "in_transit" || order.trackingStage === "at_pickup" || order.portalStatus === "shipped") {
     return "in_transit";

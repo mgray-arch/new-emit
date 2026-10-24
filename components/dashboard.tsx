@@ -12,7 +12,6 @@ import TrackingLinkField from "@/components/tracking-link-field";
 import { formatDay } from "@/lib/dates";
 import { formatEnteredBy } from "@/lib/entered-by";
 import {
-  LOAD_TABS,
   LOAD_TAB_LABEL,
   PICKUP_GROUP_LABEL,
   attentionReasons,
@@ -20,7 +19,9 @@ import {
   emptyListMessage,
   fileSummary,
   pickupGroup,
+  visibleLoadTabs,
   type LoadTab,
+  type LoadTabCounts,
   type PickupGroup,
 } from "@/lib/load-list";
 import { toast } from "@/lib/toast";
@@ -45,7 +46,7 @@ interface ListResponse {
   total: number;
   page: number;
   pageSize: number;
-  counts: Record<LoadTab, number>;
+  counts: LoadTabCounts;
   today: string;
   tomorrow: string;
   weekEnd: string;
@@ -83,7 +84,8 @@ function Note({ text }: { text: string }) {
 export default function Dashboard({ startNew = false }: { startNew?: boolean }) {
   const router = useRouter();
   const sites = useSites();
-  const [tab, setTab] = useState<LoadTab>("attention");
+  const [tab, setTab] = useState<LoadTab>("active");
+  const [listReady, setListReady] = useState(false);
   const [status, setStatus] = useState<string>("");
   const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
@@ -115,10 +117,17 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       .then((response) => (response.ok ? response.json() : null))
       .then((body: Me | null) => {
         setMe(body);
+        const select = Boolean(body && body.role === "admin" && !body.readOnly);
+        setTab((current) => (select ? "attention" : current === "attention" ? "active" : current));
+        setListReady(true);
         const edit = new URLSearchParams(window.location.search).get("edit");
         if (edit && body && !body.readOnly && canAddLoads(body)) void openEdit(edit);
       })
-      .catch(() => setMe(null));
+      .catch(() => {
+        setMe(null);
+        setTab("active");
+        setListReady(true);
+      });
   }, []);
 
   const role = me?.role ?? null;
@@ -149,6 +158,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   }, [creating, editing]);
 
   useEffect(() => {
+    if (!listReady) return;
     const params = new URLSearchParams();
     params.set("tab", tab);
     if (status) params.set("status", status);
@@ -174,7 +184,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
         setError("");
       })
       .catch(() => setError("We couldn't load your loads. Refresh the page and try again."));
-  }, [tab, status, query, shipFrom, shipTo, pickup, receiver, page, reload]);
+  }, [listReady, tab, status, query, shipFrom, shipTo, pickup, receiver, page, reload]);
 
   async function openEdit(id: string) {
     const response = await fetch(`/api/orders/${id}`);
@@ -291,7 +301,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     toast(role === "admin" && body.heldForReview ? `${body.heldForReview} in review` : "Uploaded");
   }
 
-  const counts = data?.counts ?? { attention: 0, active: 0, delivered: 0, history: 0 };
+  const counts: LoadTabCounts = data?.counts ?? { active: 0, delivered: 0, history: 0 };
   const groups = useMemo(() => {
     if (!data) return [];
     const blocks: Array<{ id: PickupGroup; orders: CustomerOrder[] }> = [];
@@ -321,7 +331,11 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       <div className="page-head">
         <div>
           <h1>Loads</h1>
-          <p className="lede">What needs a look, what is moving, and what already delivered.</p>
+          <p className="lede">
+            {selectView
+              ? "What needs a look, what is moving, and what already delivered."
+              : "What is moving, and what already delivered."}
+          </p>
         </div>
         {allowLoads ? (
           <button
@@ -344,8 +358,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       {showTips && (
         <aside className="tips">
           <strong>A few tips</strong>
-          <p>Needs Attention is the short list: a missing Select load number, or a truck with no tracking link.</p>
-          <p>Search finds a load in any tab. Click a card to open it.</p>
+          <p>Search finds a load in any list. Click a card to open it.</p>
           <button
             className="btn secondary"
             type="button"
@@ -358,24 +371,26 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
           </button>
         </aside>
       )}
-      <div className="tabs" role="tablist" aria-label="Load lists">
-        {LOAD_TABS.map((item) => (
-          <button
-            key={item}
-            className={tab === item ? "tab on" : "tab"}
-            type="button"
-            role="tab"
-            aria-selected={tab === item}
-            onClick={() => {
-              setTab(item);
-              setPage(1);
-            }}
-          >
-            <strong>{counts[item]}</strong>
-            <span>{LOAD_TAB_LABEL[item]}</span>
-          </button>
-        ))}
-      </div>
+      {listReady ? (
+        <div className="tabs" role="tablist" aria-label="Load lists">
+          {visibleLoadTabs(selectView).map((item) => (
+            <button
+              key={item}
+              className={tab === item ? "tab on" : "tab"}
+              type="button"
+              role="tab"
+              aria-selected={tab === item}
+              onClick={() => {
+                setTab(item);
+                setPage(1);
+              }}
+            >
+              <strong>{counts[item] ?? 0}</strong>
+              <span>{LOAD_TAB_LABEL[item]}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div className="filters">
         <label className="filter" style={{ flex: "1 1 220px" }}>
           <span>Search</span>
@@ -453,7 +468,10 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
               {PICKUP_GROUP_LABEL[group.id]}
             </div>
             {group.orders.map((order) => {
-              const reasons = (data ? attentionReasons(order, data.today) : []).filter((reason) => reason !== "Files in review");
+              const reasons =
+                selectView && data
+                  ? attentionReasons(order, data.today).filter((reason) => reason !== "Files in review")
+                  : [];
               const today = data?.today ?? "";
               return (
                 <article
@@ -474,7 +492,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                     <div className="lane">
                       {order.origin.city}, {order.origin.state} → {order.destination.city}, {order.destination.state}
                     </div>
-                    <StatusPill status={displayStatus(order, today)} />
+                    <StatusPill status={displayStatus(order, today, { needsAttention: selectView })} />
                   </div>
                   <div className="date-grid">
                     <div className="date-pair">

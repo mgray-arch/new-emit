@@ -4,7 +4,7 @@ import type { PortalContext } from "@/lib/db";
 import { CUSTOMER_LOAD_COLUMNS, withTransaction } from "@/lib/db";
 import { serializeCustomerOrder, trackingUrlFor } from "@/lib/customer-view";
 import { addDaysISO, denverDate, weekRange } from "@/lib/dates";
-import type { LoadTab } from "@/lib/load-list";
+import type { LoadTab, LoadTabCounts } from "@/lib/load-list";
 import { listCustomerDocuments } from "@/lib/documents";
 import { PortalError } from "@/lib/http";
 import type { CustomerOrder, PortalStatus, Session, TimelineEvent, TrackingStage } from "@/lib/types";
@@ -26,6 +26,11 @@ export interface OrderFilter {
   /** Pickup yard company, matched to the origin. */
   pickup?: string | null;
   tab?: LoadTab | null;
+  /**
+   * Select staff get the Needs Attention list. EMIT and view-as pass false so those
+   * loads stay on Active or Delivered and the attention count is omitted.
+   */
+  includeAttention?: boolean;
   /** Group by pickup date. The dashboard uses this. Other callers keep the older order. */
   grouped?: boolean;
   /** Internal. The CSV export asks for every matching row. */
@@ -182,21 +187,44 @@ function attentionReasonSql(): { sql: string; params: (today: string) => SqlArg[
   };
 }
 
-function tabClause(tab: LoadTab, today: string): { sql: string; params: SqlArg[] } {
+function includeAttentionList(filter: { includeAttention?: boolean }): boolean {
+  return filter.includeAttention !== false;
+}
+
+/** EMIT has no attention bucket. A request for that tab is the active list. */
+function resolvedTab(tab: LoadTab, includeAttention: boolean): LoadTab {
+  if (!includeAttention && tab === "attention") return "active";
+  return tab;
+}
+
+function tabClause(tab: LoadTab, today: string, includeAttention = true): { sql: string; params: SqlArg[] } {
   const reasons = attentionReasonSql();
-  if (tab === "history") {
+  const list = resolvedTab(tab, includeAttention);
+  if (list === "history") {
     return {
       sql: `(portal_status = 'cancelled' OR (tracking_stage = 'delivered' AND ${DELIVERED_ON} < date(?, '-6 days')))`,
       params: [today],
     };
   }
-  if (tab === "attention") {
+  if (!includeAttention) {
+    if (list === "delivered") {
+      return {
+        sql: `(portal_status != 'cancelled' AND tracking_stage = 'delivered' AND ${DELIVERED_ON} >= date(?, '-6 days'))`,
+        params: [today],
+      };
+    }
+    return {
+      sql: `(portal_status != 'cancelled' AND tracking_stage != 'delivered')`,
+      params: [],
+    };
+  }
+  if (list === "attention") {
     return {
       sql: `(portal_status != 'cancelled' AND NOT (tracking_stage = 'delivered' AND ${DELIVERED_ON} < date(?, '-6 days')) AND ${reasons.sql})`,
       params: [today, ...reasons.params(today)],
     };
   }
-  if (tab === "delivered") {
+  if (list === "delivered") {
     return {
       sql: `(portal_status != 'cancelled' AND tracking_stage = 'delivered' AND ${DELIVERED_ON} >= date(?, '-6 days') AND NOT ${reasons.sql})`,
       params: [today, ...reasons.params(today)],
@@ -228,7 +256,7 @@ function buildWhere(filter: OrderFilter, today: string): { sql: string; params: 
     params.push(filter.pickup.trim());
   }
   if (filter.tab) {
-    const tab = tabClause(filter.tab, today);
+    const tab = tabClause(filter.tab, today, includeAttentionList(filter));
     clauses.push(tab.sql);
     params.push(...tab.params);
   }
@@ -308,7 +336,7 @@ export interface LoadBoard {
   total: number;
   page: number;
   pageSize: number;
-  counts: Record<LoadTab, number>;
+  counts: LoadTabCounts;
   today: string;
   tomorrow: string;
   weekEnd: string;
@@ -317,22 +345,26 @@ export interface LoadBoard {
   receivers: string[];
 }
 
-async function countTabs(ctx: PortalContext, filter: OrderFilter, today: string): Promise<Record<LoadTab, number>> {
-  const tabs: LoadTab[] = ["attention", "active", "delivered", "history"];
+async function countTabs(ctx: PortalContext, filter: OrderFilter, today: string): Promise<LoadTabCounts> {
+  const includeAttention = includeAttentionList(filter);
+  const tabs: LoadTab[] = includeAttention
+    ? ["attention", "active", "delivered", "history"]
+    : ["active", "delivered", "history"];
   const pieces = tabs.map((tab) => {
-    const clause = tabClause(tab, today);
+    const clause = tabClause(tab, today, includeAttention);
     return { sql: `SUM(CASE WHEN ${clause.sql} THEN 1 ELSE 0 END) AS ${tab}`, params: clause.params };
   });
   const where = buildWhere({ ...filter, tab: null }, today);
   const row = await ctx.db
     .prepare(`SELECT ${pieces.map((piece) => piece.sql).join(", ")} FROM loads ${where.sql}`)
     .get(...pieces.flatMap((piece) => piece.params), ...where.params);
-  return {
-    attention: Number(row?.attention ?? 0),
+  const counts: LoadTabCounts = {
     active: Number(row?.active ?? 0),
     delivered: Number(row?.delivered ?? 0),
     history: Number(row?.history ?? 0),
   };
+  if (includeAttention) counts.attention = Number(row?.attention ?? 0);
+  return counts;
 }
 
 /** Dashboard list. A search ignores the selected tab so one box finds any load. */
@@ -340,10 +372,12 @@ export async function listBoard(ctx: PortalContext, filter: OrderFilter & { tab?
   const today = denverDate(ctx.now());
   const tomorrow = addDaysISO(today, 1);
   const { end: weekEnd } = weekRange(ctx.now());
-  const tab: LoadTab = filter.tab ?? "attention";
+  const includeAttention = includeAttentionList(filter);
+  const tab: LoadTab = resolvedTab(filter.tab ?? (includeAttention ? "attention" : "active"), includeAttention);
   const searching = Boolean(filter.q && filter.q.trim());
   const page = await listOrders(ctx, {
     ...filter,
+    includeAttention,
     tab: searching ? null : tab,
     grouped: true,
   });
