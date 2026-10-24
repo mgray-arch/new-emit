@@ -1,6 +1,6 @@
 import { demoSeedEnabled, getPortalContext, type PortalContext } from "@/lib/db";
 import { backfillDropLocations } from "@/lib/locations";
-import { seedDemo } from "@/lib/seed";
+import { ensureDemoSamples, seedDemo } from "@/lib/seed";
 
 type GlobalSeed = typeof globalThis & { __portalSeed?: Promise<void>; __portalTest?: PortalContext };
 
@@ -19,6 +19,17 @@ export async function seedIfEmpty(ctx: PortalContext): Promise<void> {
   }
 }
 
+/**
+ * Preview and local demo databases that already have users still receive sample
+ * paperwork and fake tracking links. Production never does, even if DEMO_SEED
+ * was copied onto that environment.
+ */
+export async function backfillDemoSamples(ctx: PortalContext): Promise<void> {
+  if (process.env.VERCEL_ENV === "production") return;
+  if (!demoSeedEnabled()) return;
+  await ensureDemoSamples(ctx);
+}
+
 export async function readyPortal(): Promise<PortalContext> {
   const ctx = await getPortalContext();
   const g = globalThis as GlobalSeed;
@@ -26,6 +37,7 @@ export async function readyPortal(): Promise<PortalContext> {
   if (!g.__portalSeed) {
     let pending!: Promise<void>;
     pending = seedIfEmpty(ctx)
+      .then(() => backfillDemoSamples(ctx))
       .then(() => backfillDropLocations(ctx))
       .catch((error: unknown) => {
         if (g.__portalSeed === pending) delete g.__portalSeed;

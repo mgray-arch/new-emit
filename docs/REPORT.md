@@ -185,7 +185,9 @@ The database is Turso (hosted libSQL). The schema, `PRAGMA` checks, and `json_ex
 
 Document and photo bytes go to Vercel Blob (private). The database stores a locator, not the file. With no Blob token, local dev writes `data/blobs`. Tests keep bytes in memory. With no Turso URL, local dev and tests use `node:sqlite` (`data/portal.db` or `:memory:`). On Vercel those two variables are required; the app throws if either is missing so a preview cannot silently write to an ephemeral disk.
 
-`DEMO_SEED=true` on a Preview loads the fake shipments, the three demo logins, and the Enchanted Rock LLC receiver link the first time the database is empty. A second cold start that loses the race on the demo emails leaves the first seed in place. Production should set `DEMO_SEED=false`.
+`DEMO_SEED=true` on a Preview loads the fake shipments, the three demo logins, and the Enchanted Rock LLC receiver link the first time the database is empty. A second cold start that loses the race on the demo emails leaves the first seed in place. Production should set `DEMO_SEED=false`. Production never adds the sample documents or tracking links, even if `DEMO_SEED` is copied there.
+
+A preview database that already has users still receives those samples the next time its server starts. That adds watermarked `TEST / SAMPLE` bills of lading and proofs of delivery on six demo loads across Active, Delivered, and History, one unreadable sample page on SO4526 for the Select review queue, and `https://example.com/track/TEST-1` style links on five in-transit loads. SO2196 stays without a link. The PDF bytes need `BLOB_READ_WRITE_TOKEN` on Preview. Without it, the links are still saved and sign-in still works. Set the token and redeploy. No database wipe.
 
 Click-by-click steps for Mike are in the README. Docker still runs the local-disk mode if Turso and Blob are unset:
 

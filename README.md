@@ -93,11 +93,19 @@ Use a **second Turso database** for Preview. If Preview points at the production
 8. `NEXT_PUBLIC_DEMO_HINT` — `true` for Preview, so the sign-in page shows the test password. Production stays `false`.
 9. Leave `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` empty until the Workspace OAuth client exists. The Google button stays hidden, with a note to use email and password.
 10. Leave `PORTAL_PUBLIC_URL` unset on Preview so links use the preview host. Production is the new hostname.
-11. `BLOB_READ_WRITE_TOKEN` — optional for clicking around. Add a Preview token only when you want uploads to work. Connect the Blob store to Preview, or paste a token and check Preview.
-12. **Deployments** → the latest Preview deployment → **Redeploy**. Environment changes do not apply to a deployment that is already built.
+11. `BLOB_READ_WRITE_TOKEN` — required on Preview if you want the sample BOL and POD files (or any upload) to be stored. Connect the Blob store to Preview, or paste a token and check Preview. Tracking links do not need it.
+12. **Deployments** → the latest Preview deployment → **Redeploy**. Environment changes do not apply to a deployment that is already built. A push to the preview branch also starts a new deployment.
 13. Open the preview URL. Sign in as `m.gray@emit.example` / `Emit-Demo-2026`.
 
-A new preview updates the preview database when its server starts. Accounts and loads stay. Refresh the Loads page after the deployment is Ready. Signing out is not required.
+A preview updates its own Turso database when its server starts. Accounts and loads stay. No wipe is required. With `DEMO_SEED=true`, that start also fills sample paperwork and fake tracking links onto the existing demo loads:
+
+- Watermarked `TEST / SAMPLE` bills of lading and proofs of delivery on Active, Delivered, and History loads (SO4429, so-003108_T16, SO4422, SO-002722, SO4418, SO4540). EMIT can open those. They are not rate confirmations and they have no carrier pay.
+- One extra page on SO4526 held for Select review, so **Files in review** shows. EMIT does not see that file.
+- Fake public links `https://example.com/track/TEST-1` through `TEST-5` on so-003108_T16, SO4422, SO4570, SO4520, and SO4547, so **Track** shows. SO2196 is left blank so **Missing tracking** still shows.
+
+Production never runs this, even if `DEMO_SEED=true` is copied onto Production. A link someone already saved is left alone. Refresh Loads after the deployment is Ready. Signing out is not required.
+
+If the sample PDFs are missing and the Track buttons are there, Preview has no Blob token. Set `BLOB_READ_WRITE_TOKEN` for Preview and redeploy. The next server start stores the PDFs. The sign-in page still works without that token.
 
 If a name is still missing, the sign-in page lists it. Redeploy after you save the variable.
 
