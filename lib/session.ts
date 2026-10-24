@@ -1,6 +1,7 @@
 import { jwtVerify, SignJWT } from "jose";
 import { safeNextPath } from "@/lib/paths";
-import type { Session } from "@/lib/types";
+import { requestOrigin } from "@/lib/public-url";
+import { isEmitPermission, type EmitAccess, type EmitPermission, type Session, type ViewAsPreview } from "@/lib/types";
 
 export { safeNextPath };
 
@@ -23,6 +24,7 @@ export async function signSession(session: Session): Promise<string> {
     email: session.email,
     name: session.name,
     role: session.role,
+    pwd: session.passwordEpoch ?? 0,
   })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(session.userId)
@@ -31,14 +33,21 @@ export async function signSession(session: Session): Promise<string> {
     .sign(authSecret());
 }
 
-export async function verifySessionToken(token: string): Promise<Session | null> {
+export async function verifySessionToken(token: string): Promise<(Session & { issuedAt: number }) | null> {
   try {
     const { payload } = await jwtVerify(token, authSecret());
-    if (payload.role !== "customer" && payload.role !== "admin") return null;
+    if (payload.role !== "customer" && payload.role !== "emit_viewer" && payload.role !== "emit_admin" && payload.role !== "admin") return null;
     if (typeof payload.email !== "string" || typeof payload.name !== "string" || typeof payload.sub !== "string") {
       return null;
     }
-    return { userId: payload.sub, email: payload.email, name: payload.name, role: payload.role };
+    return {
+      userId: payload.sub,
+      email: payload.email,
+      name: payload.name,
+      role: payload.role,
+      issuedAt: typeof payload.iat === "number" ? payload.iat : 0,
+      passwordEpoch: typeof payload.pwd === "number" ? payload.pwd : 0,
+    };
   } catch {
     return null;
   }
@@ -70,6 +79,41 @@ export function clearSessionCookie(): string {
   return `${COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${secure}`;
 }
 
+/** Select staff preview an EMIT role. Ignored unless the signed-in role is admin. The preview cannot write. */
+export const VIEW_AS_COOKIE = "portal_view_as";
+
+const LEGACY_VIEW_AS: Record<string, ViewAsPreview> = {
+  emit_admin: { access: "admin", permission: "full" },
+  customer: { access: "regular", permission: "add" },
+  emit_viewer: { access: "regular", permission: "view" },
+};
+
+export function encodeViewAs(preview: ViewAsPreview): string {
+  return `${preview.access}:${preview.permission}`;
+}
+
+/** Cookie values from this build, plus the three older role names. */
+export function parseViewAs(value: string | null | undefined): ViewAsPreview | null {
+  if (!value) return null;
+  const legacy = LEGACY_VIEW_AS[value];
+  if (legacy) return legacy;
+  const [access, permission] = value.split(":");
+  if ((access === "admin" || access === "regular") && isEmitPermission(permission)) {
+    return { access: access as EmitAccess, permission: permission as EmitPermission };
+  }
+  return null;
+}
+
+export function viewAsCookie(role: string): string {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  return `${VIEW_AS_COOKIE}=${encodeURIComponent(role)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${60 * 60 * 24 * 7}${secure}`;
+}
+
+export function clearViewAsCookie(): string {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  return `${VIEW_AS_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${secure}`;
+}
+
 export function stateCookie(state: string): string {
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   return `${STATE_COOKIE}=${state}; HttpOnly; Path=/; SameSite=Lax; Max-Age=600${secure}`;
@@ -81,7 +125,7 @@ export function clearStateCookie(): string {
 
 export function isPublicPath(pathname: string): boolean {
   if (pathname === "/login") return true;
-  if (pathname === "/api/auth/login" || pathname === "/api/auth/logout") return true;
+  if (pathname === "/api/auth/login" || pathname === "/api/auth/logout" || pathname === "/api/auth/providers") return true;
   if (pathname === "/api/auth/microsoft" || pathname.startsWith("/api/auth/microsoft/")) return true;
   if (pathname === "/api/auth/google" || pathname.startsWith("/api/auth/google/")) return true;
   if (pathname.startsWith("/track/")) return true;
@@ -91,16 +135,16 @@ export function isPublicPath(pathname: string): boolean {
   // The Gmail assistant authenticates with a bearer token, not the session cookie.
   // The handler rejects every request that lacks that token or an admin session.
   if (pathname === "/api/ingest/carrier-photos") return true;
+  // The email bot authenticates with BOT_UPLOAD_KEY. The handlers reject every request without it.
+  if (pathname === "/api/integrations/documents" || pathname === "/api/integrations/tracking-link") return true;
+  // The Load Builder bot posts the SAM load number. The handler requires LOAD_BUILDER_SECRET.
+  if (pathname === "/api/integrations/sam-load") return true;
   return false;
 }
 
 export function oauthCallbackUrl(req: Request, provider: "microsoft" | "google"): string {
   const path = `/api/auth/${provider}/callback`;
-  const configured = process.env.PORTAL_PUBLIC_URL?.replace(/\/$/, "");
-  if (configured) return `${configured}${path}`;
-  const host = req.headers.get("host") || "localhost:3000";
-  const proto = req.headers.get("x-forwarded-proto") || "http";
-  return `${proto}://${host}${path}`;
+  return `${requestOrigin(req)}${path}`;
 }
 
 export function sameOrigin(req: Request): boolean {

@@ -64,8 +64,9 @@ describe("stop sequence", () => {
     expect(body.order.stops.map((stop: { id: string }) => stop.id)).toEqual(["a", "b", "c"]);
     expect(body.order.origin.city).toBe("Sheridan");
     expect(body.order.destination.company).toBe("Kodiak Gas Services");
-    expect(body.confirmation.body).toContain("1. Pickup");
-    expect(body.confirmation.body).toContain("3. Drop");
+    expect(body.order.loadNumber).toBeNull();
+    expect(body.confirmation).toBeUndefined();
+    expect(body.order.stops.map((stop: { kind: string }) => stop.kind)).toEqual(["pickup", "drop", "drop"]);
     expectNoSecrets(body);
 
     const reordered = await patchOrder(
@@ -150,6 +151,7 @@ describe("stop sequence", () => {
     const input = orderInputSchema.parse({
       salesOrderNumber: "SO-SAM-STOPS",
       shipDate: "2026-10-20",
+      shipTime: "14:30",
       mustDeliverDate: "2026-10-22",
       stops: [
         { id: "1", ...pickup("EMIT", "Sheridan", "WY") },
@@ -161,8 +163,9 @@ describe("stop sequence", () => {
     const stops = payload.stops as Array<{ sequence: number; type: string; city: string }>;
     expect(stops.map((stop) => stop.type)).toEqual(["Pickup", "Delivery", "Delivery"]);
     expect(stops.map((stop) => stop.sequence)).toEqual([1, 2, 3]);
-    expect(stops[0]).toMatchObject({ date: "2026-10-20" });
-    expect(stops[2]).toMatchObject({ date: "2026-10-22" });
+    expect(stops[0]).toMatchObject({ date: "2026-10-20", time: "14:30" });
+    expect(stops[1]).toMatchObject({ time: null });
+    expect(stops[2]).toMatchObject({ date: "2026-10-22", time: null });
     expect(JSON.stringify(payload)).not.toMatch(/carrier/i);
     const replacement = toSamStopReplacement("900999-1", input);
     expect(replacement.loadNumber).toBe("900999-1");

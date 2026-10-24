@@ -1,5 +1,5 @@
 import { identityFromGoogle } from "@/lib/auth-policy";
-import { json } from "@/lib/http";
+import { json, PortalError } from "@/lib/http";
 import { upsertExternalUser } from "@/lib/passwords";
 import { readyPortal } from "@/lib/portal";
 import {
@@ -81,6 +81,7 @@ export async function GET(req: Request) {
       ],
     });
   } catch (error) {
+    if (error instanceof PortalError) return loginError(error.message);
     console.error(error);
     return json({ error: "Google sign-in failed." }, 500);
   }

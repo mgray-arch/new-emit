@@ -21,6 +21,9 @@ import {
 } from "@/lib/types";
 import { portalPublicUrl } from "@/lib/public-url";
 import { redactSensitiveText } from "@/lib/sensitive";
+import { samLoadUrl } from "@/lib/sam-link";
+import { canSeePricing, resolveAccess, type Viewer } from "@/lib/types";
+import { parseTrackingLink } from "@/lib/tracking-link";
 
 /**
  * The only shipment shape that may leave the server toward EMIT or the assistant.
@@ -45,6 +48,7 @@ export function serializePlace(value: unknown): Place {
   return {
     company: str(place.company),
     address1: str(place.address1),
+    address2: str(place.address2),
     city: str(place.city),
     state: str(place.state),
     postalCode: str(place.postalCode),
@@ -95,6 +99,7 @@ function serializeStops(value: unknown, origin: Place, destination: Place): Stop
         id: str(row.id) || `stop-${parsed.length + 1}`,
         kind,
         place: serializePlace(row.place),
+        locationId: typeof row.locationId === "string" && row.locationId ? row.locationId : null,
       });
     }
   }
@@ -112,8 +117,20 @@ function money(value: unknown): number | null {
   return Math.round(value * 100) / 100;
 }
 
-export function serializeCustomerOrder(value: unknown): CustomerOrder {
+export interface CustomerViewOptions {
+  /** False omits customerCost and rateReason. Default true keeps stored orders intact for internal callers. */
+  includePricing?: boolean;
+  /** False omits pendingReviewCount. Default true keeps stored orders intact for internal callers. */
+  includeReview?: boolean;
+  /** False omits who submitted the load. Portal responses include it. The assistant leaves it off. */
+  includeEnteredBy?: boolean;
+}
+
+export function serializeCustomerOrder(value: unknown, options?: CustomerViewOptions): CustomerOrder {
   const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const includePricing = options?.includePricing !== false;
+  const includeReview = options?.includeReview !== false;
+  const includeEnteredBy = options?.includeEnteredBy === true;
   const portalStatus = oneOf(raw.portalStatus, PORTAL_STATUSES) ?? "being_prepared";
   const trackingStage = oneOf(raw.trackingStage, TRACKING_STAGES) ?? "submitted";
   const documents = Array.isArray(raw.documents)
@@ -122,10 +139,10 @@ export function serializeCustomerOrder(value: unknown): CustomerOrder {
   const stops = serializeStops(raw.stops, serializePlace(raw.origin), serializePlace(raw.destination));
   const pickup = stops.find((stop) => stop.kind === "pickup") ?? stops[0];
   const drop = [...stops].reverse().find((stop) => stop.kind === "drop") ?? stops[stops.length - 1];
-  return {
+  const order: CustomerOrder = {
     id: str(raw.id),
     salesOrderNumber: str(raw.salesOrderNumber),
-    loadNumber: str(raw.loadNumber),
+    loadNumber: strOrNull(raw.loadNumber),
     portalStatus,
     trackingStage,
     timeline: serializeTimeline(raw.timeline),
@@ -140,17 +157,43 @@ export function serializeCustomerOrder(value: unknown): CustomerOrder {
     truckEta: strOrNull(raw.truckEta),
     latestEta: strOrNull(raw.latestEta),
     trackingUrl: str(raw.trackingUrl),
-    customerCost: money(raw.customerCost),
-    rateReason: oneOf(raw.rateReason, RATE_REASONS),
+    trackingLink: parseTrackingLink(raw.trackingLink),
     comments: redactSensitiveText(str(raw.comments)),
     createdBy: str(raw.createdBy),
     createdAt: str(raw.createdAt),
     updatedAt: str(raw.updatedAt),
     attachmentCount: numberOrZero(raw.attachmentCount),
     bolCount: numberOrZero(raw.bolCount),
-    pendingReviewCount: numberOrZero(raw.pendingReviewCount),
     documents,
   };
+  if (includeReview) order.pendingReviewCount = numberOrZero(raw.pendingReviewCount);
+  if (includeEnteredBy) {
+    order.enteredByName = strOrNull(raw.enteredByName);
+    order.enteredByEmail = strOrNull(raw.enteredByEmail);
+  }
+  if (includePricing) {
+    order.customerCost = money(raw.customerCost);
+    order.rateReason = oneOf(raw.rateReason, RATE_REASONS);
+  }
+  return order;
+}
+
+/** The order shape that may be sent to this viewer. See pricing and full access get EMIT's cost. Every signed-in user gets who entered the load. Nobody at EMIT gets carrier pay, the review count, or the SAM build controls. */
+export function presentCustomerOrder(order: CustomerOrder, viewer: Viewer): CustomerOrder {
+  const access = resolveAccess(viewer);
+  const view = serializeCustomerOrder(order, {
+    includePricing: canSeePricing(access),
+    includeReview: access.select,
+    includeEnteredBy: true,
+  });
+  if (access.select) {
+    if (order.samBuildStatus === "building" || order.samBuildStatus === "failed") view.samBuildStatus = order.samBuildStatus;
+    if (order.samBuildError) view.samBuildError = order.samBuildError;
+    if (order.samBuildAt) view.samBuildAt = order.samBuildAt;
+    const url = samLoadUrl(view.loadNumber);
+    if (url) view.samUrl = url;
+  }
+  return view;
 }
 
 function numberOrZero(value: unknown): number {
@@ -177,6 +220,7 @@ export function toPublicTracking(order: CustomerOrder): PublicTracking {
     shipDate: order.shipDate,
     mustDeliverDate: order.mustDeliverDate,
     truckType: order.truckType,
+    trackingLink: order.trackingLink ?? null,
   };
 }
 

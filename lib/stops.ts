@@ -5,6 +5,7 @@ export interface StopInput {
   id?: string;
   kind: StopKind;
   place: Place;
+  locationId?: string | null;
 }
 
 /**
@@ -26,7 +27,8 @@ export function resolvedRoute(input: { stops?: StopInput[] | null }): { stops: S
   const stops = (input.stops ?? []).map((stop) => ({
     id: stop.id && stop.id.trim() ? stop.id.trim() : randomUUID(),
     kind: stop.kind,
-    place: { ...stop.place, country: stop.place.country || "US" },
+    place: { ...stop.place, country: stop.place.country || "US", address2: stop.place.address2 ?? "" },
+    locationId: stop.locationId ?? null,
   }));
   const pickup = stops.find((stop) => stop.kind === "pickup");
   const drop = [...stops].reverse().find((stop) => stop.kind === "drop");

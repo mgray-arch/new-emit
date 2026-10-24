@@ -52,6 +52,7 @@ export const STAGE_LABEL: Record<TrackingStage, string> = {
 export interface Place {
   company: string;
   address1: string;
+  address2?: string;
   city: string;
   state: string;
   postalCode: string;
@@ -65,6 +66,8 @@ export interface Stop {
   id: string;
   kind: StopKind;
   place: Place;
+  /** Saved drop this stop was filled from. Empty for a one-off pickup. */
+  locationId?: string | null;
 }
 
 /** Public tracking lists the sequence without street addresses. */
@@ -92,7 +95,8 @@ export interface CustomerDocument {
 export interface CustomerOrder {
   id: string;
   salesOrderNumber: string;
-  loadNumber: string;
+  /** Real Select (SAM) load number, or null until a Select admin or a future SAM sync enters it. */
+  loadNumber: string | null;
   portalStatus: PortalStatus;
   trackingStage: TrackingStage;
   timeline: TimelineEvent[];
@@ -106,21 +110,38 @@ export interface CustomerOrder {
   mustDeliverDate: string | null;
   truckEta: string | null;
   latestEta: string | null;
+  /** Portal status page. This is not the carrier's public share link. */
   trackingUrl: string;
-  customerCost: number | null;
-  rateReason: RateReason | null;
+  /** SAM / MacroPoint public share link. Null until a Select admin or a future SAM sync sets it. */
+  trackingLink: string | null;
+  /** EMIT's own cost. Omitted entirely for regular EMIT users. */
+  customerCost?: number | null;
+  /** Omitted entirely for regular EMIT users. */
+  rateReason?: RateReason | null;
   comments: string;
   createdBy: string;
+  /** Who submitted the load. Null on older loads. Name and email only. */
+  enteredByName?: string | null;
+  /** Who submitted the load. Null on older loads. Name and email only. */
+  enteredByEmail?: string | null;
   createdAt: string;
   updatedAt: string;
   attachmentCount: number;
   bolCount: number;
-  pendingReviewCount: number;
+  /** Pages held for Select. Omitted for every EMIT user, including EMIT admins. */
+  pendingReviewCount?: number;
   documents: CustomerDocument[];
+  /** Select only. Omitted for every EMIT role and for view-as. */
+  samBuildStatus?: "building" | "failed" | null;
+  samBuildError?: string | null;
+  /** Select only. When the build was requested, so a stuck build can be retried. */
+  samBuildAt?: string | null;
+  /** Select only. Present when SAM_LOAD_URL_TEMPLATE can build a link. */
+  samUrl?: string | null;
 }
 
 export interface PublicTracking {
-  loadNumber: string;
+  loadNumber: string | null;
   salesOrderNumber: string;
   portalStatus: PortalStatus;
   trackingStage: TrackingStage;
@@ -134,31 +155,135 @@ export interface PublicTracking {
   shipDate: string | null;
   mustDeliverDate: string | null;
   truckType: TruckType | null;
+  trackingLink: string | null;
 }
 
-export type PortalRole = "customer" | "admin";
+/**
+ * customer = regular EMIT user. emit_viewer = older view-only rows, treated as regular.
+ * emit_admin = EMIT admin. admin = Select. Permission is stored separately.
+ */
+export type PortalRole = "customer" | "emit_viewer" | "emit_admin" | "admin";
+
+/** What this EMIT person may do with loads and with EMIT's own price. Never carrier pay. */
+export type EmitPermission = "view" | "add" | "pricing" | "full";
+
+export type EmitAccess = "admin" | "regular";
+
+export const EMIT_PERMISSIONS = ["view", "add", "pricing", "full"] as const;
+
+export const PERMISSION_LABEL: Record<EmitPermission, string> = {
+  view: "View only",
+  add: "Add loads",
+  pricing: "See pricing",
+  full: "Full access",
+};
+
+/** Select is previewing one EMIT access plus one permission. The preview cannot write. */
+export interface ViewAsPreview {
+  access: EmitAccess;
+  permission: EmitPermission;
+}
+
+export type Viewer =
+  | string
+  | {
+      role?: string | null;
+      permission?: EmitPermission | null;
+      viewAs?: ViewAsPreview | null;
+    }
+  | null
+  | undefined;
+
+export interface ResolvedAccess {
+  role: string;
+  permission: EmitPermission | null;
+  /** Real Select session, not a view-as preview. */
+  select: boolean;
+  viewAs: ViewAsPreview | null;
+}
+
+export function isEmitPermission(value: string | null | undefined): value is EmitPermission {
+  return value === "view" || value === "add" || value === "pricing" || value === "full";
+}
+
+/** Effective rules for a session, a legacy role string, or a Select view-as preview. */
+export function resolveAccess(viewer: Viewer): ResolvedAccess {
+  if (viewer && typeof viewer === "object" && viewer.viewAs) {
+    return {
+      role: viewer.viewAs.access === "admin" ? "emit_admin" : "customer",
+      permission: viewer.viewAs.permission,
+      select: false,
+      viewAs: viewer.viewAs,
+    };
+  }
+  const role = typeof viewer === "string" ? viewer : (viewer?.role ?? "");
+  if (role === "admin") return { role: "admin", permission: null, select: true, viewAs: null };
+  if (!role) return { role: "", permission: null, select: false, viewAs: null };
+  const explicit = viewer && typeof viewer === "object" ? viewer.permission : undefined;
+  const permission = isEmitPermission(explicit) ? explicit : permissionFromRole(role);
+  return { role, permission, select: false, viewAs: null };
+}
+
+/** Customer price only: what EMIT pays Select. Carrier pay is never included by this check. */
+export function canSeePricing(viewer: Viewer): boolean {
+  const access = resolveAccess(viewer);
+  if (access.select) return true;
+  return access.permission === "pricing" || access.permission === "full";
+}
+
+/** View only and see pricing can look. Add loads and full access can create and edit. */
+export function canAddLoads(viewer: Viewer): boolean {
+  const access = resolveAccess(viewer);
+  if (access.select) return true;
+  return access.permission === "add" || access.permission === "full";
+}
+
+/**
+ * Saved delivery locations. EMIT admins can manage them unless they are view only.
+ * See pricing does not by itself grant this. Pickup sites stay with Select.
+ * View-as still reports the capability so the preview matches the role; writes are rejected separately.
+ */
+export function canManageLocations(viewer: Viewer): boolean {
+  const access = resolveAccess(viewer);
+  if (access.select) return true;
+  return access.role === "emit_admin" && access.permission !== "view";
+}
+
+export function permissionFromRole(role: string | null | undefined): EmitPermission | null {
+  if (role === "emit_viewer") return "view";
+  if (role === "customer") return "add";
+  if (role === "emit_admin") return "full";
+  return null;
+}
+
+/** Legacy mapping when a caller sends only a permission. Full access stays an EMIT admin. */
+export function roleFromPermission(permission: EmitPermission): PortalRole {
+  if (permission === "full") return "emit_admin";
+  return "customer";
+}
+
+export function accessFromRole(role: string | null | undefined): EmitAccess {
+  return role === "emit_admin" ? "admin" : "regular";
+}
 
 export interface Session {
   userId: string;
   email: string;
   name: string;
   role: PortalRole;
-}
-
-export interface OrderConfirmation {
-  salesOrderNumber: string;
-  loadNumber: string;
-  emailedTo: string;
-  subject: string;
-  body: string;
-  sender: string | null;
-  delivered: boolean;
-  createdAt: string;
+  /** Bumped when the password changes so older cookies stop working. */
+  passwordEpoch?: number;
+  /** EMIT permission from the user row. Null for Select. Ignored while viewAs is set. */
+  permission?: EmitPermission | null;
+  /** The signed-in role. Equals role unless Select is previewing an EMIT role. */
+  actorRole?: PortalRole;
+  /** Set only for a Select admin who is previewing an EMIT role. The preview is read-only. */
+  viewAs?: ViewAsPreview | null;
 }
 
 export interface AssistantReference {
   salesOrderNumber: string;
-  loadNumber: string;
+  loadNumber: string | null;
   trackingUrl: string;
   trackingStage: TrackingStage;
   latestEta: string | null;
@@ -189,7 +314,7 @@ export interface ReviewItem {
   id: string;
   loadId: string;
   salesOrderNumber: string;
-  loadNumber: string;
+  loadNumber: string | null;
   kind: string;
   screenResult: "block" | "uncertain";
   screenReason: string;
@@ -202,9 +327,15 @@ export interface ReviewItem {
   createdAt: string;
 }
 
+/** The number EMIT should see. Pending means Select has not entered the SAM load number yet. */
+export function formatLoadNumber(loadNumber: string | null | undefined): string {
+  const value = loadNumber?.trim();
+  return value ? value : "Pending";
+}
+
 export function formatPlace(place: Place): string {
   const cityLine = [place.city, place.state].filter(Boolean).join(", ");
-  return [place.company, place.address1, cityLine, place.postalCode].filter(Boolean).join(", ");
+  return [place.company, place.address1, place.address2, cityLine, place.postalCode].filter(Boolean).join(", ");
 }
 
 export function mapsUrl(place: Place): string {
