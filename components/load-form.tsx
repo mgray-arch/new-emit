@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { StopPlace, type DraftStop } from "@/components/stop-place";
 import Timeline from "@/components/timeline";
 import TrackLink from "@/components/track-link";
 import { formatWhen } from "@/lib/dates";
+import { timeSelectOptions } from "@/lib/ship-time";
 import {
   RATE_REASONS,
   STATUS_LABEL,
@@ -329,6 +330,7 @@ export default function LoadForm({
   hideCommercial?: boolean;
   readOnly?: boolean;
 }) {
+  const shipTimeId = useId();
   return (
     <>
       {order && (
@@ -413,8 +415,19 @@ export default function LoadForm({
           <input type="date" value={draft.shipDate} onChange={(event) => setDraft({ ...draft, shipDate: event.target.value })} />
         </div>
         <div className="field">
-          <label>Expected Ship Time (optional)</label>
-          <input type="time" value={draft.shipTime} onChange={(event) => setDraft({ ...draft, shipTime: event.target.value })} />
+          <label htmlFor={shipTimeId}>Expected Ship Time (optional)</label>
+          <select
+            id={shipTimeId}
+            value={draft.shipTime}
+            onChange={(event) => setDraft({ ...draft, shipTime: event.target.value })}
+          >
+            <option value="">Select time</option>
+            {timeSelectOptions(draft.shipTime).map((time) => (
+              <option key={time} value={time}>
+                {time}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
       <div className="grid-2">
