@@ -6,6 +6,9 @@ import { sensitiveReason } from "@/lib/sensitive";
 import { readStoredBytes, writeStoredBytes } from "@/lib/storage";
 import type { CustomerDocument, ReviewItem } from "@/lib/types";
 import { PortalError } from "@/lib/http";
+import { safeFilename } from "@/lib/document-view";
+
+export { safeFilename };
 
 export type ScreenDecision = "pass" | "block" | "uncertain";
 
@@ -24,12 +27,6 @@ export function screenPageText(text: string | null | undefined): { decision: Scr
 
 export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 const MAX_PAGES = 25;
-
-export function safeFilename(name: string): string {
-  const base = name.split(/[/\\]/).pop() || "document";
-  const cleaned = base.replace(/[^\w.\- ()]+/g, "_").slice(0, 80);
-  return cleaned || "document";
-}
 
 export function sniffUpload(bytes: Uint8Array, filename: string): "pdf" | "png" | "jpeg" | "text" | "other" {
   if (bytes.length >= 5 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) return "pdf";

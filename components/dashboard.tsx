@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import DocumentLinks from "@/components/document-links";
 import LoadForm, { draftFromOrder, emptyDraft, payloadFromDraft, useSites, type Draft } from "@/components/load-form";
 import SamBuildButton from "@/components/sam-build-button";
 import PhotoGallery from "@/components/photo-gallery";
@@ -636,9 +637,7 @@ function FileList({ docs }: { docs: CustomerDocument[] }) {
   return (
     <div className="refs">
       {docs.map((doc) => (
-        <a key={doc.id} href={`/api/documents/${doc.id}`}>
-          {doc.filename}
-        </a>
+        <DocumentLinks key={doc.id} doc={doc} />
       ))}
     </div>
   );

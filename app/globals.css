@@ -403,6 +403,8 @@ td select {
 .ask-form input { flex: 1; background: var(--bg-input); border: 1px solid #3c424d; border-radius: 8px; padding: 10px 12px; }
 .refs { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .refs a { color: var(--orange); font-size: 13px; }
+.doc-links { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+.doc-links .doc-name { overflow-wrap: anywhere; }
 
 .review { display: flex; flex-direction: column; gap: 12px; }
 .review article { background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }

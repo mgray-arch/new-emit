@@ -1,4 +1,5 @@
-import { readCustomerDocument, safeFilename } from "@/lib/documents";
+import { documentContentDisposition, wantsDocumentDownload } from "@/lib/document-view";
+import { readCustomerDocument } from "@/lib/documents";
 import { isSession, requireSession } from "@/lib/guard";
 import { errorResponse, json } from "@/lib/http";
 import { getOrder } from "@/lib/orders";
@@ -15,10 +16,11 @@ export async function GET(req: Request, context: { params: Promise<{ id: string 
     const ctx = await readyPortal();
     const doc = await readCustomerDocument(ctx, id);
     if (!doc || !(await getOrder(ctx, doc.loadId))) return json({ error: "Document not found" }, 404);
+    const download = wantsDocumentDownload(new URL(req.url).searchParams.get("download"));
     return new Response(Buffer.from(doc.bytes), {
       headers: {
         "content-type": doc.mediaType,
-        "content-disposition": `attachment; filename="${safeFilename(doc.filename)}"`,
+        "content-disposition": documentContentDisposition(doc.mediaType, doc.filename, download),
         "cache-control": "no-store",
         "x-content-type-options": "nosniff",
       },

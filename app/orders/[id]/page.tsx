@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import DocumentLinks from "@/components/document-links";
 import PhotoGallery from "@/components/photo-gallery";
 import SamBuildButton from "@/components/sam-build-button";
 import SelectLoadField from "@/components/select-load-field";
@@ -158,9 +159,11 @@ export default function OrderPage() {
               ) : (
                 <div className="refs">
                   {order.documents.map((doc) => (
-                    <a key={doc.id} href={`/api/documents/${doc.id}`}>
-                      {doc.kind === "bol" ? "BOL" : "File"} · {doc.filename}
-                    </a>
+                    <DocumentLinks
+                      key={doc.id}
+                      doc={doc}
+                      label={`${doc.kind === "bol" ? "BOL" : "File"} · ${doc.filename}`}
+                    />
                   ))}
                 </div>
               )}
