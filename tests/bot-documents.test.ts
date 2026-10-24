@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { PDFDocument, StandardFonts } from "pdf-lib";
 import { beforeAll, describe, expect, it } from "vitest";
 import * as integrationRoute from "@/app/api/integrations/documents/route";
 import { POST } from "@/app/api/integrations/documents/route";
@@ -24,10 +25,19 @@ beforeAll(async () => {
   ctx = await seededPortal();
 });
 
-function form(fields: { filename: string; bytes: Uint8Array; loadNumber?: string; docType?: string }) {
+async function pdf(text: string): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([612, 792]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  page.drawText(text, { x: 48, y: 720, size: 12, font, maxWidth: 500 });
+  return doc.save();
+}
+
+function form(fields: { filename: string; bytes: Uint8Array; loadNumber?: string; salesOrderNumber?: string; docType?: string }) {
   const body = new FormData();
   body.set("file", new File([Buffer.from(fields.bytes)], fields.filename, { type: "text/plain" }));
-  body.set("loadNumber", fields.loadNumber ?? "900196-1");
+  if (fields.loadNumber !== "") body.set("loadNumber", fields.loadNumber ?? "900196-1");
+  if (fields.salesOrderNumber) body.set("salesOrderNumber", fields.salesOrderNumber);
   if (fields.docType !== undefined) body.set("doc_type", fields.docType);
   return body;
 }
@@ -140,15 +150,16 @@ describe("bot document upload", () => {
     const before = Number(
       (await ctx.db.prepare(`SELECT COUNT(*) AS n FROM customer_documents WHERE load_id = ?`).get(id))?.n ?? 0,
     );
-    const bol = new TextEncoder().encode("Bill of lading. Shipper EMIT Technologies, Sheridan WY. Receiver Enchanted Rock.");
+    const bol = await pdf("Bill of lading. Shipper EMIT Technologies, Sheridan WY. Receiver Enchanted Rock.");
     const created = await POST(post(form({ filename: "emailed-bol.txt", bytes: bol, docType: "bol" }), { ip: "203.0.113.30" }));
     expect(created.status).toBe(201);
     const body = await created.json();
     expect(Object.keys(body).sort()).toEqual(
-      ["docType", "duplicate", "heldForReview", "loadNumber", "released", "sha256", "uploadedBy"].sort(),
+      ["docType", "duplicate", "heldForReview", "loadNumber", "released", "salesOrderNumber", "sha256", "uploadedBy"].sort(),
     );
     expect(body).toMatchObject({
       loadNumber: "900196-1",
+      salesOrderNumber: "SO2196",
       docType: "bol",
       uploadedBy: BOT_UPLOADER,
       duplicate: false,
@@ -178,7 +189,7 @@ describe("bot document upload", () => {
     expect(other.status).toBe(201);
     expect((await other.json()).duplicate).toBe(false);
 
-    const rate = new TextEncoder().encode("This rate confirmation lists carrier pay for the Sheridan load today.");
+    const rate = await pdf("This rate confirmation lists carrier pay for the Sheridan load today.");
     const held = await POST(post(form({ filename: "ratecon.txt", bytes: rate }), { ip: "203.0.113.32" }));
     expect(held.status).toBe(201);
     expect(await held.json()).toMatchObject({ released: 0, heldForReview: 1, uploadedBy: BOT_UPLOADER });
@@ -212,7 +223,7 @@ describe("bot document upload", () => {
       .get("dock.png");
     expect(photoRow).toMatchObject({ screen_result: "uncertain", uploaded_by: BOT_UPLOADER });
 
-    const pod = new TextEncoder().encode("Proof of delivery. Receiver signed for four crates in Oklahoma City today.");
+    const pod = await pdf("Proof of delivery. Receiver signed for four crates in Oklahoma City today.");
     const podResponse = await POST(
       post(form({ filename: "pod.txt", bytes: pod, docType: "pod", loadNumber: "900182-1" }), { ip: "203.0.113.34" }),
     );
@@ -223,6 +234,45 @@ describe("bot document upload", () => {
       .prepare(`SELECT kind, uploaded_by FROM customer_documents WHERE load_id = ? AND filename = ?`)
       .get(podLoad, "pod.txt");
     expect(podRow).toMatchObject({ kind: "attachment", uploaded_by: BOT_UPLOADER });
+  });
+
+  it("accepts a sales order number, and rejects text and a mismatched pair", async () => {
+    const byOrder = await pdf("Bill of lading filed from the sales order number alone, Sheridan to Oklahoma City.");
+    const created = await POST(
+      post(form({ filename: "by-so.pdf", bytes: byOrder, loadNumber: "", salesOrderNumber: "SO2196" }), { ip: "203.0.113.40" }),
+    );
+    expect(created.status).toBe(201);
+    expect(await created.json()).toMatchObject({
+      loadNumber: "900196-1",
+      salesOrderNumber: "SO2196",
+      docType: "bol",
+      duplicate: false,
+    });
+
+    const text = await POST(
+      post(
+        form({
+          filename: "notes.txt",
+          bytes: new TextEncoder().encode("Bill of lading written as plain text instead of a PDF."),
+          loadNumber: "900181-1",
+        }),
+        { ip: "203.0.113.41" },
+      ),
+    );
+    expect(text.status).toBe(415);
+
+    const mismatch = await POST(
+      post(
+        form({
+          filename: "mismatch.pdf",
+          bytes: await pdf("Bill of lading whose load number and sales order do not match."),
+          loadNumber: "900196-1",
+          salesOrderNumber: "SO2981",
+        }),
+        { ip: "203.0.113.42" },
+      ),
+    );
+    expect(mismatch.status).toBe(409);
   });
 
   it("rate limits uploads per IP, including failed keys", async () => {

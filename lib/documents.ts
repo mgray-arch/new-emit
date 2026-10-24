@@ -22,7 +22,7 @@ export function screenPageText(text: string | null | undefined): { decision: Scr
   return { decision: "pass", reason: "No rate-confirmation signals found." };
 }
 
-const MAX_BYTES = 8 * 1024 * 1024;
+export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 const MAX_PAGES = 25;
 
 export function safeFilename(name: string): string {
@@ -31,7 +31,7 @@ export function safeFilename(name: string): string {
   return cleaned || "document";
 }
 
-function sniff(bytes: Uint8Array, filename: string): "pdf" | "png" | "jpeg" | "text" | "other" {
+export function sniffUpload(bytes: Uint8Array, filename: string): "pdf" | "png" | "jpeg" | "text" | "other" {
   if (bytes.length >= 5 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) return "pdf";
   if (bytes.length >= 4 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "png";
   if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "jpeg";
@@ -132,9 +132,9 @@ export async function ingestDocument(
   },
 ): Promise<IngestResult> {
   if (input.bytes.byteLength === 0) throw new PortalError("That file is empty");
-  if (input.bytes.byteLength > MAX_BYTES) throw new PortalError("Files must be 8 MB or smaller");
+  if (input.bytes.byteLength > MAX_UPLOAD_BYTES) throw new PortalError("Files must be 8 MB or smaller");
   const filename = safeFilename(input.filename);
-  const kind = sniff(input.bytes, filename);
+  const kind = sniffUpload(input.bytes, filename);
   const slot = input.slot === "bol" ? "bol" : "attachment";
   const uploadedBy = input.uploadedBy?.trim() ? input.uploadedBy.trim().slice(0, 80) : null;
   const createdAt = ctx.now().toISOString();

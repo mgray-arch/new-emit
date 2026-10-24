@@ -23,6 +23,9 @@ export const SELECT_LOAD_NUMBER = /^\d{4,10}-\d{1,3}$/;
 
 export type LoadNumberSource = "admin" | "sam";
 
+/** Who stored the public share link. The email bot never clears a link. */
+export type TrackingLinkSource = LoadNumberSource | "bot-email";
+
 export function parseSelectLoadNumber(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -138,11 +141,13 @@ export async function assignTrackingLink(
   ctx: PortalContext,
   orderId: string,
   trackingLink: string,
-  source: LoadNumberSource,
+  source: TrackingLinkSource,
 ): Promise<CustomerOrder> {
   const raw = trackingLink.trim();
   if (!raw) {
-    if (source !== "admin") throw new PortalError("SAM did not return a tracking link.");
+    if (source !== "admin") {
+      throw new PortalError(source === "sam" ? "SAM did not return a tracking link." : "Send an http or https tracking link.");
+    }
     const cleared = await ctx.db
       .prepare(`UPDATE loads SET tracking_link = NULL, tracking_link_source = NULL, updated_at = ? WHERE id = ?`)
       .run(ctx.now().toISOString(), orderId);

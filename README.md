@@ -111,7 +111,7 @@ Leave these blank unless you are turning that feature on:
 | `AZURE_AD_TENANT_ID`, `AZURE_AD_CLIENT_ID`, `AZURE_AD_CLIENT_SECRET` | Only if EMIT later wants Microsoft sign-in. Not required. |
 | `AI_API_KEY`, `AI_BASE_URL`, `AI_MODEL` | Optional assistant. Blank uses the built-in answers. |
 | `CARRIER_PHOTO_INGEST_TOKEN` | Bearer token for the photo ingest API. Admins can upload without it. |
-| `BOT_UPLOAD_KEY` | Bearer token for the SAM bot document upload. At least 16 characters. The bot can only upload. |
+| `BOT_UPLOAD_KEY` | Bearer token for the email bot. At least 16 characters. Same key for `POST /api/integrations/documents` and `POST /api/integrations/tracking-link`. |
 | `LOAD_BUILDER_WEBHOOK_URL` | Where **Build load in SAM** posts the load. `http` or `https`. Unset: the button returns an error and the load is not marked building. |
 | `LOAD_BUILDER_SECRET` | Shared bearer secret, at least 16 characters. Sent to the webhook and required on the callback. |
 | `SAM_LOAD_URL_TEMPLATE` | Link for a stored SAM number. Must contain `{loadNumber}`. Example: `https://sam.example.com/loads/{loadNumber}`. Unset: the number shows and is not a link. |
@@ -226,17 +226,25 @@ History can be exported as CSV. The file never includes carrier pay. View only a
 
 Each load has a tracking link, separate from the portal status page. A Select admin pastes the public SAM or MacroPoint URL on the load. EMIT users and receivers get a Track button when it is set. The link has to be http or https. Clearing the field removes the button.
 
-## Bot document upload
+The email bot can set the same link. See the bot section below. An empty bot value does not clear a link.
 
-Mike's bot posts a BOL from SAM email to `POST /api/integrations/documents`.
+## Bot document upload and tracking links
 
-Send `Authorization: Bearer <BOT_UPLOAD_KEY>`. The key is at least 16 characters and compared in constant time. A missing or wrong key is 401. A session cookie is not accepted. The path skips the session-cookie check so the bot does not sign in, and it is limited to 60 requests a minute per IP.
+One key covers both. There is no second secret.
 
-The body is multipart: `file`, `loadNumber` (a Select load number such as `458934-1`; `load_number` is accepted too), and optional `doc_type` (`bol`, `pod`, or `photo`). Omitted `doc_type` means `bol`.
+Send `Authorization: Bearer <BOT_UPLOAD_KEY>`. The key is at least 16 characters and compared in constant time. A missing, short, or wrong key is 401. A session cookie is not accepted. Both paths skip the session-cookie check so the bot does not sign in. They share a limit of 60 requests a minute per IP.
 
-The file is screened with the same page rules as an upload from the portal. A rate confirmation or a page with no readable text stays in Select review. The uploader is stored as Select bot. The same file bytes on the same load are stored once; a retry returns the first result. This path cannot list, read, or delete documents.
+Name the load with `loadNumber` (a Select load number such as `458934-1`; `load_number` is accepted too), `salesOrderNumber` (`sales_order_number` too), or both. Both have to be the same load. No match is 404. More than one match, or a pair that points at different loads, is 409 and does not guess.
 
-An unknown load number is 404. A number that matches more than one load is rejected instead of guessing.
+`POST /api/integrations/documents` uploads a file. The body is multipart: `file`, the load fields above, and optional `doc_type` (`bol`, `pod`, or `photo`). Omitted `doc_type` means `bol`. The file has to be a PDF, PNG, or JPEG, 8 MB or smaller. Anything else is 415. It is screened with the same page rules as an upload from the portal. A rate confirmation or a page with no readable text stays in Select review, so EMIT does not see it. The uploader is stored as Select bot. A BOL is filed as a BOL. The same file bytes on the same load are stored once; a retry returns the first result. This path cannot list, read, or delete documents.
+
+`POST /api/integrations/tracking-link` sets the public share link. The body is JSON:
+
+```json
+{ "loadNumber": "458934-1", "trackingLink": "https://macropoint.example/share/abc" }
+```
+
+`salesOrderNumber` can stand in for the load number, or be sent with it. `tracking_link` is accepted too. The URL has to be http or https. A blank value, or `javascript:`, is 400 and leaves the current link in place. Sending the same URL again is 200 with `duplicate: true` and does not write a second row. A new URL is 201 and the source is `bot-email`. The response is the order id, sales order number, load number, link, and duplicate flag. It does not include cost or carrier pay.
 
 ## Build load in SAM
 

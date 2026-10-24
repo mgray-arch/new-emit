@@ -135,8 +135,8 @@ export function isPublicPath(pathname: string): boolean {
   // The Gmail assistant authenticates with a bearer token, not the session cookie.
   // The handler rejects every request that lacks that token or an admin session.
   if (pathname === "/api/ingest/carrier-photos") return true;
-  // The SAM bot authenticates with BOT_UPLOAD_KEY. The handler is upload-only.
-  if (pathname === "/api/integrations/documents") return true;
+  // The email bot authenticates with BOT_UPLOAD_KEY. The handlers reject every request without it.
+  if (pathname === "/api/integrations/documents" || pathname === "/api/integrations/tracking-link") return true;
   // The Load Builder bot posts the SAM load number. The handler requires LOAD_BUILDER_SECRET.
   if (pathname === "/api/integrations/sam-load") return true;
   return false;

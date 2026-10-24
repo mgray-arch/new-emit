@@ -1,4 +1,4 @@
-import { botKeyMatches, consumeBotUpload, ingestBotDocument, parseBotDocType, parseBotLoadNumber } from "@/lib/bot-documents";
+import { botKeyMatches, consumeBotUpload, ingestBotDocument, parseBotDocType } from "@/lib/bot-documents";
 import { errorResponse, json, PortalError, unauthorized } from "@/lib/http";
 import { clientIp } from "@/lib/passwords";
 import { readyPortal } from "@/lib/portal";
@@ -6,8 +6,17 @@ import { readyPortal } from "@/lib/portal";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+function formText(form: FormData, ...names: string[]): string {
+  for (const name of names) {
+    const value = form.get(name);
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
 async function readMultipart(req: Request): Promise<{
   loadNumber: string;
+  salesOrderNumber: string;
   filename: string;
   bytes: Uint8Array;
   docType: ReturnType<typeof parseBotDocType>;
@@ -17,12 +26,11 @@ async function readMultipart(req: Request): Promise<{
   const form = await req.formData();
   const file = form.get("file");
   if (!(file instanceof File)) throw new PortalError("Choose a file to upload");
-  const loadField = form.get("loadNumber") ?? form.get("load_number");
-  const loadNumber = parseBotLoadNumber(typeof loadField === "string" ? loadField : "");
   const docField = form.get("doc_type") ?? form.get("docType");
   const docType = parseBotDocType(typeof docField === "string" ? docField : "");
   return {
-    loadNumber,
+    loadNumber: formText(form, "loadNumber", "load_number"),
+    salesOrderNumber: formText(form, "salesOrderNumber", "sales_order_number"),
     filename: file.name,
     bytes: new Uint8Array(await file.arrayBuffer()),
     docType,
