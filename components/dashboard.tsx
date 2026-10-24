@@ -469,10 +469,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
               {PICKUP_GROUP_LABEL[group.id]}
             </div>
             {group.orders.map((order) => {
-              const reasons =
-                selectView && data
-                  ? attentionReasons(order, data.today).filter((reason) => reason !== "Files in review")
-                  : [];
+              const reasons = selectView && data ? attentionReasons(order, data.today) : [];
               const today = data?.today ?? "";
               return (
                 <article
