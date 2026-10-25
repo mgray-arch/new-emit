@@ -126,6 +126,8 @@ Leave these blank unless you are turning that feature on:
 | `SAM_API_BASE_URL`, `SAM_API_TOKEN`, `SAM_CUSTOMER_ID` | Leave blank. The portal does not call the SAM API. |
 | `SLACK_NEW_LOADS_WEBHOOK_URL` | Slack incoming webhook for a new-load note. Unset: no Slack message is sent. The note does not include carrier pay. |
 | `SLACK_USER_ID_DREW`, `SLACK_USER_ID_AINSLEY` | Optional Slack member ids so the owner line @mentions that person. Unset: the note uses the names Drew and Ainsley. |
+| `SLACK_MESSAGES_WEBHOOK_URL` | Slack incoming webhook when an EMIT user posts in Messages. Unset: no Slack message is sent. The note has the load number (when one is attached), a short preview, and a link. It does not include the full message or carrier pay. |
+| `MESSAGE_NOTIFY_EMAILS` | Optional comma-separated addresses for that same note. The portal has no email sender, so setting this does not send mail and does not block the message. |
 
 Do not set `DEMO_USER_PASSWORD` in production. Do not set a Gmail client. Order mail has been removed.
 

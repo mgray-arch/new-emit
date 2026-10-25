@@ -23,6 +23,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [toastMessage, setToastMessage] = useState("");
   const [menu, setMenu] = useState(false);
+  const [unread, setUnread] = useState(0);
 
   useEffect(() => {
     setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
@@ -54,6 +55,28 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     localStorage.setItem("emit-theme", next);
     setTheme(next);
   }
+
+  useEffect(() => {
+    let stop = false;
+    async function pullUnread() {
+      try {
+        const response = await fetch("/api/messages/unread");
+        if (!response.ok) return;
+        const body = (await response.json()) as { count?: number };
+        if (!stop) setUnread(Number(body.count) || 0);
+      } catch {
+        /* The nav still works when the count cannot be loaded. */
+      }
+    }
+    void pullUnread();
+    const timer = window.setInterval(() => void pullUnread(), 15_000);
+    window.addEventListener("emit-messages-read", pullUnread);
+    return () => {
+      stop = true;
+      window.clearInterval(timer);
+      window.removeEventListener("emit-messages-read", pullUnread);
+    };
+  }, [pathname]);
 
   useEffect(() => {
     fetch("/api/me")
@@ -92,6 +115,12 @@ export default function Shell({ children }: { children: React.ReactNode }) {
 
   const links = [
     { href: "/", label: "Loads", on: pathname === "/" },
+    {
+      href: "/messages",
+      label: "Messages",
+      on: pathname === "/messages",
+      title: unread > 0 ? `Messages, ${unread} unread` : "Messages with Select",
+    },
     { href: "/ask", label: "Ask", on: pathname === "/ask", title: "Ask about an order" },
     ...(me?.role === "admin" || me?.role === "emit_admin"
       ? [{ href: "/locations", label: "Locations", on: pathname === "/locations" }]
@@ -120,7 +149,10 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         <nav className="sidenav-links" aria-label="Main">
           {links.map((link) => (
             <Link key={link.href} href={link.href} className={link.on ? "active" : ""} title={link.title}>
-              {link.label}
+              <span>{link.label}</span>
+              {link.href === "/messages" && unread > 0 ? (
+                <span className="nav-count">{unread > 99 ? "99+" : unread}</span>
+              ) : null}
             </Link>
           ))}
         </nav>

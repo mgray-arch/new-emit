@@ -89,6 +89,11 @@ export default function OrderPage() {
             <p className="lede">
               {order.salesOrderNumber} · Select load {formatLoadNumber(order.loadNumber)}
             </p>
+            <p>
+              <Link href={`/messages?load=${order.id}`} className="text-link">
+                Message about this load
+              </Link>
+            </p>
             <div className="date-grid">
               <div className="date-pair">
                 <span className="k">Pickup</span>

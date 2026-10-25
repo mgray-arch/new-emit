@@ -195,6 +195,27 @@ CREATE TABLE IF NOT EXISTS locations (
 );
 
 CREATE INDEX IF NOT EXISTS locations_kind ON locations(kind, active, use_count);
+
+CREATE TABLE IF NOT EXISTS messages (
+  id TEXT PRIMARY KEY,
+  seq INTEGER NOT NULL UNIQUE,
+  body TEXT NOT NULL,
+  author_id TEXT NOT NULL,
+  author_name TEXT NOT NULL,
+  author_email TEXT NOT NULL,
+  author_side TEXT NOT NULL CHECK(author_side IN ('emit', 'select')),
+  load_id TEXT,
+  load_number TEXT,
+  sales_order_number TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS messages_seq ON messages(seq);
+
+CREATE TABLE IF NOT EXISTS message_reads (
+  user_id TEXT PRIMARY KEY,
+  read_seq INTEGER NOT NULL
+);
 `;
 
 /**
