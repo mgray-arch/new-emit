@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
-import type { Place, Stop, StopKind } from "@/lib/types";
+import type { Place, Stop, StopKind, StopSchedule } from "@/lib/types";
 
 export interface StopInput {
   id?: string;
   kind: StopKind;
   place: Place;
   locationId?: string | null;
+  schedule?: StopSchedule | null;
 }
 
 /**
@@ -29,6 +30,7 @@ export function resolvedRoute(input: { stops?: StopInput[] | null }): { stops: S
     kind: stop.kind,
     place: { ...stop.place, country: stop.place.country || "US", address2: stop.place.address2 ?? "" },
     locationId: stop.locationId ?? null,
+    ...(stop.schedule ? { schedule: stop.schedule } : {}),
   }));
   const pickup = stops.find((stop) => stop.kind === "pickup");
   const drop = [...stops].reverse().find((stop) => stop.kind === "drop");

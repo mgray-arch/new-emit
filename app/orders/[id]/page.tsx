@@ -13,6 +13,7 @@ import Timeline from "@/components/timeline";
 import TrackLink from "@/components/track-link";
 import TrackingLinkField from "@/components/tracking-link-field";
 import { denverDate, formatDay, formatWhen } from "@/lib/dates";
+import { formatStopSchedule } from "@/lib/stop-schedule";
 import { formatEnteredBy } from "@/lib/entered-by";
 import { displayStatus, fileSummary } from "@/lib/load-list";
 import { toast } from "@/lib/toast";
@@ -137,13 +138,17 @@ export default function OrderPage() {
                 <p className="empty">No stops on this load yet.</p>
               ) : (
                 <ol className="stop-list">
-                  {order.stops.map((stop) => (
-                    <li key={stop.id}>
-                      <strong>{stop.kind === "pickup" ? "Pickup" : "Delivery"}</strong>
-                      <div className="company">{stop.place.company}</div>
-                      <div className="addr">{formatPlace(stop.place)}</div>
-                    </li>
-                  ))}
+                  {order.stops.map((stop) => {
+                    const schedule = formatStopSchedule(stop.schedule);
+                    return (
+                      <li key={stop.id}>
+                        <strong>{stop.kind === "pickup" ? "Pickup" : "Delivery"}</strong>
+                        <div className="company">{stop.place.company}</div>
+                        <div className="addr">{formatPlace(stop.place)}</div>
+                        {schedule ? <div className="mini">{schedule}</div> : null}
+                      </li>
+                    );
+                  })}
                 </ol>
               )}
             </section>

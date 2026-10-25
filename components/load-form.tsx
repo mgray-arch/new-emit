@@ -372,7 +372,10 @@ export default function LoadForm({
           <label>Truck Type (optional)</label>
           <select value={draft.truckType} onChange={(event) => setDraft({ ...draft, truckType: event.target.value })}>
             <option value="">Select truck type</option>
-            {TRUCK_TYPES.map((type) => (
+            {(draft.truckType && !(TRUCK_TYPES as readonly string[]).includes(draft.truckType)
+              ? [draft.truckType, ...TRUCK_TYPES]
+              : TRUCK_TYPES
+            ).map((type) => (
               <option key={type}>{type}</option>
             ))}
           </select>

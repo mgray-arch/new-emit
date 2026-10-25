@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS loads (
   sales_order_number TEXT NOT NULL,
   load_number TEXT UNIQUE,
   load_number_source TEXT,
+  source TEXT,
   portal_status TEXT NOT NULL,
   tracking_stage TEXT NOT NULL,
   timeline_json TEXT NOT NULL,
@@ -364,6 +365,7 @@ export async function openDatabase(file?: string): Promise<SqlDatabase> {
   await migrateSamBuild(db);
   await migrateEnteredBy(db);
   await migrateDocumentUploaders(db);
+  await migrateLoadSource(db);
   await db.exec(`DROP TABLE IF EXISTS outbox`);
   return db;
 }
@@ -696,6 +698,14 @@ async function rebuildUsersForRoleOnce(db: SqlDatabase, spec: UserRebuild): Prom
       DROP TABLE users;
       ALTER TABLE ${spec.table} RENAME TO users;
     `);
+}
+
+/**
+ * Null means the load was entered in the portal. `sam-import` means the historical
+ * SAM import created it. A portal load is never relabeled, so a re-import cannot overwrite it.
+ */
+async function migrateLoadSource(db: SqlDatabase): Promise<void> {
+  await ensureColumn(db, "loads", "source", "TEXT");
 }
 
 /** Older document tables have no uploader. The bot upload log is created with the schema. */

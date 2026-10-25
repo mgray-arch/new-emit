@@ -119,7 +119,7 @@ Leave these blank unless you are turning that feature on:
 | `AZURE_AD_TENANT_ID`, `AZURE_AD_CLIENT_ID`, `AZURE_AD_CLIENT_SECRET` | Only if EMIT later wants Microsoft sign-in. Not required. |
 | `AI_API_KEY`, `AI_BASE_URL`, `AI_MODEL` | Optional assistant. Blank uses the built-in answers. |
 | `CARRIER_PHOTO_INGEST_TOKEN` | Bearer token for the photo ingest API. Admins can upload without it. |
-| `BOT_UPLOAD_KEY` | Bearer token for the email bot. At least 16 characters. Same key for `POST /api/integrations/documents` and `POST /api/integrations/tracking-link`. |
+| `BOT_UPLOAD_KEY` | Bearer token for the Select bot. At least 16 characters. Same key for `POST /api/integrations/documents`, `POST /api/integrations/tracking-link`, and `POST /api/integrations/loads/import`. |
 | `LOAD_BUILDER_WEBHOOK_URL` | Where **Build load in SAM** posts the load. `http` or `https`. Unset: the button returns an error and the load is not marked building. |
 | `LOAD_BUILDER_SECRET` | Shared bearer secret, at least 16 characters. Sent to the webhook and required on the callback. |
 | `SAM_LOAD_URL_TEMPLATE` | Link for a stored SAM number. Must contain `{loadNumber}`. Example: `https://sam.example.com/loads/{loadNumber}`. Unset: the number shows and is not a link. |
@@ -222,7 +222,7 @@ A drop is linked to a receiver when the company name matches, so the receiver pa
 
 ## Load lists
 
-Select staff see four lists: **Needs Attention** (no Select load number, files in review, an in-transit load with no tracking link, or a past-due delivery), **Active**, **Delivered** for the last 7 days, and **History**. EMIT admins, regular EMIT users, and Select **View as** do not get that list, its count, or the Needs Attention badge. Those loads stay on Active or Delivered, so nothing is hidden from them. A delivered load moves to History on its own after those 7 days. Cancelled loads are in History too.
+Select staff see four lists: **Needs Attention** (no Select load number, files in review, an in-transit load with no tracking link, or a past-due delivery), **Active**, **Delivered** for the last 7 days, and **History**. A delivered historical import is not flagged Missing tracking or Past due. An import that is still in transit can be. EMIT admins, regular EMIT users, and Select **View as** do not get that list, its count, or the Needs Attention badge. Those loads stay on Active or Delivered, so nothing is hidden from them. A delivered load moves to History on its own after those 7 days. Cancelled loads are in History too.
 
 Each load is a card: the lane in bold, pickup and delivery dates, a colored status, and Track when there is a link. **Entered by** is on the card and the load page for Select and every EMIT user: the name and email, the email alone when the name is missing, or Unknown on older loads. That line is only the person. It is not carrier pay, and view only or add loads still do not see EMIT's cost. Long notes stay on two lines until you expand them. Open a card for the four-step timeline (Ordered, Booked, Picked up, Delivered) and the stops, documents, tracking, and notes. A PDF opens with **View PDF**, and a PNG or JPEG opens with **View**, both in a new tab. **Download** saves the file. Anything else only downloads. Light mode is in the header. EMIT users see a short tip the first time.
 
@@ -236,11 +236,11 @@ Each load has a tracking link, separate from the portal status page. A Select ad
 
 The email bot can set the same link. See the bot section below. An empty bot value does not clear a link.
 
-## Bot document upload and tracking links
+## Bot document upload, tracking links, and historical loads
 
-One key covers both. There is no second secret.
+One key covers all three. There is no second secret.
 
-Send `Authorization: Bearer <BOT_UPLOAD_KEY>`. The key is at least 16 characters and compared in constant time. A missing, short, or wrong key is 401. A session cookie is not accepted. Both paths skip the session-cookie check so the bot does not sign in. They share a limit of 60 requests a minute per IP.
+Send `Authorization: Bearer <BOT_UPLOAD_KEY>`. The key is at least 16 characters and compared in constant time. A missing, short, or wrong key is 401. A session cookie is not accepted. These paths skip the session-cookie check so the bot does not sign in. They share a limit of 60 requests a minute per IP.
 
 Name the load with `loadNumber` (a Select load number such as `458934-1`; `load_number` is accepted too), `salesOrderNumber` (`sales_order_number` too), or both. Both have to be the same load. No match is 404. More than one match, or a pair that points at different loads, is 409 and does not guess.
 
@@ -253,6 +253,84 @@ Name the load with `loadNumber` (a Select load number such as `458934-1`; `load_
 ```
 
 `salesOrderNumber` can stand in for the load number, or be sent with it. `tracking_link` is accepted too. The URL has to be http or https. A blank value, or `javascript:`, is 400 and leaves the current link in place. Sending the same URL again is 200 with `duplicate: true` and does not write a second row. A new URL is 201 and the source is `bot-email`. The response is the order id, sales order number, load number, link, and duplicate flag. It does not include cost or carrier pay.
+
+### Historical load import
+
+`POST /api/integrations/loads/import` backfills EMIT loads the portal does not have yet. The portal still does not call SAM. The bot reads SAM and posts this allowlist. Documents are not imported. There is no new secret: the same `BOT_UPLOAD_KEY` and the same 60-requests-a-minute limit as the two paths above.
+
+`dryRun` is required and has to be a boolean. `"true"` is 400, so a string cannot write. `loads` is 1 to 200 objects. More than 200 is 400. A bad load does not fail the batch. The response is 200 and each item is `created`, `updated`, `linked`, or `error`. A dry run uses `would create`, `would update`, `would link`, or `error`, and writes nothing. `summary` counts those actions.
+
+```json
+{
+  "dryRun": true,
+  "loads": [
+    {
+      "selectLoadNumber": "460117-1",
+      "salesOrderNumber": "so-1276_1277_2496_2497",
+      "status": "Completed",
+      "equipment": "Flatbed, Hotshot",
+      "customerRate": 4150,
+      "trackingShareUrl": "https://customer.goselect.com/tracking/example",
+      "createdAt": "2026-10-22T13:53:14.407Z",
+      "stops": [
+        {
+          "sequence": 1,
+          "type": "Pickup",
+          "locationName": "EMIT TECHNOLOGIES",
+          "address1": "2571 North Main Street",
+          "city": "Sheridan",
+          "state": "WY",
+          "postalCode": "82801",
+          "date": "2026-10-22T12:00:00.000Z",
+          "time": "16:30",
+          "arrivalTime": "2026-10-22T19:07:09.000Z",
+          "departureTime": "2026-10-23T07:20:40.000Z"
+        },
+        {
+          "sequence": 2,
+          "type": "Delivery",
+          "locationName": "INTERMOUNTAIN ELECTRONICS - PRICE",
+          "address": "1676 East Declaration Drive, Price, UT, 84501",
+          "city": "Price",
+          "state": "UT",
+          "postalCode": "84501",
+          "date": "2026-10-23",
+          "time": "0800 - 1700"
+        }
+      ]
+    }
+  ]
+}
+```
+
+`loadNumber` is accepted for `selectLoadNumber`. `transitStatus`, `truckType`, `customer_rate`, `trackingLink`, and `created_at` are accepted under those names. Stops can use `kind` of `pickup` or `drop` instead of `type`. `sequence` orders the stops. Without it, array order is kept. A combined `address` is split when `address1` is omitted and `city` is set. `time` can be `16:30`, `1600`, `0800 - 1700`, or `0600 MDT`. An `appointment` object with `earliest` and `latest` is the same window. `date` may be `YYYY-MM-DD` or a SAM date-only value at `12:00Z`. The calendar date is the date in that string. It is not shifted to Denver. Arrival and departure are stored as sent when they are timestamps.
+
+`customerRate` is EMIT's total charge in dollars. It is stored as the existing customer cost. See pricing and full access can see it. View only and add loads cannot. There is no carrier-pay fallback.
+
+Sales orders are stored trimmed, including the original letters and separators. A missing sales order stays blank. The import does not invent one from the load number. `SO-68458`, `SO68458`, and `68458` match each other when linking. `so-1276_1277_2496_2497` is one value. It matches that string aside from case and spaces, and it does not match `1276`.
+
+The upsert key is `selectLoadNumber`. Sending it again updates the imported row and does not add a second one. A load EMIT created in the portal has no import source. That row is not overwritten. When its sales order matches, the import sets the Select load number if it is still blank, and fills a tracking link only when the portal load does not have one. Stops, price, status, dates, and Entered by stay as EMIT saved them. If that sales order is already on a different Select number, or it matches more than one portal load, the item is `error` and nothing is written. If the Select number is already on a portal load with a different sales order, that is an error too.
+
+Imported rows are `source` `sam-import`. **Entered by** is `Imported from SAM`. SAM comments and paperwork are not copied. Carrier pay, carrier name, MC number, and rate confirmation fields are ignored wherever they appear. They are not stored and they are not returned.
+
+Status is the SAM transit status:
+
+| SAM status | Portal status | Tracking stage |
+| --- | --- | --- |
+| Open, and the words pending, submitted, being prepared | Being Prepared | Submitted |
+| Covered, and the words booked, ready to ship | Ready to Ship | Booked |
+| Dispatched | Ready to Ship | Booked |
+| At Shipper, At Pickup, Loaded | Shipped | At Pickup |
+| In Transit, and the word active | Shipped | In Transit |
+| At Receiver, Out for Delivery | Shipped | In Transit |
+| Delivered, Completed | Shipped | Delivered |
+| Cancelled, voided | Cancelled | Submitted |
+
+Delivered and Completed land on Delivered in the list, then History after 7 days. They are not Missing tracking and they are not Past due, even with no share link and an old delivery date. In Transit with no link is still Missing tracking. A delivery date before today on a load that is not delivered is still Past due.
+
+Equipment maps onto the portal truck list when the name is one of those types. `Flatbed, Hotshot` is Hot Shot. `Sprinter` is Sprinter Van. `F53` and `53' Flatbed` are 53' Flatbed. `Straight Box Truck`, `Power Only`, `Step Deck`, `Flatbed or Stepdeck`, `Straight Van`, and `53' Van` stay as that text, because the portal list has no length or type for them. Any other name is kept as sent, up to 80 characters.
+
+Delivery stops link to a saved location only on an exact dock: the same normalized street, city, state, and ZIP. `East`/`E`, `Drive`/`Dr`, and a ZIP+4 are the same street the location page already uses. A likely match (same street, different ZIP or only a similar company) is reported and not linked, because the portal otherwise asks a person. The import does not create location rows, and it does not change how often a dock has been used. Pickups are stored on the load only.
 
 ## Build load in SAM
 

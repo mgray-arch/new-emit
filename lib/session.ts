@@ -137,6 +137,8 @@ export function isPublicPath(pathname: string): boolean {
   if (pathname === "/api/ingest/carrier-photos") return true;
   // The email bot authenticates with BOT_UPLOAD_KEY. The handlers reject every request without it.
   if (pathname === "/api/integrations/documents" || pathname === "/api/integrations/tracking-link") return true;
+  // Historical SAM loads use the same key. The handler rejects every request without it.
+  if (pathname === "/api/integrations/loads/import") return true;
   // The Load Builder bot posts the SAM load number. The handler requires LOAD_BUILDER_SECRET.
   if (pathname === "/api/integrations/sam-load") return true;
   return false;

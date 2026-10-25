@@ -18,6 +18,17 @@ export const TRUCK_TYPES = [
 ] as const;
 export type TruckType = (typeof TRUCK_TYPES)[number];
 
+/** Per-stop schedule copied from SAM. Dates are calendar dates. Appointment times are local wall-clock HH:MM. */
+export interface StopSchedule {
+  date: string | null;
+  appointmentStart: string | null;
+  appointmentEnd: string | null;
+  /** Kept only when the appointment text is not a clock time. */
+  appointmentText: string | null;
+  arrivedAt: string | null;
+  departedAt: string | null;
+}
+
 export const TRANSIT_OPTIONS = ["Normal", "Team"] as const;
 export type TransitOption = (typeof TRANSIT_OPTIONS)[number];
 
@@ -68,6 +79,8 @@ export interface Stop {
   place: Place;
   /** Saved drop this stop was filled from. Empty for a one-off pickup. */
   locationId?: string | null;
+  /** Present on historical SAM imports. Portal-entered loads omit it. */
+  schedule?: StopSchedule | null;
 }
 
 /** Public tracking lists the sequence without street addresses. */
@@ -103,7 +116,8 @@ export interface CustomerOrder {
   origin: Place;
   destination: Place;
   stops: Stop[];
-  truckType: TruckType | null;
+  /** A portal truck type, or the raw equipment text when SAM used a type this list does not have. */
+  truckType: string | null;
   transit: TransitOption | null;
   shipDate: string | null;
   shipTime: string | null;
@@ -154,7 +168,7 @@ export interface PublicTracking {
   stops: PublicStop[];
   shipDate: string | null;
   mustDeliverDate: string | null;
-  truckType: TruckType | null;
+  truckType: string | null;
   trackingLink: string | null;
 }
 
