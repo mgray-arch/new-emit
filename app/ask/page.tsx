@@ -53,7 +53,7 @@ export default function AskPage() {
                 <div className="refs">
                   {turn.answer.references.map((ref) => (
                     <a key={ref.loadNumber + ref.salesOrderNumber} href={ref.trackingUrl}>
-                      {ref.salesOrderNumber} · load {ref.loadNumber} · {ref.originCity} to {ref.destinationCity}
+                      {ref.salesOrderNumber} · Select load {ref.loadNumber ?? "Pending"} · {ref.originCity} to {ref.destinationCity}
                     </a>
                   ))}
                 </div>

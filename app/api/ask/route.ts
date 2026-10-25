@@ -15,7 +15,7 @@ export async function POST(req: Request) {
     if (!isSession(session)) return session;
     const ctx = await readyPortal();
     const body = bodySchema.parse(await req.json());
-    const answer = await answerQuestion(ctx, body.question);
+    const answer = await answerQuestion(ctx, body.question, session);
     return json(answer);
   } catch (error) {
     return errorResponse(error);

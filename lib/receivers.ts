@@ -20,7 +20,7 @@ export interface ReceiverRecord {
 export interface ReceiverShipment {
   id: string;
   salesOrderNumber: string;
-  loadNumber: string;
+  loadNumber: string | null;
   portalStatus: PortalStatus;
   trackingStage: TrackingStage;
   timeline: TimelineEvent[];
@@ -30,6 +30,7 @@ export interface ReceiverShipment {
   latestEta: string | null;
   truckType: string | null;
   trackingUrl: string;
+  trackingLink: string | null;
   photos: Array<{ id: string; filename: string; mediaType: string; receivedAt: string }>;
 }
 
@@ -184,6 +185,7 @@ export async function shipmentsForReceiver(ctx: PortalContext, company: string):
     latestEta: order.latestEta,
     truckType: order.truckType,
     trackingUrl: order.trackingUrl,
+    trackingLink: order.trackingLink,
     photos: (await listCarrierPhotos(ctx, order.id, false)).map((photo) => ({
       id: photo.id,
       filename: photo.filename,

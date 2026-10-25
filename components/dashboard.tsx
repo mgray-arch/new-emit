@@ -1,106 +1,110 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import DocumentLinks from "@/components/document-links";
 import LoadForm, { draftFromOrder, emptyDraft, payloadFromDraft, useSites, type Draft } from "@/components/load-form";
+import SamBuildButton from "@/components/sam-build-button";
 import PhotoGallery from "@/components/photo-gallery";
+import SelectLoadField from "@/components/select-load-field";
+import StatusPill from "@/components/status-pill";
+import TrackLink from "@/components/track-link";
+import TrackingLinkField from "@/components/tracking-link-field";
 import { formatDay } from "@/lib/dates";
+import { formatEnteredBy } from "@/lib/entered-by";
+import {
+  LOAD_TAB_LABEL,
+  PICKUP_GROUP_LABEL,
+  attentionReasons,
+  displayStatus,
+  emptyListMessage,
+  fileSummary,
+  pickupGroup,
+  visibleLoadTabs,
+  type LoadTab,
+  type LoadTabCounts,
+  type PickupGroup,
+} from "@/lib/load-list";
+import { toast } from "@/lib/toast";
 import {
   STATUS_LABEL,
-  formatPlace,
+  canAddLoads,
+  canSeePricing,
+  formatLoadNumber,
   type CustomerDocument,
   type CustomerOrder,
-  type OrderConfirmation,
-  type PortalStatus,
+  type PortalRole,
 } from "@/lib/types";
+
+interface Me {
+  role: PortalRole;
+  permission?: "view" | "add" | "pricing" | "full" | null;
+  readOnly?: boolean;
+}
 
 interface ListResponse {
   orders: CustomerOrder[];
   total: number;
   page: number;
   pageSize: number;
-  stats: Record<PortalStatus | "total", number>;
+  counts: LoadTabCounts;
+  today: string;
+  tomorrow: string;
+  weekEnd: string;
+  scope: "tab" | "all";
+  tab: LoadTab;
+  receivers: string[];
 }
 
-const STATS: Array<{ key: PortalStatus | "total"; label: string; color: string; icon: string }> = [
-  { key: "total", label: "Total Loads", color: "var(--orange)", icon: "box" },
-  { key: "being_prepared", label: "Being Prepared", color: "var(--gold)", icon: "clock" },
-  { key: "ready_to_ship", label: "Ready to Ship", color: "var(--green)", icon: "check" },
-  { key: "shipped", label: "Shipped", color: "var(--blue)", icon: "truck" },
-  { key: "cancelled", label: "Cancelled", color: "var(--red)", icon: "x" },
-];
+const PAGE_SIZE = 25;
 
-function Icon({ name, color }: { name: string; color: string }) {
-  const common = { width: 18, height: 18, fill: "none", stroke: color, strokeWidth: 1.8 };
-  if (name === "clock") {
-    return (
-      <svg {...common} viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="8" />
-        <path d="M12 8v5l3 2" />
-      </svg>
-    );
-  }
-  if (name === "check") {
-    return (
-      <svg {...common} viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="8" />
-        <path d="M8 12.5l2.5 2.5L16 9" />
-      </svg>
-    );
-  }
-  if (name === "truck") {
-    return (
-      <svg {...common} viewBox="0 0 24 24">
-        <path d="M3 7h11v8H3zM14 10h4l3 3v2h-7z" />
-        <circle cx="7" cy="17" r="1.5" />
-        <circle cx="17" cy="17" r="1.5" />
-      </svg>
-    );
-  }
-  if (name === "x") {
-    return (
-      <svg {...common} viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="8" />
-        <path d="M9 9l6 6M15 9l-6 6" />
-      </svg>
-    );
-  }
+function Note({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const long = text.length > 90;
   return (
-    <svg {...common} viewBox="0 0 24 24">
-      <path d="M4 8l8-4 8 4-8 4-8-4zM4 8v8l8 4 8-4V8" />
-    </svg>
-  );
-}
-
-function DateStack({ date, time }: { date: string | null; time?: string | null }) {
-  if (!date) return <span className="mini">—</span>;
-  const [year] = date.split("-");
-  return (
-    <span className="datestack">
-      <span>{formatDay(date)},</span>
-      <span>
-        {year}
-        {time ? ` ${time}` : ""}
-      </span>
-    </span>
+    <div className="note-wrap">
+      <p className={open || !long ? "note" : "note clamp"} title={text}>
+        {text}
+      </p>
+      {long ? (
+        <button
+          className="text-btn"
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            setOpen((value) => !value);
+          }}
+        >
+          {open ? "Show less" : "Show note"}
+        </button>
+      ) : null}
+    </div>
   );
 }
 
 export default function Dashboard({ startNew = false }: { startNew?: boolean }) {
+  const router = useRouter();
   const sites = useSites();
+  const [tab, setTab] = useState<LoadTab>("active");
+  const [listReady, setListReady] = useState(false);
   const [status, setStatus] = useState<string>("");
   const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
   const [shipFrom, setShipFrom] = useState("");
   const [shipTo, setShipTo] = useState("");
-  const [showDates, setShowDates] = useState(false);
+  const [pickup, setPickup] = useState("");
+  const [receiver, setReceiver] = useState("");
   const [page, setPage] = useState(1);
   const [data, setData] = useState<ListResponse | null>(null);
+  const [rows, setRows] = useState<CustomerOrder[]>([]);
+  const [reload, setReload] = useState(0);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<CustomerOrder | null>(null);
   const [creating, setCreating] = useState(startNew);
   const [draft, setDraft] = useState<Draft>(emptyDraft());
-  const [role, setRole] = useState<"customer" | "admin" | null>(null);
-  const [confirmation, setConfirmation] = useState<OrderConfirmation | null>(null);
+  const [me, setMe] = useState<Me | null>(null);
+  const [showTips, setShowTips] = useState(false);
+  const [submitted, setSubmitted] = useState<CustomerOrder | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
 
@@ -112,30 +116,76 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   useEffect(() => {
     fetch("/api/me")
       .then((response) => (response.ok ? response.json() : null))
-      .then((body) => setRole(body?.role ?? null))
-      .catch(() => setRole(null));
+      .then((body: Me | null) => {
+        setMe(body);
+        const select = Boolean(body && body.role === "admin" && !body.readOnly);
+        setTab((current) => (select ? "attention" : current === "attention" ? "active" : current));
+        setListReady(true);
+        const edit = new URLSearchParams(window.location.search).get("edit");
+        if (edit && body && !body.readOnly && canAddLoads(body)) void openEdit(edit);
+      })
+      .catch(() => {
+        setMe(null);
+        setTab("active");
+        setListReady(true);
+      });
+  }, []);
+
+  const role = me?.role ?? null;
+  const readOnly = Boolean(me?.readOnly);
+  const showPricing = canSeePricing(me);
+  const allowLoads = canAddLoads(me);
+  const selectView = role === "admin" && !readOnly;
+
+  useEffect(() => {
+    if (!allowLoads || readOnly) setCreating(false);
+  }, [allowLoads, readOnly]);
+
+  useEffect(() => {
+    if (!role || role === "admin") return;
+    if (window.localStorage.getItem("emit-tips-v1") === "1") return;
+    setShowTips(true);
+  }, [role]);
+
+  const replaceOrder = useCallback((next: CustomerOrder) => {
+    setRows((current) => current.map((item) => (item.id === next.id ? next : item)));
+    setEditing((current) => (current?.id === next.id ? next : current));
   }, []);
 
   useEffect(() => {
+    if (!creating && !editing) return;
+    document.documentElement.classList.add("dialog-open");
+    return () => document.documentElement.classList.remove("dialog-open");
+  }, [creating, editing]);
+
+  useEffect(() => {
+    if (!listReady) return;
     const params = new URLSearchParams();
+    params.set("tab", tab);
     if (status) params.set("status", status);
     if (query.trim()) params.set("q", query.trim());
     if (shipFrom) params.set("shipFrom", shipFrom);
     if (shipTo) params.set("shipTo", shipTo);
+    if (pickup) params.set("pickup", pickup);
+    if (receiver) params.set("receiver", receiver);
     params.set("page", String(page));
+    params.set("pageSize", String(PAGE_SIZE));
     fetch(`/api/orders?${params}`)
       .then(async (response) => {
         if (!response.ok) throw new Error("Could not load orders");
         return response.json();
       })
-      .then((body) => {
+      .then((body: ListResponse) => {
         setData(body);
+        setRows((current) => {
+          if (page === 1) return body.orders;
+          const seen = new Set(current.map((order) => order.id));
+          return [...current, ...body.orders.filter((order) => !seen.has(order.id))];
+        });
         setError("");
       })
-      .catch(() => setError("Could not load orders"));
-  }, [status, query, shipFrom, shipTo, page, confirmation, editing]);
-
-  const stats = data?.stats ?? { total: 0, being_prepared: 0, ready_to_ship: 0, shipped: 0, cancelled: 0 };
+      .catch(() => setError("We couldn't load your loads. Refresh the page and try again."));
+  }, [listReady, tab, status, query, shipFrom, shipTo, pickup, receiver, page, reload]);
 
   async function openEdit(id: string) {
     const response = await fetch(`/api/orders/${id}`);
@@ -143,29 +193,78 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     const body = await response.json();
     setEditing(body.order);
     setDraft(draftFromOrder(body.order));
-    setConfirmation(body.confirmation);
+    setSubmitted(null);
     setFormError("");
     setCreating(false);
   }
 
   async function save() {
+    if (readOnly) {
+      setFormError("View-as is read-only. Switch back to Select view to change anything.");
+      return;
+    }
     if (!draft.stops.some((stop) => stop.kind === "pickup") || !draft.stops.some((stop) => stop.kind === "drop")) {
       setFormError("Add at least one pickup and one drop.");
+      return;
+    }
+    if (draft.stops.some((stop) => stop.duplicateOf && !stop.saveAsNew)) {
+      setFormError("This looks like a duplicate. Use the existing location, or save it as new.");
       return;
     }
     setSaving(true);
     setFormError("");
     try {
-      const payload = payloadFromDraft(draft);
+      const payload = payloadFromDraft(draft, { includePricing: showPricing });
       const response = await fetch(editing ? `/api/orders/${editing.id}` : "/api/orders", {
         method: editing ? "PATCH" : "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
       });
       const body = await response.json();
+      if (response.status === 409 && Array.isArray(body.duplicates)) {
+        const duplicates = body.duplicates as Array<{
+          stopId?: string;
+          location?: {
+            id: string;
+            company: string;
+            address1: string;
+            address2?: string;
+            city: string;
+            state: string;
+            postalCode?: string;
+            country?: string;
+            receiverCompany?: string | null;
+          };
+        }>;
+        const warnings = new Map(duplicates.map((item) => [item.stopId, item.location]));
+        setDraft({
+          ...draft,
+          stops: draft.stops.map((stop) => {
+            const location = warnings.get(stop.id);
+            if (!location) return stop;
+            return {
+              ...stop,
+              saveAsNew: false,
+              duplicateOf: {
+                id: location.id,
+                company: location.receiverCompany || location.company,
+                address1: location.address1,
+                address2: location.address2 ?? "",
+                city: location.city,
+                state: location.state,
+                postalCode: location.postalCode ?? "",
+                country: location.country || "US",
+                receiverCompany: location.receiverCompany ?? null,
+              },
+            };
+          }),
+        });
+        setFormError(body.error || "This looks like a duplicate.");
+        return;
+      }
       if (!response.ok) throw new Error(body.error || "Could not save");
       if (!editing) {
-        setConfirmation(body.confirmation);
+        setSubmitted(body.order);
         setEditing(body.order);
         setDraft(draftFromOrder(body.order));
         setCreating(false);
@@ -173,28 +272,21 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
         setEditing(body.order);
         setDraft(draftFromOrder(body.order));
       }
+      setPage(1);
+      setReload((value) => value + 1);
+      toast(editing ? "Load saved." : "Load submitted. Select will add the load number.");
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Could not save");
+      setFormError(err instanceof Error ? err.message : "We couldn't save this load. Check the fields and try again.");
     } finally {
       setSaving(false);
     }
   }
 
-  async function changeStatus(order: CustomerOrder, portalStatus: PortalStatus) {
-    await fetch(`/api/orders/${order.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ portalStatus }),
-    });
-    setPage(page);
-    setData((current) => (current ? { ...current } : current));
-    const params = new URLSearchParams({ page: String(page) });
-    if (status) params.set("status", status);
-    const response = await fetch(`/api/orders?${params}`);
-    if (response.ok) setData(await response.json());
-  }
-
   async function upload(slot: "attachment" | "bol", file: File) {
+    if (readOnly) {
+      setFormError("View-as is read-only. Switch back to Select view to change anything.");
+      return;
+    }
     if (!editing) return;
     const form = new FormData();
     form.set("file", file);
@@ -202,196 +294,251 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     const response = await fetch(`/api/orders/${editing.id}/documents`, { method: "POST", body: form });
     const body = await response.json();
     if (!response.ok) {
-      setFormError(body.error || "Upload failed");
+      setFormError(body.error || "We couldn't upload that file. Try again.");
       return;
     }
     setEditing(body.order);
-    setFormError(
-      body.heldForReview
-        ? `${body.heldForReview} page${body.heldForReview === 1 ? "" : "s"} held for Select review. ${body.released} released.`
-        : "",
-    );
+    setFormError("");
+    toast(role === "admin" && body.heldForReview ? `${body.heldForReview} in review` : "Uploaded");
   }
 
-  const rangeLabel = useMemo(() => {
-    if (!data) return "";
-    if (data.total === 0) return "No loads";
-    const from = (data.page - 1) * data.pageSize + 1;
-    const to = Math.min(data.total, data.page * data.pageSize);
-    return `Showing ${from}–${to} of ${data.total}`;
-  }, [data]);
+  const counts: LoadTabCounts = data?.counts ?? { active: 0, delivered: 0, history: 0 };
+  const groups = useMemo(() => {
+    if (!data) return [];
+    const blocks: Array<{ id: PickupGroup; orders: CustomerOrder[] }> = [];
+    for (const order of rows) {
+      const id = pickupGroup(order.shipDate, data.today, data.tomorrow, data.weekEnd);
+      const last = blocks[blocks.length - 1];
+      if (!last || last.id !== id) blocks.push({ id, orders: [order] });
+      else last.orders.push(order);
+    }
+    return blocks;
+  }, [rows, data]);
+
+  function exportHistory() {
+    const params = new URLSearchParams();
+    params.set("tab", "history");
+    if (status) params.set("status", status);
+    if (query.trim()) params.set("q", query.trim());
+    if (shipFrom) params.set("shipFrom", shipFrom);
+    if (shipTo) params.set("shipTo", shipTo);
+    if (pickup) params.set("pickup", pickup);
+    if (receiver) params.set("receiver", receiver);
+    window.location.href = `/api/orders/export?${params}`;
+  }
 
   return (
     <main className="page">
-      <h1>BROKER DASHBOARD</h1>
-      <p className="lede">View and track all incoming shipment loads</p>
-      <section className="stats">
-        {STATS.map((stat) => (
-          <button
-            key={stat.key}
-            className={`stat ${status === (stat.key === "total" ? "" : stat.key) && (stat.key === "total" ? !status : true) ? "on" : ""}`}
-            style={{ borderLeftColor: stat.color, ["--accent" as string]: stat.color }}
-            onClick={() => {
-              setStatus(stat.key === "total" ? "" : stat.key);
-              setPage(1);
-            }}
-            type="button"
-          >
-            <div className="ico">
-              <Icon name={stat.icon} color={stat.color} />
-            </div>
-            <strong>{stats[stat.key] ?? 0}</strong>
-            <em>{stat.label}</em>
-          </button>
-        ))}
-      </section>
-      <div className="filters">
-        <select
-          aria-label="Status"
-          value={status}
-          onChange={(event) => {
-            setStatus(event.target.value);
-            setPage(1);
-          }}
-        >
-          <option value="">All Statuses</option>
-          {Object.entries(STATUS_LABEL).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-        <button className="btn secondary" type="button" onClick={() => setShowDates((value) => !value)}>
-          Ship date range
-        </button>
-        {showDates && (
-          <>
-            <input aria-label="Ship from" type="date" value={shipFrom} onChange={(event) => { setShipFrom(event.target.value); setPage(1); }} />
-            <input aria-label="Ship to" type="date" value={shipTo} onChange={(event) => { setShipTo(event.target.value); setPage(1); }} />
-          </>
-        )}
-        <input
-          className="search"
-          placeholder="Search SO or city"
-          value={q}
-          onChange={(event) => {
-            setQ(event.target.value);
-            setPage(1);
-          }}
-          aria-label="Search by SO or city"
-        />
-        <button
-          className="btn"
-          type="button"
-          onClick={() => {
-            setCreating(true);
-            setEditing(null);
-            setDraft(emptyDraft());
-            setConfirmation(null);
-            setFormError("");
-          }}
-        >
-          New load
-        </button>
-      </div>
-      {error && <p className="error">{error}</p>}
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              {["PO / Order #", "Origin", "Destination", "Truck Type", "Transit", "Ship Date/Time", "Must Deliver", "Truck ETA", "Status", "Cost", "Notes", "Files", "BOL", "Created By"].map((heading) => (
-                <th key={heading}>{heading}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {data?.orders.map((order) => (
-              <tr key={order.id}>
-                <td>
-                  <span className="so">
-                    <button className="icon-btn" aria-label={`Edit ${order.salesOrderNumber}`} type="button" onClick={() => openEdit(order.id)}>
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                        <path d="M4 20h4l10-10-4-4L4 16v4z" />
-                      </svg>
-                    </button>
-                    {order.salesOrderNumber}
-                  </span>
-                </td>
-                <td>
-                  <div className="company">{order.origin.company}</div>
-                  <div className="addr">{formatPlace(order.origin).replace(`${order.origin.company}, `, "")}</div>
-                </td>
-                <td>
-                  <div className="company">{order.destination.company}</div>
-                  <div className="addr">{formatPlace(order.destination).replace(`${order.destination.company}, `, "")}</div>
-                  {order.stops.length > 2 && <div className="mini">{order.stops.length} stops</div>}
-                </td>
-                <td>{order.truckType || "—"}</td>
-                <td>{order.transit || "—"}</td>
-                <td>
-                  <DateStack date={order.shipDate} time={order.shipTime} />
-                </td>
-                <td>
-                  <DateStack date={order.mustDeliverDate} />
-                </td>
-                <td>
-                  <DateStack date={order.truckEta} />
-                </td>
-                <td>
-                  <select aria-label={`Status for ${order.salesOrderNumber}`} value={order.portalStatus} onChange={(event) => changeStatus(order, event.target.value as PortalStatus)}>
-                    {Object.entries(STATUS_LABEL).map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td>{order.customerCost == null ? "—" : order.customerCost.toLocaleString("en-US", { style: "currency", currency: "USD" })}</td>
-                <td className="notes">{order.comments || "—"}</td>
-                <td>
-                  <div>{order.attachmentCount}</div>
-                  {order.pendingReviewCount > 0 && <div className="hold">{order.pendingReviewCount} in review</div>}
-                </td>
-                <td>{order.bolCount}</td>
-                <td>{order.createdBy}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="load-cards">
-        {data?.orders.map((order) => (
-          <article className="load-card" key={order.id}>
-            <h3>{order.salesOrderNumber}</h3>
-            <div className="pill">{STATUS_LABEL[order.portalStatus]}</div>
-            <p>
-              {order.origin.city}, {order.origin.state} → {order.destination.city}, {order.destination.state}
-              {order.stops.length > 2 ? ` · ${order.stops.length} stops` : ""}
-            </p>
-            <p className="mini">
-              Ship {order.shipDate || "—"} {order.shipTime || ""} · ETA {order.latestEta ? formatDay(order.latestEta.slice(0, 10)) : order.truckEta || "—"}
-            </p>
-            <button className="btn secondary" type="button" onClick={() => openEdit(order.id)}>
-              Open
-            </button>
-          </article>
-        ))}
-      </div>
-      <div className="pager">
-        <span>{rangeLabel}</span>
+      <div className="page-head">
         <div>
-          <button className="btn secondary" type="button" disabled={!data || data.page <= 1} onClick={() => setPage((value) => value - 1)}>
-            Previous
+          <h1>Loads</h1>
+          <p className="lede">
+            {selectView
+              ? "What needs a look, what is moving, and what already delivered."
+              : "What is moving, and what already delivered."}
+          </p>
+        </div>
+        {allowLoads ? (
+          <button
+            className="btn"
+            type="button"
+            disabled={readOnly}
+            title={readOnly ? "Read-only preview" : undefined}
+            onClick={() => {
+              setCreating(true);
+              setEditing(null);
+              setDraft(emptyDraft());
+              setSubmitted(null);
+              setFormError("");
+            }}
+          >
+            New load
           </button>
+        ) : null}
+      </div>
+      {showTips && (
+        <aside className="tips">
+          <strong>A few tips</strong>
+          <p>Search finds a load in any list. Click a card to open it.</p>
           <button
             className="btn secondary"
             type="button"
-            disabled={!data || data.page * data.pageSize >= data.total}
-            onClick={() => setPage((value) => value + 1)}
+            onClick={() => {
+              window.localStorage.setItem("emit-tips-v1", "1");
+              setShowTips(false);
+            }}
           >
-            Next
+            Got it
           </button>
+        </aside>
+      )}
+      {listReady ? (
+        <div className="tabs" role="tablist" aria-label="Load lists">
+          {visibleLoadTabs(selectView).map((item) => (
+            <button
+              key={item}
+              className={tab === item ? "tab on" : "tab"}
+              type="button"
+              role="tab"
+              aria-selected={tab === item}
+              onClick={() => {
+                setTab(item);
+                setPage(1);
+              }}
+            >
+              <strong>{counts[item] ?? 0}</strong>
+              <span>{LOAD_TAB_LABEL[item]}</span>
+            </button>
+          ))}
         </div>
+      ) : null}
+      <div className="filters">
+        <label className="filter" style={{ flex: "1 1 220px" }}>
+          <span>Search</span>
+          <input
+            className="search board-search"
+            placeholder="Load number, order, city, or receiver"
+            value={q}
+            onChange={(event) => {
+              setQ(event.target.value);
+              setPage(1);
+            }}
+            aria-label="Search loads"
+          />
+        </label>
+        <label className="filter">
+          <span>Pickup from</span>
+          <input aria-label="Pickup from" type="date" value={shipFrom} onChange={(event) => { setShipFrom(event.target.value); setPage(1); }} />
+        </label>
+        <label className="filter">
+          <span>Pickup to</span>
+          <input aria-label="Pickup to" type="date" value={shipTo} onChange={(event) => { setShipTo(event.target.value); setPage(1); }} />
+        </label>
+        <label className="filter">
+          <span>Pickup site</span>
+          <select aria-label="Pickup site" value={pickup} onChange={(event) => { setPickup(event.target.value); setPage(1); }}>
+            <option value="">All sites</option>
+            {sites.map((site) => (
+              <option key={site.id} value={site.company}>
+                {site.company}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="filter">
+          <span>Receiver</span>
+          <select aria-label="Receiver" value={receiver} onChange={(event) => { setReceiver(event.target.value); setPage(1); }}>
+            <option value="">All receivers</option>
+            {(data?.receivers ?? []).map((company) => (
+              <option key={company} value={company}>
+                {company}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="filter">
+          <span>Status</span>
+          <select
+            aria-label="Status"
+            value={status}
+            onChange={(event) => {
+              setStatus(event.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">All statuses</option>
+            {Object.entries(STATUS_LABEL).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {tab === "history" && (
+          <button className="btn secondary" type="button" onClick={exportHistory}>
+            Export CSV
+          </button>
+        )}
+      </div>
+      {data?.scope === "all" && query.trim() ? <p className="mini">Showing matches from every tab.</p> : null}
+      {error && <p className="error">{error}</p>}
+      <div className="board">
+        {groups.map((group) => (
+          <section key={group.id}>
+            <div className="group-head" role="heading" aria-level={2}>
+              {PICKUP_GROUP_LABEL[group.id]}
+            </div>
+            {group.orders.map((order) => {
+              const reasons = selectView && data ? attentionReasons(order, data.today) : [];
+              const today = data?.today ?? "";
+              return (
+                <article
+                  key={order.id}
+                  className="load-row"
+                  tabIndex={0}
+                  aria-label={`Open ${order.salesOrderNumber}`}
+                  onClick={(event) => {
+                    const target = event.target as HTMLElement;
+                    if (target.closest("a, button, select, input, label, option")) return;
+                    router.push(`/orders/${order.id}`);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && event.target === event.currentTarget) router.push(`/orders/${order.id}`);
+                  }}
+                >
+                  <div className="load-row-top">
+                    <div className="lane">
+                      {order.origin.city}, {order.origin.state} → {order.destination.city}, {order.destination.state}
+                    </div>
+                    <StatusPill status={displayStatus(order, today, { needsAttention: selectView })} />
+                  </div>
+                  <div className="date-grid">
+                    <div className="date-pair">
+                      <span className="k">Pickup</span>
+                      <span>{order.shipDate ? `${formatDay(order.shipDate)}${order.shipTime ? `, ${order.shipTime}` : ""}` : "Not set"}</span>
+                    </div>
+                    <div className="date-pair">
+                      <span className="k">Delivery</span>
+                      <span>{order.mustDeliverDate ? formatDay(order.mustDeliverDate) : "Not set"}</span>
+                    </div>
+                  </div>
+                  <div className="load-meta">
+                    {order.salesOrderNumber} · Select load {formatLoadNumber(order.loadNumber)}
+                    {order.stops.length > 2 ? ` · ${order.stops.length} stops` : ""} · {fileSummary({ ...order, pendingReviewCount: 0 })}
+                  </div>
+                  <div className="load-meta">Entered by: {formatEnteredBy(order.enteredByName, order.enteredByEmail)}</div>
+                  {reasons.length > 0 && <div className="hold">{reasons.join(" · ")}</div>}
+                  {selectView && (order.pendingReviewCount ?? 0) > 0 ? (
+                    <div className="hold">{order.pendingReviewCount} in review</div>
+                  ) : null}
+                  {order.comments ? <Note text={order.comments} /> : null}
+                  <div className="load-row-actions">
+                    {selectView ? <SamBuildButton order={order} onUpdated={replaceOrder} /> : null}
+                    <TrackLink href={order.trackingLink} />
+                    {showPricing && (
+                      <span className="load-meta">
+                        {order.customerCost == null ? "Cost not set" : order.customerCost.toLocaleString("en-US", { style: "currency", currency: "USD" })}
+                      </span>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </section>
+        ))}
+        {data && rows.length === 0 ? (
+          <p className="empty">
+            {emptyListMessage(tab, Boolean(query.trim() || status || shipFrom || shipTo || pickup || receiver))}
+          </p>
+        ) : null}
+      </div>
+      <div className="pager">
+        <span>{data ? `Showing ${rows.length} of ${data.total}` : ""}</span>
+        {data && rows.length < data.total ? (
+          <button className="btn secondary" type="button" onClick={() => setPage((value) => value + 1)}>
+            Load more
+          </button>
+        ) : null}
       </div>
       {(creating || editing) && (
         <div className="backdrop" role="presentation" onMouseDown={() => { setCreating(false); setEditing(null); }}>
@@ -404,33 +551,49 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
           >
             <div className="dialog-head">
               <div>
-                <h2 id="load-title">{editing ? "EDIT LOAD" : "NEW LOAD"}</h2>
-                <p className="sub">{editing ? "Update load details." : "Submit a load to Select."}</p>
+                <h2 id="load-title">{editing ? "Edit load" : "New load"}</h2>
+                <p className="sub">{editing ? "Update this load, then save." : "Tell Select what you need moved."}</p>
               </div>
-              <button className="icon-btn" type="button" aria-label="Close" onClick={() => { setCreating(false); setEditing(null); }}>
+              <button className="icon-btn" type="button" aria-label="Close" title="Close" onClick={() => { setCreating(false); setEditing(null); }}>
                 ✕
               </button>
             </div>
-            {confirmation && (
+            {submitted && editing && submitted.id === editing.id && (
               <div className="confirm">
-                <strong>Order confirmed</strong>
+                <strong>Order submitted</strong>
                 <div className="pair">
-                  <span>{confirmation.salesOrderNumber}</span>
+                  <span>{submitted.salesOrderNumber}</span>
                   <span>→</span>
-                  <b>Select load {confirmation.loadNumber}</b>
+                  <b>Select load {formatLoadNumber(submitted.loadNumber)}</b>
                 </div>
                 <p className="mini">
-                  Confirmation prepared for {confirmation.emailedTo}
-                  {confirmation.sender ? ` from ${confirmation.sender}` : ""}.{" "}
-                  {confirmation.delivered
-                    ? "Sent from the Select Gmail account."
-                    : "Stored in the outbox. It sends when the Select Gmail account is configured."}
+                  This screen is the confirmation. No email is sent. The Select load number stays pending until a Select admin enters the number from SAM.
                 </p>
-                <pre className="email-preview">{confirmation.subject}{"\n\n"}{confirmation.body}</pre>
               </div>
             )}
+            {selectView && editing && (
+              <>
+                <SamBuildButton order={editing} onUpdated={replaceOrder} />
+                <SelectLoadField
+                  orderId={editing.id}
+                  loadNumber={editing.loadNumber}
+                  onUpdated={(order) => {
+                    setEditing(order);
+                    setSubmitted((current) => (current?.id === order.id ? order : current));
+                  }}
+                />
+                <TrackingLinkField
+                  orderId={editing.id}
+                  trackingLink={editing.trackingLink}
+                  onUpdated={(order) => {
+                    setEditing(order);
+                    setSubmitted((current) => (current?.id === order.id ? order : current));
+                  }}
+                />
+              </>
+            )}
             {formError && <p className="error">{formError}</p>}
-            <LoadForm draft={draft} setDraft={setDraft} order={editing} sites={sites} />
+            <LoadForm draft={draft} setDraft={setDraft} order={editing} sites={sites} hideCommercial={!showPricing} />
             {editing && (
               <div className="grid-2">
                 <div className="field">
@@ -445,15 +608,15 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                 </div>
               </div>
             )}
-            {editing && editing.pendingReviewCount > 0 && (
-              <p className="hold">{editing.pendingReviewCount} page(s) are held for Select review and are not visible yet.</p>
+            {selectView && editing && (editing.pendingReviewCount ?? 0) > 0 && (
+              <p className="hold">{editing.pendingReviewCount} in review</p>
             )}
-            {editing && <PhotoGallery orderId={editing.id} loadNumber={editing.loadNumber} canUpload={role === "admin"} />}
+            {editing && <PhotoGallery orderId={editing.id} loadNumber={editing.loadNumber} canUpload={selectView} />}
             <div className="actions">
               <button className="btn secondary" type="button" onClick={() => { setCreating(false); setEditing(null); }}>
                 Close
               </button>
-              <button className="btn" type="button" disabled={saving} onClick={save}>
+              <button className="btn" type="button" disabled={saving || readOnly} onClick={save}>
                 {saving ? "Saving…" : editing ? "Save changes" : "Submit order"}
               </button>
             </div>
@@ -469,9 +632,7 @@ function FileList({ docs }: { docs: CustomerDocument[] }) {
   return (
     <div className="refs">
       {docs.map((doc) => (
-        <a key={doc.id} href={`/api/documents/${doc.id}`}>
-          {doc.filename}
-        </a>
+        <DocumentLinks key={doc.id} doc={doc} />
       ))}
     </div>
   );

@@ -1,6 +1,6 @@
 import { jwtVerify } from "jose";
 import { NextResponse, type NextRequest } from "next/server";
-import { authSecret, isPublicPath, safeNextPath } from "@/lib/session";
+import { VIEW_AS_COOKIE, authSecret, isPublicPath, parseViewAs, safeNextPath } from "@/lib/session";
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -11,7 +11,14 @@ export async function middleware(req: NextRequest) {
 
   try {
     const { payload } = await jwtVerify(token, authSecret());
+    const previewing = parseViewAs(req.cookies.get(VIEW_AS_COOKIE)?.value) !== null;
     const adminPath = pathname.startsWith("/admin") || pathname.startsWith("/api/admin");
+    if (previewing && adminPath && payload.role === "admin") {
+      if (pathname.startsWith("/api/")) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+      return NextResponse.redirect(new URL("/", req.url));
+    }
     if (adminPath && payload.role !== "admin") {
       if (pathname.startsWith("/api/")) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });

@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { BrandLogo } from "@/components/brand-logo";
 import Timeline from "@/components/timeline";
+import TrackLink from "@/components/track-link";
 import { formatDay, formatWhen } from "@/lib/dates";
-import { STAGE_LABEL, STATUS_LABEL, type PortalStatus, type TimelineEvent, type TrackingStage } from "@/lib/types";
+import { STAGE_LABEL, STATUS_LABEL, formatLoadNumber, type PortalStatus, type TimelineEvent, type TrackingStage } from "@/lib/types";
 
 interface ReceiverPhoto {
   id: string;
@@ -15,7 +17,7 @@ interface ReceiverPhoto {
 interface ReceiverLoad {
   id: string;
   salesOrderNumber: string;
-  loadNumber: string;
+  loadNumber: string | null;
   portalStatus: PortalStatus;
   trackingStage: TrackingStage;
   timeline: TimelineEvent[];
@@ -25,6 +27,7 @@ interface ReceiverLoad {
   latestEta: string | null;
   truckType: string | null;
   trackingUrl: string;
+  trackingLink: string | null;
   photos: ReceiverPhoto[];
 }
 
@@ -52,7 +55,7 @@ export default function ReceiverLinkPage() {
   return (
     <main className="public">
       <header>
-        <img src="/brand/emit-logo.png" alt="EMIT" style={{ height: 36 }} />
+        <BrandLogo />
         <div>
           <div className="brand-name">YOUR DELIVERIES</div>
           <div className="brand-sub">{company || "Select Transport Partners"}</div>
@@ -63,7 +66,7 @@ export default function ReceiverLinkPage() {
       {loads.map((load) => (
         <article className="receiver-card" key={load.id}>
           <h2>
-            {load.salesOrderNumber} · {load.loadNumber}
+            {load.salesOrderNumber} · Select load {formatLoadNumber(load.loadNumber)}
           </h2>
           <p className="lede">
             {STAGE_LABEL[load.trackingStage]} · {STATUS_LABEL[load.portalStatus]}
@@ -81,9 +84,10 @@ export default function ReceiverLinkPage() {
             {load.truckType ? ` · ${load.truckType}` : ""}
           </p>
           <p>Latest ETA: {load.latestEta ? formatWhen(load.latestEta) : "Not posted yet"}</p>
+          <TrackLink href={load.trackingLink} />
           {load.trackingUrl && (
             <p>
-              <a href={load.trackingUrl}>Tracking link</a>
+              <a href={load.trackingUrl}>Portal status</a>
             </p>
           )}
           {load.photos.length > 0 && (

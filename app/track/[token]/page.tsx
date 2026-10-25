@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { BrandLogo } from "@/components/brand-logo";
 import Timeline from "@/components/timeline";
+import TrackLink from "@/components/track-link";
 import { formatDay, formatWhen } from "@/lib/dates";
-import { STAGE_LABEL, STATUS_LABEL, type PublicTracking } from "@/lib/types";
+import { STAGE_LABEL, STATUS_LABEL, formatLoadNumber, type PublicTracking } from "@/lib/types";
 
 export default function TrackPage() {
   const params = useParams<{ token: string }>();
@@ -27,17 +29,17 @@ export default function TrackPage() {
   return (
     <main className="public">
       <header>
-        <img src="/brand/emit-logo.png" alt="EMIT" style={{ height: 36 }} />
+        <BrandLogo />
         <div>
           <div className="brand-name">EMIT SHIPMENT TRACKING</div>
           <div className="brand-sub">Select Transport Partners</div>
         </div>
       </header>
-      {missing && <p>This tracking link is not valid.</p>}
+      {missing && <p>This tracking link does not match a load. Check the link and try again.</p>}
       {data && (
         <>
           <h1 style={{ letterSpacing: "0.04em", fontSize: 22 }}>
-            {data.salesOrderNumber} · {data.loadNumber}
+            {data.salesOrderNumber} · Select load {formatLoadNumber(data.loadNumber)}
           </h1>
           <p className="lede">
             {STAGE_LABEL[data.trackingStage]} · {STATUS_LABEL[data.portalStatus]}
@@ -54,6 +56,7 @@ export default function TrackPage() {
           </ol>
           <p className="mini">Ship date {formatDay(data.shipDate)} · Must deliver {formatDay(data.mustDeliverDate)}</p>
           <p>Latest ETA: {data.latestEta ? formatWhen(data.latestEta) : "Not posted yet"}</p>
+          <TrackLink href={data.trackingLink} />
           {data.truckType && <p className="mini">{data.truckType}</p>}
         </>
       )}

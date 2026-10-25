@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { buildModelRequest, isDisallowedQuestion } from "@/lib/assistant";
 import { answerQuestion } from "@/lib/assistant";
-import { serializeCustomerOrder, toPublicTracking } from "@/lib/customer-view";
+import { presentCustomerOrder, serializeCustomerOrder, toPublicTracking } from "@/lib/customer-view";
 import { CUSTOMER_LOAD_COLUMNS } from "@/lib/db";
 import { CUSTOMER_DOCUMENT_READ_SQL, ingestDocument, listCustomerDocuments, listReviewQueue, readCustomerDocument, reviewDocument, screenPageText } from "@/lib/documents";
 import { getOrder, listAllOrders, listOrders } from "@/lib/orders";
@@ -9,6 +9,8 @@ import { mapSamDetailToCustomer, pickCustomerRate, toSamCreatePayload } from "@/
 import { redactSensitiveText } from "@/lib/sensitive";
 import { POST as ask } from "@/app/api/ask/route";
 import { GET as listOrdersRoute, POST as createOrderRoute } from "@/app/api/orders/route";
+import { GET as getOrderRoute } from "@/app/api/orders/[id]/route";
+import { POST as uploadDocument } from "@/app/api/orders/[id]/documents/route";
 import { GET as downloadDoc } from "@/app/api/documents/[id]/route";
 import { GET as reviewQueue } from "@/app/api/admin/review/route";
 import { GET as track } from "@/app/api/track/[token]/route";
@@ -301,6 +303,66 @@ describe("authenticated API", () => {
     expect(queueBody.items.some((item: { textExcerpt?: string }) => item.textExcerpt?.includes("BLACKHAWK"))).toBe(true);
   });
 
+  it("never sends the held-document count to an EMIT user or an EMIT admin", async () => {
+    const stored = serializeCustomerOrder({ id: "x", salesOrderNumber: "SO1", pendingReviewCount: 4 });
+    expect(stored.pendingReviewCount).toBe(4);
+    for (const role of ["customer", "emit_admin"]) {
+      const view = presentCustomerOrder(stored, role);
+      expect(view).not.toHaveProperty("pendingReviewCount");
+      expect(JSON.stringify(view)).not.toMatch(/pendingReviewCount|pending_review/);
+    }
+    expect(presentCustomerOrder(stored, "admin").pendingReviewCount).toBe(4);
+
+    await ctx.db.prepare(`UPDATE loads SET pending_review_count = 3 WHERE sales_order_number = ?`).run("SO2196");
+
+    const customer = await sessionCookie(customerSession());
+    const emitAdmin = await sessionCookie({
+      userId: "emit-admin-1",
+      email: "lead@emit.example",
+      name: "Emit Lead",
+      role: "emit_admin",
+    });
+    const admin = await sessionCookie(adminSession());
+    const headers = (cookie: string) => ({ cookie, host: "portal.test" });
+
+    async function assertHidden(cookie: string) {
+      const list = await listOrdersRoute(new Request("http://portal.test/api/orders?q=SO2196&pageSize=50", { headers: headers(cookie) }));
+      expect(list.status).toBe(200);
+      const body = await list.json();
+      expect(JSON.stringify(body)).not.toMatch(/pendingReviewCount|pending_review_count|heldForReview/);
+      const id = body.orders[0].id as string;
+      const detail = await getOrderRoute(new Request(`http://portal.test/api/orders/${id}`, { headers: headers(cookie) }), {
+        params: Promise.resolve({ id }),
+      });
+      expect(detail.status).toBe(200);
+      expect(JSON.stringify(await detail.json())).not.toMatch(/pendingReviewCount|pending_review_count|heldForReview/);
+      return id;
+    }
+
+    const id = await assertHidden(customer);
+    await assertHidden(emitAdmin);
+
+    const adminList = await listOrdersRoute(
+      new Request("http://portal.test/api/orders?q=SO2196", { headers: headers(admin) }),
+    );
+    const adminBody = await adminList.json();
+    expect(adminBody.orders[0].salesOrderNumber).toBe("SO2196");
+    expect(adminBody.orders[0].pendingReviewCount).toBe(3);
+
+    const form = new FormData();
+    form.set("slot", "attachment");
+    form.set("file", new File([new Uint8Array([1, 2, 3])], "note.txt", { type: "text/plain" }));
+    const uploaded = await uploadDocument(
+      new Request(`http://portal.test/api/orders/${id}/documents`, { method: "POST", headers: headers(customer), body: form }),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(uploaded.status).toBe(200);
+    const uploadedBody = await uploaded.json();
+    expect(uploadedBody).not.toHaveProperty("heldForReview");
+    expect(uploadedBody).not.toHaveProperty("released");
+    expect(JSON.stringify(uploadedBody)).not.toMatch(/pendingReviewCount|pending_review_count|heldForReview/);
+  });
+
   it("does not download a quarantined page for a customer", async () => {
     const held = (await listReviewQueue(ctx))[0];
     const cookie = await sessionCookie(customerSession());
@@ -330,15 +392,39 @@ describe("authenticated API", () => {
     );
     expect(response.status).toBe(201);
     const body = await response.json();
-    expect(body.confirmation.salesOrderNumber).toBe("SO-NEW-1");
-    expect(body.confirmation.loadNumber).toMatch(/^9\d+-1$/);
-    expect(body.confirmation.subject).toContain("SO-NEW-1");
-    expect(body.confirmation.subject).toContain(body.confirmation.loadNumber);
-    expect(body.confirmation.body).toContain(body.confirmation.loadNumber);
+    expect(body.order.salesOrderNumber).toBe("SO-NEW-1");
+    expect(body.order.loadNumber).toBeNull();
+    expect(body.confirmation).toBeUndefined();
     expectNoSecrets(body);
-    expect(body.order.customerCost).toBe(1100);
-    expect(body.confirmation.delivered).toBe(false);
-    expect(body.confirmation.sender).toBeNull();
+    expect("customerCost" in body.order).toBe(false);
+    expect("rateReason" in body.order).toBe(false);
+    const stored = (await ctx.db.prepare(`SELECT customer_cost_cents FROM loads WHERE sales_order_number = ?`).get("SO-NEW-1")) as {
+      customer_cost_cents: number | null;
+    };
+    expect(stored.customer_cost_cents).toBeNull();
+    const adminCookie = await sessionCookie(adminSession());
+    const priced = await createOrderRoute(
+      new Request("http://portal.test/api/orders", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: adminCookie, host: "portal.test", origin: "http://portal.test" },
+        body: JSON.stringify({
+          salesOrderNumber: "SO-NEW-ADMIN",
+          origin: { company: "EMIT Technologies", address1: "2437 Allen Avenue", city: "Sheridan", state: "WY", postalCode: "82801" },
+          destination: { company: "Kodiak Gas Services", address1: "6801 Brooklyn Court", city: "Oklahoma City", state: "OK", postalCode: "73132" },
+          shipDate: "2026-10-20",
+          customerCost: 1100,
+          carrierPay: 8765.43,
+          carrierName: "BLACKHAWK HAULING LLC",
+          staffNotes: "INTERNAL-ONLY-SENTINEL",
+        }),
+      }),
+    );
+    expect(priced.status).toBe(201);
+    const pricedBody = await priced.json();
+    expect(pricedBody.order.customerCost).toBe(1100);
+    expectNoSecrets(pricedBody);
+    const tables = (await ctx.db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`).all()) as Array<{ name: string }>;
+    expect(tables.map((table) => table.name)).not.toContain("outbox");
     const columns = (await ctx.db.prepare(`PRAGMA table_info(loads)`).all()) as Array<{ name: string }>;
     expect(columns.map((column) => column.name)).not.toContain("carrier_pay_cents");
     expect(body.order.trackingUrl.length).toBeGreaterThan(20);
