@@ -10,6 +10,7 @@ import { PortalError } from "@/lib/http";
 import type { CustomerOrder, PortalStatus, Session, TimelineEvent, TrackingStage } from "@/lib/types";
 import { STAGE_LABEL, TRACKING_STAGES, canAddLoads, canSeePricing } from "@/lib/types";
 import { syncStopLocations } from "@/lib/locations";
+import { assignLoadOwner, type LoadOwner } from "@/lib/load-owner";
 import { notifyNewLoad } from "@/lib/slack-new-load";
 import { legacyStops, resolvedRoute } from "@/lib/stops";
 import type { OrderInput, OrderPatch } from "@/lib/validate";
@@ -77,6 +78,8 @@ interface LoadRow {
   created_by: string;
   entered_by_name: string | null;
   entered_by_email: string | null;
+  owner: string | null;
+  owner_needs_check: number | null;
   created_at: string;
   updated_at: string;
   pending_review_count: number;
@@ -132,8 +135,11 @@ async function rowToOrder(ctx: PortalContext, row: LoadRow, withDocuments: boole
     documents: withDocuments ? await listCustomerDocuments(ctx, row.id) : [],
   }, { includeEnteredBy: true });
   const status = row.sam_build_status === "building" || row.sam_build_status === "failed" ? row.sam_build_status : null;
+  const owner = row.owner === "Drew" || row.owner === "Ainsley" ? row.owner : null;
   return {
     ...order,
+    owner,
+    ownerNeedsCheck: Number(row.owner_needs_check) === 1,
     samBuildStatus: status,
     samBuildError: row.sam_build_error || null,
     samBuildAt: row.sam_build_at || null,
@@ -505,15 +511,19 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
   await withTransaction(ctx.db, async () => {
     const syncedStops = await syncStopLocations(ctx, drafted.stops, actor.name, input.stops ?? []);
     route = resolvedRoute({ stops: syncedStops });
+    const assignment = assignLoadOwner({
+      destinationState: route.destination.state,
+      equipment: input.truckType,
+    });
     await ctx.db
       .prepare(
         `INSERT INTO loads (
            id, sales_order_number, load_number, portal_status, tracking_stage, timeline_json,
            origin_json, destination_json, stops_json, truck_type, transit, ship_date, ship_time,
            must_deliver_date, truck_eta, latest_eta, tracking_token, customer_cost_cents,
-           rate_reason, comments, created_by, entered_by_name, entered_by_email, created_at, updated_at, pending_review_count
+           rate_reason, comments, created_by, entered_by_name, entered_by_email, owner, owner_needs_check, created_at, updated_at, pending_review_count
          ) VALUES (
-           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0
+           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0
          )`,
       )
       .run(
@@ -539,6 +549,8 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
         actor.name,
         actor.name.trim() || null,
         actor.email.trim() || null,
+        assignment.owner,
+        assignment.needsCheck ? 1 : 0,
         now,
         now,
       );
@@ -617,6 +629,17 @@ export async function updateOrder(ctx: PortalContext, id: string, patch: OrderPa
   const updated = await getOrder(ctx, id);
   if (!updated) throw new PortalError("Order not found", 404);
   return updated;
+}
+
+/** Select staff change the owner. This does not post to Slack. */
+export async function setLoadOwner(ctx: PortalContext, id: string, owner: LoadOwner): Promise<CustomerOrder> {
+  const updated = await ctx.db
+    .prepare(`UPDATE loads SET owner = ?, owner_needs_check = 0, updated_at = ? WHERE id = ?`)
+    .run(owner, ctx.now().toISOString(), id);
+  if (!updated.changes) throw new PortalError("Order not found", 404);
+  const order = await getOrder(ctx, id);
+  if (!order) throw new PortalError("Order not found", 404);
+  return order;
 }
 
 export function demoTrackingToken(loadNumber: string): string {

@@ -124,6 +124,10 @@ export interface CustomerOrder {
   enteredByName?: string | null;
   /** Who submitted the load. Null on older loads. Name and email only. */
   enteredByEmail?: string | null;
+  /** Select only. Drew or Ainsley. Omitted for every EMIT user and for view-as. Null on older loads. */
+  owner?: "Drew" | "Ainsley" | null;
+  /** Select only. True when the auto-assign had no equipment or destination. */
+  ownerNeedsCheck?: boolean;
   createdAt: string;
   updatedAt: string;
   attachmentCount: number;

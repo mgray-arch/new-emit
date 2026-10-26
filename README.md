@@ -124,8 +124,8 @@ Leave these blank unless you are turning that feature on:
 | `LOAD_BUILDER_SECRET` | Shared bearer secret, at least 16 characters. Sent to the webhook and required on the callback. |
 | `SAM_LOAD_URL_TEMPLATE` | Link for a stored SAM number. Must contain `{loadNumber}`. Example: `https://sam.example.com/loads/{loadNumber}`. Unset: the number shows and is not a link. |
 | `SAM_API_BASE_URL`, `SAM_API_TOKEN`, `SAM_CUSTOMER_ID` | Leave blank. The portal does not call the SAM API. |
-| `SLACK_NEW_LOADS_WEBHOOK_URL` | Slack incoming webhook for a new-load note. Unset: no Slack message is sent. The note does not include carrier pay. |
-| `SLACK_USER_ID_DREW`, `SLACK_USER_ID_AINSLEY` | Optional Slack member ids so the owner line @mentions that person. Unset: the note uses the names Drew and Ainsley. |
+| `SLACK_NEW_LOADS_WEBHOOK_URL` | Slack incoming webhook for a new-load note. Unset: no Slack message is sent. The note names the owner and who entered the load. It does not include carrier pay. A missing equipment type or destination adds a line that the owner needs a human check. |
+| `SLACK_USER_ID_DREW`, `SLACK_USER_ID_AINSLEY` | Optional Slack member ids (like `U012ABCDEF`) so that note @mentions Drew or Ainsley. Unset: the note uses the plain name. Drew owns flatbed and hot shot loads into Texas. Ainsley owns every other load. |
 | `SLACK_MESSAGES_WEBHOOK_URL` | Slack incoming webhook when an EMIT user posts in Messages. Unset: no Slack message is sent. The note has the load number (when one is attached), a short preview, and a link. It does not include the full message or carrier pay. |
 | `MESSAGE_NOTIFY_EMAILS` | Optional comma-separated addresses for that same note. The portal has no email sender, so setting this does not send mail and does not block the message. |
 

@@ -187,6 +187,8 @@ export function presentCustomerOrder(order: CustomerOrder, viewer: Viewer): Cust
     includeEnteredBy: true,
   });
   if (access.select) {
+    view.owner = order.owner === "Drew" || order.owner === "Ainsley" ? order.owner : null;
+    view.ownerNeedsCheck = order.ownerNeedsCheck === true;
     if (order.samBuildStatus === "building" || order.samBuildStatus === "failed") view.samBuildStatus = order.samBuildStatus;
     if (order.samBuildError) view.samBuildError = order.samBuildError;
     if (order.samBuildAt) view.samBuildAt = order.samBuildAt;

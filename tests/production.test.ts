@@ -572,7 +572,7 @@ describe("Select load numbers", () => {
     expect(Number(chatFlag?.chat_enabled ?? 0)).toBe(0);
     const loadColumns = (await upgraded.prepare(`PRAGMA table_info(loads)`).all()) as Array<{ name: string }>;
     expect(loadColumns.map((column) => column.name)).toEqual(
-      expect.arrayContaining(["tracking_link", "tracking_link_source", "sam_build_status", "sam_build_error", "sam_build_at"]),
+      expect.arrayContaining(["tracking_link", "tracking_link_source", "sam_build_status", "sam_build_error", "sam_build_at", "owner", "owner_needs_check"]),
     );
     const customerDocs = (await upgraded.prepare(`PRAGMA table_info(customer_documents)`).all()) as Array<{ name: string }>;
     const internalDocs = (await upgraded.prepare(`PRAGMA table_info(internal_documents)`).all()) as Array<{ name: string }>;

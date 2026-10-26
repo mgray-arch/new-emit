@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import DocumentLinks from "@/components/document-links";
+import LoadOwnerField from "@/components/load-owner-field";
 import PhotoGallery from "@/components/photo-gallery";
 import SamBuildButton from "@/components/sam-build-button";
 import SelectLoadField from "@/components/select-load-field";
@@ -214,6 +215,17 @@ export default function OrderPage() {
                 {order.truckType || "Truck type not set"} · {order.transit || "Transit not set"} · Created by {order.createdBy}
               </p>
               <p className="mini">Entered by: {formatEnteredBy(order.enteredByName, order.enteredByEmail)}</p>
+              {selectView ? (
+                <LoadOwnerField
+                  orderId={order.id}
+                  owner={order.owner ?? null}
+                  needsCheck={order.ownerNeedsCheck === true}
+                  onUpdated={(next) => {
+                    setOrder(next);
+                    toast("Owner saved.");
+                  }}
+                />
+              ) : null}
             </section>
 
             <section className="detail-section">

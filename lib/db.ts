@@ -76,6 +76,8 @@ CREATE TABLE IF NOT EXISTS loads (
   created_by TEXT NOT NULL,
   entered_by_name TEXT,
   entered_by_email TEXT,
+  owner TEXT,
+  owner_needs_check INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   pending_review_count INTEGER NOT NULL DEFAULT 0,
@@ -226,7 +228,7 @@ export const CUSTOMER_LOAD_COLUMNS = `
   id, sales_order_number, load_number, portal_status, tracking_stage, timeline_json,
   origin_json, destination_json, stops_json, truck_type, transit, ship_date, ship_time,
   must_deliver_date, truck_eta, latest_eta, tracking_token, tracking_link, customer_cost_cents,
-  rate_reason, comments, created_by, entered_by_name, entered_by_email, created_at, updated_at, pending_review_count,
+  rate_reason, comments, created_by, entered_by_name, entered_by_email, owner, owner_needs_check, created_at, updated_at, pending_review_count,
   sam_build_status, sam_build_error, sam_build_at
 `;
 
@@ -385,6 +387,7 @@ export async function openDatabase(file?: string): Promise<SqlDatabase> {
   await migrateEmitPermissions(db);
   await migrateSamBuild(db);
   await migrateEnteredBy(db);
+  await migrateLoadOwner(db);
   await migrateDocumentUploaders(db);
   await migrateChatEnabled(db);
   await db.exec(`DROP TABLE IF EXISTS outbox`);
@@ -649,6 +652,12 @@ async function migrateSamBuild(db: SqlDatabase): Promise<void> {
 async function migrateEnteredBy(db: SqlDatabase): Promise<void> {
   await ensureColumn(db, "loads", "entered_by_name", "TEXT");
   await ensureColumn(db, "loads", "entered_by_email", "TEXT");
+}
+
+/** Select owner. Null on rows saved before this column existed. EMIT never receives it. */
+async function migrateLoadOwner(db: SqlDatabase): Promise<void> {
+  await ensureColumn(db, "loads", "owner", "TEXT");
+  await ensureColumn(db, "loads", "owner_needs_check", "INTEGER NOT NULL DEFAULT 0");
 }
 
 /** Older databases only allowed customer and Select admin. EMIT admin is a third role. */
