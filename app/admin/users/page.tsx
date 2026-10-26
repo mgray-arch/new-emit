@@ -19,8 +19,8 @@ interface EmitUser {
 const PERMISSIONS: Array<{ value: EmitUser["permission"]; label: string; detail: string }> = [
   { value: "view", label: "View only", detail: "Can look at loads. Cannot add loads. No pricing." },
   { value: "add", label: "Add loads", detail: "Can add and edit loads. No pricing." },
-  { value: "pricing", label: "See pricing", detail: "Sees the price EMIT pays Select. Cannot add loads. Never carrier pay." },
-  { value: "full", label: "Full access", detail: "Can add loads and see the price EMIT pays. Never carrier pay." },
+  { value: "pricing", label: "See pricing", detail: "An EMIT admin sees the price EMIT pays Select. A regular user does not. Cannot add loads. Never carrier pay." },
+  { value: "full", label: "Full access", detail: "Can add loads. An EMIT admin also sees the price EMIT pays. A regular user does not. Never carrier pay." },
 ];
 
 export default function UsersPage() {
@@ -155,7 +155,7 @@ export default function UsersPage() {
       <main className="page">
         <h1>EMIT users</h1>
         <p className="lede">
-          Only Select can add someone here. An email that is not on this list cannot sign in as EMIT. Each person is an EMIT admin or a regular user, and has one permission. See pricing and full access show the price EMIT pays Select. They never show carrier pay. An EMIT admin can manage saved locations unless the permission is view only.
+          Only Select can add someone here. An email that is not on this list cannot sign in as EMIT. Each person is an EMIT admin or a regular user, and has one permission. A regular user never sees the price EMIT pays Select. An EMIT admin with see pricing or full access does. They never show carrier pay. An EMIT admin can manage saved locations unless the permission is view only.
         </p>
         {error && <p className="error">{error}</p>}
         {message && <p className="mini">{message}</p>}

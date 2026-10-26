@@ -17,11 +17,12 @@ import { denverDate, formatDay, formatWhen } from "@/lib/dates";
 import { formatEnteredBy } from "@/lib/entered-by";
 import { displayStatus, fileSummary } from "@/lib/load-list";
 import { toast } from "@/lib/toast";
-import { canAddLoads, canSeePricing, formatLoadNumber, formatPlace, type CustomerOrder, type PortalRole } from "@/lib/types";
+import { canAddLoads, canSeePricing, formatLoadNumber, formatPlace, type CustomerOrder, type PortalRole, type ViewAsPreview } from "@/lib/types";
 
 interface Me {
   role: PortalRole;
   permission?: "view" | "add" | "pricing" | "full" | null;
+  viewAs?: ViewAsPreview | null;
   readOnly?: boolean;
   chatEnabled?: boolean;
 }

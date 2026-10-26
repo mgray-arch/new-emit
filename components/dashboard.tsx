@@ -34,11 +34,13 @@ import {
   type CustomerDocument,
   type CustomerOrder,
   type PortalRole,
+  type ViewAsPreview,
 } from "@/lib/types";
 
 interface Me {
   role: PortalRole;
   permission?: "view" | "add" | "pricing" | "full" | null;
+  viewAs?: ViewAsPreview | null;
   readOnly?: boolean;
 }
 

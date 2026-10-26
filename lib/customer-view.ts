@@ -178,7 +178,7 @@ export function serializeCustomerOrder(value: unknown, options?: CustomerViewOpt
   return order;
 }
 
-/** The order shape that may be sent to this viewer. See pricing and full access get EMIT's cost. Every signed-in user gets who entered the load. Nobody at EMIT gets carrier pay, the review count, or the SAM build controls. */
+/** The order shape that may be sent to this viewer. EMIT admins with see pricing or full access, and Select, get EMIT's cost. Regular EMIT users never do, and neither does a view-as regular preview. Every signed-in user gets who entered the load. Nobody at EMIT gets carrier pay, the review count, or the SAM build controls. */
 export function presentCustomerOrder(order: CustomerOrder, viewer: Viewer): CustomerOrder {
   const access = resolveAccess(viewer);
   const view = serializeCustomerOrder(order, {

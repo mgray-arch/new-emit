@@ -119,7 +119,7 @@ describe("EMIT permissions and view-as", () => {
       expect(view.enteredByEmail).toBe("jane@emit.example");
       expect(view.pendingReviewCount).toBeUndefined();
       expect(view.samBuildStatus).toBeUndefined();
-      if (permission === "pricing" || permission === "full") expect(view.customerCost).toBe(1500);
+      if (permission === "full") expect(view.customerCost).toBe(1500);
       else expect(view.customerCost).toBeUndefined();
       expect(JSON.stringify(view)).not.toMatch(/carrierPay|carrier_pay|8765/);
     }
@@ -127,13 +127,15 @@ describe("EMIT permissions and view-as", () => {
     expect(presentCustomerOrder(stored, "emit_viewer").customerCost).toBeUndefined();
     expect(presentCustomerOrder(stored, "emit_admin").customerCost).toBe(1500);
     const pricingOnly = presentCustomerOrder(stored, { role: "customer", permission: "pricing" });
-    expect(pricingOnly.customerCost).toBe(1500);
-    expect(JSON.stringify(pricingOnly)).not.toMatch(/carrierPay|carrier_pay|8765/);
+    expect(pricingOnly.customerCost).toBeUndefined();
+    expect("rateReason" in pricingOnly).toBe(false);
+    expect(JSON.stringify(pricingOnly)).not.toMatch(/carrierPay|carrier_pay|8765|customerCost|rateReason/);
     expect(presentCustomerOrder(stored, { role: "emit_admin", permission: "view" }).customerCost).toBeUndefined();
     const preview = presentCustomerOrder(stored, { role: "admin", viewAs: { access: "regular", permission: "pricing" } });
     expect(preview.enteredByName).toBe("Jane Doe");
     expect(preview.enteredByEmail).toBe("jane@emit.example");
-    expect(preview.customerCost).toBe(1500);
+    expect(preview.customerCost).toBeUndefined();
+    expect("rateReason" in preview).toBe(false);
     expect(preview.pendingReviewCount).toBeUndefined();
     expect(preview.samBuildStatus).toBeUndefined();
     expect(JSON.stringify(preview)).not.toMatch(/carrierPay|carrier_pay|8765/);
@@ -176,8 +178,9 @@ describe("EMIT permissions and view-as", () => {
     const asPricing = await cookieFor(adminSession(), "regular:pricing");
     const pricingList = await listOrdersRoute(new Request("http://portal.test/api/orders?q=SO2196", { headers: { cookie: asPricing } }));
     const pricingOrder = (await pricingList.json()).orders[0];
-    expect(pricingOrder.customerCost).toBe(1500);
-    expect(JSON.stringify(pricingOrder)).not.toMatch(/carrierPay|carrier_pay|8765/);
+    expect("customerCost" in pricingOrder).toBe(false);
+    expect("rateReason" in pricingOrder).toBe(false);
+    expect(JSON.stringify(pricingOrder)).not.toMatch(/carrierPay|carrier_pay|8765|customerCost|rateReason|1,?500/);
     expect((await createLoad("SO-AS-PRICE", asPricing)).status).toBe(403);
     expect((await createLoad("SO-AS-FULL", asFull)).status).toBe(403);
 
@@ -265,7 +268,9 @@ describe("EMIT permissions and view-as", () => {
     );
     expect((await full.json()).user.permission).toBe("full");
     const priced = await listOrdersRoute(new Request("http://portal.test/api/orders?q=SO2196", { headers: { cookie: viewerCookie } }));
-    expect((await priced.json()).orders[0].customerCost).toBe(1500);
+    const pricedOrder = (await priced.json()).orders[0];
+    expect("customerCost" in pricedOrder).toBe(false);
+    expect("rateReason" in pricedOrder).toBe(false);
 
     const add = await patchUser(
       new Request(`http://portal.test/api/admin/users/${createdUser.id}`, {
@@ -290,7 +295,7 @@ describe("EMIT permissions and view-as", () => {
     expect(row.role).toBeUndefined();
   });
 
-  it("shows EMIT's price for see pricing, hides carrier pay, and blocks every view-as write", async () => {
+  it("hides EMIT's price from a regular user with see pricing, and blocks every view-as write", async () => {
     const admin = await cookieFor(adminSession());
     const created = await createUser(
       new Request("http://portal.test/api/admin/users", {
@@ -319,8 +324,9 @@ describe("EMIT permissions and view-as", () => {
     const cookie = signedIn.headers.get("set-cookie")?.split(";")[0] ?? "";
     const listed = await listOrdersRoute(new Request("http://portal.test/api/orders?q=SO2196", { headers: { cookie } }));
     const order = (await listed.json()).orders[0];
-    expect(order.customerCost).toBe(1500);
-    expect(JSON.stringify(order)).not.toMatch(/carrierPay|carrier_pay|carrierCost|8765|pendingReviewCount|samBuild/);
+    expect("customerCost" in order).toBe(false);
+    expect("rateReason" in order).toBe(false);
+    expect(JSON.stringify(order)).not.toMatch(/carrierPay|carrier_pay|carrierCost|8765|pendingReviewCount|samBuild|customerCost|rateReason|1,?500/);
     expect((await createLoad("SO-PRICE-NO", cookie)).status).toBe(403);
 
     const stranger = await login(
