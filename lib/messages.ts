@@ -63,7 +63,8 @@ export function messageAccess(session: Session): MessageAccess {
 }
 
 export function messageBlockedReason(body: string): string | null {
-  return sensitiveReason(body) ?? (FIELD_LEAK.test(body) ? "Message includes a carrier-pay field." : null);
+  if (FIELD_LEAK.test(body)) return "Message includes a carrier-pay field.";
+  return sensitiveReason(body);
 }
 
 export function cleanMessageBody(input: string): string {

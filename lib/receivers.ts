@@ -1,8 +1,8 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { assertNoCarrierFields } from "@/lib/customer-view";
 import type { PortalContext } from "@/lib/db";
 import { PortalError } from "@/lib/http";
 import { listOrders } from "@/lib/orders";
-import { listCarrierPhotos } from "@/lib/photos";
 import { portalPublicUrl } from "@/lib/public-url";
 import type { PortalStatus, StopKind, TimelineEvent, TrackingStage } from "@/lib/types";
 
@@ -18,20 +18,15 @@ export interface ReceiverRecord {
 }
 
 export interface ReceiverShipment {
-  id: string;
-  salesOrderNumber: string;
   loadNumber: string | null;
   portalStatus: PortalStatus;
   trackingStage: TrackingStage;
   timeline: TimelineEvent[];
-  stops: Array<{ kind: StopKind; company: string; city: string; state: string }>;
+  stops: Array<{ kind: StopKind; city: string; state: string }>;
   shipDate: string | null;
   mustDeliverDate: string | null;
   latestEta: string | null;
-  truckType: string | null;
-  trackingUrl: string;
   trackingLink: string | null;
-  photos: Array<{ id: string; filename: string; mediaType: string; receivedAt: string }>;
 }
 
 interface ReceiverRow {
@@ -159,38 +154,83 @@ export async function receiverCompanyForToken(
   return row ?? null;
 }
 
-/** Loads, tracking, and photos for one receiver. No cost, documents, or comments. */
+const LOAD_KEYS = new Set([
+  "loadNumber",
+  "portalStatus",
+  "trackingStage",
+  "timeline",
+  "stops",
+  "shipDate",
+  "mustDeliverDate",
+  "latestEta",
+  "trackingLink",
+]);
+const STOP_KEYS = new Set(["kind", "city", "state"]);
+const TIMELINE_KEYS = new Set(["stage", "at", "label"]);
+
+function assertKeys(value: object, allowed: Set<string>): void {
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) throw new Error("Receiver payload contained a forbidden field");
+  }
+}
+
+/** The receiver response is an allowlist. Anything else fails the request instead of being sent. */
+export function assertReceiverPayload(value: unknown): void {
+  if (!value || typeof value !== "object") throw new Error("Receiver payload contained a forbidden field");
+  const body = value as { company?: unknown; loads?: unknown };
+  assertKeys(body, new Set(["company", "loads"]));
+  if (!Array.isArray(body.loads)) throw new Error("Receiver payload contained a forbidden field");
+  for (const load of body.loads) {
+    if (!load || typeof load !== "object") throw new Error("Receiver payload contained a forbidden field");
+    assertKeys(load, LOAD_KEYS);
+    const shipment = load as ReceiverShipment;
+    if (!Array.isArray(shipment.stops) || !Array.isArray(shipment.timeline)) {
+      throw new Error("Receiver payload contained a forbidden field");
+    }
+    for (const stop of shipment.stops) assertKeys(stop, STOP_KEYS);
+    for (const event of shipment.timeline) assertKeys(event, TIMELINE_KEYS);
+  }
+  assertNoCarrierFields(value);
+}
+
+/** Load number, status, lane, dates, and the public tracking link. No files, streets, or pay. */
 export async function shipmentsForReceiver(ctx: PortalContext, company: string): Promise<ReceiverShipment[]> {
+  const target = company.trim().toLowerCase();
   const first = await listOrders(ctx, { receiverCompany: company, page: 1, pageSize: 50 });
   const orders = [...first.orders];
   const pageSize = 50;
   for (let page = 2; page <= Math.ceil(first.total / pageSize); page += 1) {
     orders.push(...(await listOrders(ctx, { receiverCompany: company, page, pageSize })).orders);
   }
-  return Promise.all(orders.map(async (order) => ({
-    id: order.id,
-    salesOrderNumber: order.salesOrderNumber,
-    loadNumber: order.loadNumber,
-    portalStatus: order.portalStatus,
-    trackingStage: order.trackingStage,
-    timeline: order.timeline,
-    stops: order.stops.map((stop) => ({
-      kind: stop.kind,
-      company: stop.place.company,
-      city: stop.place.city,
-      state: stop.place.state,
-    })),
-    shipDate: order.shipDate,
-    mustDeliverDate: order.mustDeliverDate,
-    latestEta: order.latestEta,
-    truckType: order.truckType,
-    trackingUrl: order.trackingUrl,
-    trackingLink: order.trackingLink,
-    photos: (await listCarrierPhotos(ctx, order.id, false)).map((photo) => ({
-      id: photo.id,
-      filename: photo.filename,
-      mediaType: photo.mediaType,
-      receivedAt: photo.receivedAt,
-    })),
-  })));
+  return orders
+    .filter((order) =>
+      order.stops.some((stop) => stop.kind === "drop" && stop.place.company.trim().toLowerCase() === target),
+    )
+    .map((order) => ({
+      loadNumber: order.loadNumber,
+      portalStatus: order.portalStatus,
+      trackingStage: order.trackingStage,
+      timeline: order.timeline,
+      stops: order.stops.map((stop) => ({
+        kind: stop.kind,
+        city: stop.place.city,
+        state: stop.place.state,
+      })),
+      shipDate: order.shipDate,
+      mustDeliverDate: order.mustDeliverDate,
+      latestEta: order.latestEta,
+      trackingLink: order.trackingLink,
+    }));
+}
+
+/** Null when the token is missing, disabled, or already rotated. The body has no files. */
+export async function receiverPortal(
+  ctx: PortalContext,
+  token: string,
+): Promise<{ company: string; loads: ReceiverShipment[] } | null> {
+  const receiver = await receiverCompanyForToken(ctx, token);
+  if (!receiver) return null;
+  const body = { company: receiver.company, loads: await shipmentsForReceiver(ctx, receiver.company) };
+  assertReceiverPayload(body);
+  return body;
 }

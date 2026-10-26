@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { crc32, deflateSync } from "node:zlib";
 import type { PortalContext } from "@/lib/db";
-import { safeFilename } from "@/lib/documents";
+import { refreshLoadReviewCount, safeFilename } from "@/lib/documents";
 import { PortalError } from "@/lib/http";
+import { readImageText } from "@/lib/ocr";
 import { sensitiveReason } from "@/lib/sensitive";
 import { readStoredBytes, writeStoredBytes } from "@/lib/storage";
 
@@ -196,7 +197,6 @@ export async function ingestCarrierPhoto(ctx: PortalContext, input: IngestPhotoI
   const kind = classify(input);
   const filename = safeFilename(input.filename);
   const mediaType = MEDIA[kind];
-  const heldReason = photoHoldReason({ filename, source, subject, bytes: input.bytes });
   const sha256 = createHash("sha256").update(input.bytes).digest("hex");
   const load = await ctx.db.prepare(`SELECT id, load_number FROM loads WHERE load_number = ?`).get(loadNumber);
   if (!load) throw new PortalError(`No load with SAM load number ${loadNumber}.`, 404);
@@ -221,6 +221,15 @@ export async function ingestCarrierPhoto(ctx: PortalContext, input: IngestPhotoI
       heldReason: existing.hold_reason == null ? null : String(existing.hold_reason),
     };
   }
+  const metaReason = photoHoldReason({ filename, source, subject, bytes: input.bytes });
+  const visual = await readImageText(input.bytes);
+  const pixelReason = visual.ok ? sensitiveReason(visual.text) : null;
+  const unclear = !visual.ok
+    ? visual.reason
+    : visual.text.trim() && visual.confidence < 40 && !pixelReason
+      ? "OCR was not confident enough to show this photo to EMIT."
+      : null;
+  const heldReason = metaReason ?? pixelReason ?? unclear;
   const id = randomUUID();
   const createdAt = ctx.now().toISOString();
   const storageKey = await writeStoredBytes(`carrier-photos/${id}`, input.bytes, mediaType);
@@ -244,6 +253,7 @@ export async function ingestCarrierPhoto(ctx: PortalContext, input: IngestPhotoI
       heldReason,
       storageKey,
     );
+  await refreshLoadReviewCount(ctx.db, String(load.id));
   return {
     id,
     loadId: String(load.id),

@@ -140,10 +140,24 @@ describe("stop sequence", () => {
       params: Promise.resolve({ token }),
     });
     const listed = await list.json();
-    const match = listed.loads.find((load: { salesOrderNumber: string }) => load.salesOrderNumber === "SO-MID-DROP");
+    const match = listed.loads.find((load: { stops: Array<{ city: string }> }) =>
+      load.stops.some((stop) => stop.city === "Oklahoma City"),
+    );
     expect(match).toBeTruthy();
     expect(match.customerCost).toBeUndefined();
-    expect(match.stops.map((stop: { kind: string }) => stop.kind)).toEqual(["pickup", "drop", "drop"]);
+    expect(match.salesOrderNumber).toBeUndefined();
+    expect(match.photos).toBeUndefined();
+    expect(match.stops.map((stop: { kind: string; city: string; company?: string }) => stop.kind)).toEqual([
+      "pickup",
+      "drop",
+      "drop",
+    ]);
+    expect(match.stops.map((stop: { city: string; company?: string }) => stop.city)).toEqual([
+      "Sheridan",
+      "Cypress",
+      "Oklahoma City",
+    ]);
+    expect(match.stops.every((stop: { company?: string }) => stop.company === undefined)).toBe(true);
     expect((await listOrders(ctx, { q: "Casper", receiverCompany: "Enchanted Rock LLC" })).total).toBe(0);
   });
 

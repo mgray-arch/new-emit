@@ -1,7 +1,6 @@
-import { assertNoCarrierFields } from "@/lib/customer-view";
 import { errorResponse, json } from "@/lib/http";
 import { readyPortal } from "@/lib/portal";
-import { receiverCompanyForToken, shipmentsForReceiver } from "@/lib/receivers";
+import { receiverPortal } from "@/lib/receivers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,10 +9,8 @@ export async function GET(_req: Request, context: { params: Promise<{ token: str
   try {
     const { token } = await context.params;
     const ctx = await readyPortal();
-    const receiver = await receiverCompanyForToken(ctx, token);
-    if (!receiver) return json({ error: "This link is not valid." }, 404);
-    const body = { company: receiver.company, loads: await shipmentsForReceiver(ctx, receiver.company) };
-    assertNoCarrierFields(body);
+    const body = await receiverPortal(ctx, token);
+    if (!body) return json({ error: "This link is not valid." }, 404);
     return json(body);
   } catch (error) {
     return errorResponse(error);

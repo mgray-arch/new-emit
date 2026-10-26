@@ -325,6 +325,8 @@ export interface ReviewItem {
   loadId: string;
   salesOrderNumber: string;
   loadNumber: string | null;
+  /** document = a PDF page or upload. photo = a carrier photo held before EMIT can see it. */
+  source: "document" | "photo";
   kind: string;
   screenResult: "block" | "uncertain";
   screenReason: string;

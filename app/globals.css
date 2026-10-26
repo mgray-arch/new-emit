@@ -421,8 +421,20 @@ td select {
 .public header { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
 .receiver-card { background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
 .receiver-card h2 { margin: 0 0 6px; font-size: 18px; }
+.receiver-card input,
+.receiver-card .link-box {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0 0 8px;
+}
 .confirm-box { border: 1px solid #e08a2f; border-radius: 10px; padding: 10px; margin-top: 8px; display: grid; gap: 8px; }
 .link-box { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
+.public .track-btn { min-height: 44px; justify-content: center; }
 
 .site-chips { display: flex; flex-wrap: wrap; gap: 10px; width: 100%; }
 .site-chip {
@@ -849,6 +861,11 @@ html[data-theme="light"] .pill.status-attention { background: #fde8ea; color: #8
 html[data-theme="light"] .pill.status-cancelled { background: #efe8dc; color: #3d3832; }
 
 @media (max-width: 640px) {
+  .public { margin: 12px auto; padding: 0 14px 32px; }
+  .public header { flex-wrap: wrap; }
+  .public .track-btn { width: 100%; }
+  .receiver-card .actions { flex-direction: column; align-items: stretch; }
+  .receiver-card .actions .btn { width: 100%; flex: 1 1 auto; text-align: center; }
   .stop-actions { flex-basis: 100%; width: 100%; }
   .stop-actions .btn { min-width: 44px; flex: 1 1 auto; }
   .stats { grid-template-columns: 1fr; }

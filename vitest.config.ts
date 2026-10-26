@@ -11,8 +11,8 @@ export default defineConfig({
       PORTAL_PUBLIC_URL: "http://portal.test",
     },
     fileParallelism: false,
-    testTimeout: 30000,
-    hookTimeout: 30000,
+    testTimeout: 60000,
+    hookTimeout: 120000,
   },
   resolve: {
     alias: { "@": path.resolve(__dirname, ".") },

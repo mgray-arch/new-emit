@@ -191,8 +191,8 @@ export default function SettingsPage() {
 
         <h2 style={{ marginTop: 28 }}>RECEIVERS</h2>
         <p className="lede">
-          Receivers do not sign in. Each company gets a private link that shows only loads with a drop at that company, plus tracking and photos.
-          The company name has to match the drop on the load. Nothing is loaded until you add it here.
+          Receivers do not sign in. Each company gets a private link that shows only loads with a drop at that company: load number, status, lane, dates, and the Track link.
+          The company name has to match the drop on the load. Photos and documents stay in the EMIT portal. Nothing is loaded until you add it here.
         </p>
         <div className="receiver-card">
           <input aria-label="New receiver company" placeholder="Company name" value={company} onChange={(event) => setCompany(event.target.value)} />

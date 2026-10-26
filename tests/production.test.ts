@@ -451,9 +451,13 @@ describe("Select load numbers", () => {
     const receiver = await receiverPortal(new Request(`http://portal.test/api/r/${receiverRecord.token}`), {
       params: Promise.resolve({ token: receiverRecord.token }),
     });
-    const match = (await receiver.json()).loads.find((load: { salesOrderNumber: string }) => load.salesOrderNumber === "SO-TRACK-1");
+    const match = (await receiver.json()).loads.find(
+      (load: { trackingLink: string | null }) => load.trackingLink === "https://macropoint.example/share/abc",
+    );
     expect(match.trackingLink).toBe("https://macropoint.example/share/abc");
     expect(match.customerCost).toBeUndefined();
+    expect(match.photos).toBeUndefined();
+    expect(match.salesOrderNumber).toBeUndefined();
 
     const synced = await syncTrackingLinkFromSam(ctx, order.id, {
       loads: [{ tracking: { shareUrl: "https://macropoint.example/share/next" }, carrierCost: 8765.43 }],
