@@ -13,10 +13,10 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
     if (!isSession(session)) return session;
     const { id } = await context.params;
     const body = z
-      .object({ action: z.enum(["approve", "reject"]), confirm: z.boolean().optional() })
+      .object({ action: z.enum(["approve", "delete"]), confirm: z.boolean().optional() })
       .parse(await req.json());
     const ctx = await readyPortal();
-    const result = await reviewDocument(ctx, id, body.action, session.email, { confirm: body.confirm });
+    const result = await reviewDocument(ctx, id, body.action, session.email);
     return json({ ok: true, ...result });
   } catch (error) {
     return errorResponse(error);

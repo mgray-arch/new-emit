@@ -205,19 +205,10 @@ describe("documents", () => {
     const bol = await listCustomerDocuments(ctx, (await listAllOrders(ctx)).find((item) => item.salesOrderNumber === "SO2196")!.id);
     expect(bol.some((doc) => doc.kind === "bol")).toBe(true);
 
-    await expect(reviewDocument(ctx, held!.id, "approve", "mgray@goselect.com")).rejects.toThrow(/explicit confirmation/);
+    await expect(reviewDocument(ctx, held!.id, "approve", "mgray@goselect.com")).rejects.toThrow(/cannot be released/);
     expect(await listCustomerDocuments(ctx, order.id)).toHaveLength(docs.length);
     const cookie = await sessionCookie(adminSession());
     const denied = await reviewDecision(
-      new Request(`http://portal.test/api/admin/review/${held!.id}`, {
-        method: "POST",
-        headers: { "content-type": "application/json", cookie, host: "portal.test", origin: "http://portal.test" },
-        body: JSON.stringify({ action: "approve" }),
-      }),
-      { params: Promise.resolve({ id: held!.id }) },
-    );
-    expect(denied.status).toBe(409);
-    const released = await reviewDecision(
       new Request(`http://portal.test/api/admin/review/${held!.id}`, {
         method: "POST",
         headers: { "content-type": "application/json", cookie, host: "portal.test", origin: "http://portal.test" },
@@ -225,18 +216,13 @@ describe("documents", () => {
       }),
       { params: Promise.resolve({ id: held!.id }) },
     );
-    expect(released.status).toBe(200);
-    const audit = await released.json();
-    expect(audit.reviewedBy).toBe("mgray@goselect.com");
-    expect(audit.reviewedAt).toContain("2026-10-14");
+    expect(denied.status).toBe(409);
     const stored = (await ctx.db
-      .prepare(`SELECT review_status, reviewed_by, reviewed_at FROM internal_documents WHERE id = ?`)
-      .get(held!.id)) as { review_status: string; reviewed_by: string; reviewed_at: string };
-    expect(stored.review_status).toBe("approved");
-    expect(stored.reviewed_by).toBe("mgray@goselect.com");
-    expect(stored.reviewed_at).toBe(audit.reviewedAt);
-    const after = await listCustomerDocuments(ctx, order.id);
-    expect(after.length).toBeGreaterThan(docs.length);
+      .prepare(`SELECT review_status, reviewed_by FROM internal_documents WHERE id = ?`)
+      .get(held!.id)) as { review_status: string; reviewed_by: string | null };
+    expect(stored.review_status).toBe("pending");
+    expect(stored.reviewed_by).toBeNull();
+    expect(await listCustomerDocuments(ctx, order.id)).toHaveLength(docs.length);
   });
 
   it("holds a text rate confirmation and an image", async () => {

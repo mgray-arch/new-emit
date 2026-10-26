@@ -19,6 +19,8 @@ const STRONG: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /pay(?:able)?\s+to\s+(the\s+)?carrier/i, reason: "Page says pay to the carrier." },
   { pattern: /paid\s+to\s+(the\s+)?(motor\s+)?carrier/i, reason: "Page says paid to the carrier." },
   { pattern: /compensation\s+to\s+(the\s+)?(motor\s+)?carrier/i, reason: "Page states carrier compensation." },
+  { pattern: /total\s+carrier\s+pay/i, reason: "Page mentions total carrier pay." },
+  { pattern: /broker\s*carrier\s*agreements?/i, reason: "Page is a broker-carrier agreement." },
 ];
 
 const DOLLAR = /\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?/;

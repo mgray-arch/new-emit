@@ -73,7 +73,7 @@ export default function PhotoGallery({
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "We couldn't add that photo. Try a JPEG or PNG.");
       if (body.duplicate) setNotice("That image is already on this load.");
-      else if (!body.visibleToCustomer) setNotice("Held from EMIT. It looked like a rate confirmation.");
+      else if (!body.visibleToCustomer) setNotice("Held for Select. It is on the quarantine list and EMIT cannot see it.");
       else setNotice("Photo attached.");
       await refresh();
     } catch (err) {

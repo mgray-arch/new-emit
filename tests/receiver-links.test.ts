@@ -91,12 +91,11 @@ describe("receiver links", () => {
     });
     expect(held.releasedIds).toEqual([]);
     expect(held.heldIds.length).toBeGreaterThan(0);
-    await reviewDocument(ctx, held.heldIds[0], "approve", "mgray@goselect.com", { confirm: true });
+    await expect(reviewDocument(ctx, held.heldIds[0], "approve", "mgray@goselect.com")).rejects.toThrow(/cannot be released/);
     const released = await listCustomerDocuments(ctx, order.id);
-    expect(released.some((doc) => doc.filename.includes("SENTINEL"))).toBe(true);
-    const releasedId = released.find((doc) => doc.filename.includes("SENTINEL"))!.id;
-    const anonymous = await downloadDoc(new Request(`http://portal.test/api/documents/${releasedId}`), {
-      params: Promise.resolve({ id: releasedId }),
+    expect(released.some((doc) => doc.filename.includes("SENTINEL"))).toBe(false);
+    const anonymous = await downloadDoc(new Request(`http://portal.test/api/documents/${held.heldIds[0]}`), {
+      params: Promise.resolve({ id: held.heldIds[0] }),
     });
     expect(anonymous.status).toBe(401);
 
@@ -125,29 +124,33 @@ describe("receiver links", () => {
       receivedAt: "2026-10-14T18:02:00Z",
     });
     expect(visible.visibleToCustomer).toBe(true);
-    await ctx.db.prepare(`UPDATE carrier_photos SET held = 0, hold_reason = NULL WHERE id IN (?, ?)`).run(named.id, embedded.id);
 
     const response = await openReceiver(cypress.token);
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.company).toBe("Cypress Dock LLC");
-    const numbers = body.loads.map((load: { salesOrderNumber: string }) => load.salesOrderNumber);
-    expect(numbers).toContain("SO-RCV-CYPRESS");
-    expect(numbers).not.toContain("SO-RCV-PICKUP-ONLY");
-    expect(numbers).not.toContain("so-003108_T16");
+    const numbers = body.loads.map((load: { loadNumber: string | null }) => load.loadNumber);
+    expect(numbers).toContain("910001-1");
+    expect(numbers).not.toContain("900196-1");
     expect(
-      body.loads.every((load: { stops: Array<{ kind: string; company: string }> }) =>
-        load.stops.some((stop) => stop.kind === "drop" && stop.company === "Cypress Dock LLC"),
+      body.loads.every((load: { stops: Array<{ kind: string; city: string }> }) =>
+        load.stops.some((stop) => stop.kind === "drop" && stop.city === "Cypress"),
       ),
     ).toBe(true);
-    const own = body.loads.find((load: { salesOrderNumber: string }) => load.salesOrderNumber === "SO-RCV-CYPRESS");
-    expect(own.photos.map((photo: { filename: string }) => photo.filename)).toEqual(["dock-ok.png"]);
+    const own = body.loads.find((load: { loadNumber: string }) => load.loadNumber === "910001-1");
+    expect(Object.keys(own).sort()).toEqual(
+      ["latestEta", "loadNumber", "mustDeliverDate", "portalStatus", "shipDate", "stops", "timeline", "trackingLink", "trackingStage"].sort(),
+    );
+    expect(own.photos).toBeUndefined();
     expect(own.customerCost).toBeUndefined();
     expect(own.documents).toBeUndefined();
     expect(own.comments).toBeUndefined();
+    expect(own.salesOrderNumber).toBeUndefined();
+    expect(own.stops[0]).toEqual({ kind: "pickup", city: "Sheridan", state: "WY" });
+    expect(own.stops.at(-1)).toEqual({ kind: "drop", city: "Cypress", state: "TX" });
     const textBody = JSON.stringify(body);
-    expect(textBody).not.toMatch(/customerCost|rateReason|carrierPay|carrierRate|documents|comments/i);
-    expect(textBody).not.toMatch(/PAY-SENTINEL|4242\.42|424242|BLACKHAWK|8,765\.43|8765\.43|rate confirmation|rate-confirmation/i);
+    expect(textBody).not.toMatch(/customerCost|rateReason|carrierPay|carrierRate|documents|comments|photos|salesOrder/i);
+    expect(textBody).not.toMatch(/PAY-SENTINEL|4242\.42|424242|BLACKHAWK|8,765\.43|8765\.43|rate confirmation|rate-confirmation|dock-ok/i);
     expectNoSecrets(body);
 
     const hiddenName = await receiverPhoto(new Request(`http://portal.test/api/r/${cypress.token}/photos/${named.id}`), {
@@ -161,21 +164,22 @@ describe("receiver links", () => {
     const allowed = await receiverPhoto(new Request(`http://portal.test/api/r/${cypress.token}/photos/${visible.id}`), {
       params: Promise.resolve({ token: cypress.token, photoId: visible.id }),
     });
-    expect(allowed.status).toBe(200);
+    expect(allowed.status).toBe(404);
 
     const enchanted = (await ctx.db.prepare(`SELECT access_token FROM receivers WHERE company = ?`).get("Enchanted Rock LLC")) as {
       access_token: string;
     };
-    const rock = await openReceiver(enchanted.access_token);
-    const rockBody = await rock.json();
-    const rockNumbers = rockBody.loads.map((load: { salesOrderNumber: string }) => load.salesOrderNumber);
-    expect(rockNumbers).toContain("SO-RCV-PICKUP-ONLY");
-    expect(rockNumbers).not.toContain("SO-RCV-CYPRESS");
+    await ctx.db.prepare(`UPDATE loads SET load_number = ? WHERE sales_order_number = ?`).run("910002-1", "SO-RCV-PICKUP-ONLY");
+    const rockAgain = await openReceiver(enchanted.access_token);
+    const rockBody = await rockAgain.json();
+    const rockNumbers = rockBody.loads.map((load: { loadNumber: string | null }) => load.loadNumber);
+    expect(rockNumbers).toContain("910002-1");
+    expect(rockNumbers).not.toContain("910001-1");
     expect(JSON.stringify(rockBody)).not.toMatch(/PAY-SENTINEL|rate-confirmation-SENTINEL|dock-ok\.png/);
     expectNoSecrets(rockBody);
 
     const direct = await receiverPortal(ctx, cypress.token);
-    expect(direct?.loads.some((load) => load.salesOrderNumber === "SO-RCV-CYPRESS")).toBe(true);
+    expect(direct?.loads.some((load) => load.loadNumber === "910001-1")).toBe(true);
   });
 
   it("returns 404 for a disabled link and for the token a reset replaces", async () => {

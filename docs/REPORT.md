@@ -25,7 +25,7 @@ Saved delivery locations are searched from the drop stop. Pickup yards stay the 
 - New-order requests are validated with Zod. Carrier fields posted by a client are ignored. There is nowhere to write them.
 - Unauthenticated routes are the per-load tracking page, the per-receiver private link, and the machine ingest paths (carrier photos, `POST /api/integrations/documents`, and `POST /api/integrations/tracking-link`). The bot paths check `BOT_UPLOAD_KEY` in constant time, rate-limit by IP, and cannot list or delete. They are not an open order API.
 
-Staff can still read the text excerpt of a quarantined page. Releasing a page the screener flagged as a rate confirmation takes a second click ("Yes, release it") and the API rejects `{ action: "approve" }` without `confirm: true`. The release stores `reviewed_by` (the admin email) and `reviewed_at`. Uncertain pages can still be released in one click. Keeping a page internal does not require the extra confirm.
+Staff can still read the text excerpt of a quarantined page and download it from the Select-only quarantine list. A page or photo the screener flagged as a rate confirmation cannot be released to EMIT. Approve is rejected. Delete removes the file. An unclear read can be approved, which records the admin email and the time, or deleted.
 
 ## Branding
 
@@ -64,9 +64,9 @@ Those HTTP paths are still a placeholder. Wiring `submitOrder` and `updateOrder`
 
 ## Carrier photos
 
-Each load has a photo gallery. Select admins and EMIT staff can view it while signed in. A receiver sees photos only through that company's private link. The public tracking link does not show photos. Photos are not customer documents: this path never accepts or displays a PDF or other document.
+Each load has a photo gallery. Select admins and EMIT staff can view it while signed in. A receiver link does not show photos or any other file. The public tracking link does not show photos. Photos are not customer documents: this path never accepts or displays a PDF or other document.
 
-The demo seeds an orange dock photo on SO2196 (Select load 900196-1) and a Cypress arrival photo on SO4555. A second SO2196 image is stored with rate-confirmation text in the file. EMIT and receiver links do not see that image. An admin does, marked held.
+The demo seeds an orange dock photo on SO2196 (Select load 900196-1) and a Cypress arrival photo on SO4555. A second SO2196 image is stored with rate-confirmation text in the file. EMIT does not see that image. It sits on the Select quarantine list. Receiver links do not show either photo.
 
 ### Ingest API
 
@@ -103,7 +103,7 @@ Responses:
 
 The same SHA-256 on one load is one row. A later retry does not create a second photo.
 
-Filename, source, subject, and printable strings inside the file (PNG text, EXIF, and similar) go through the same rate-confirmation checks as documents. A hit is stored with `held = 1`. EMIT and receiver links get neither the row nor the bytes (404). Admins still see it in the gallery, labeled held. There is no release action on this path, so a rate-confirmation lookalike cannot be pushed to EMIT. The check does not OCR pixels. A photograph of a paper rate confirmation with no embedded text can still be shown; the assistant should pass the email subject so that signal is screened.
+Filename, source, subject, printable strings inside the file, and OCR of the pixels go through the same rate-confirmation checks as documents. A hit is stored with `held = 1` and listed in the Select quarantine. EMIT gets neither the row nor the bytes (404). A receiver link never receives photo bytes. A rate confirmation cannot be approved onto EMIT. An OCR failure is held too, and Select can approve that one after looking at it or delete it.
 
 Gallery reads, all session-authenticated and scoped like the load:
 
@@ -247,7 +247,7 @@ There is no public test URL in this environment.
 
 ## Open questions
 
-Answered and in this build: a Select admin may release a flagged rate confirmation after an explicit confirm, and the portal logs who and when. See pricing and full access see the price EMIT pays. View only and add loads do not. Carrier pay is not stored and is hidden from every EMIT role, every permission, and from Select while viewing as EMIT. The portal is the confirmation. No order email is sent. EMIT signs in with a password a Select admin sets. Select admins sign in with Google and can mark an EMIT user as an EMIT admin or a regular user. View-as is read-only. Microsoft is optional. Receiver companies and contact emails are edited in admin. Receivers use a private link and do not sign in. A Select admin can paste a public tracking link on each load. The public hostname is `PORTAL_PUBLIC_URL`, not a name baked into the code. Vercel hosting uses Turso for the database and Vercel Blob for document and photo bytes. Local dev still uses SQLite and files.
+Answered and in this build: a rate confirmation cannot be released to EMIT. Select can approve an unclear file or delete it. See pricing and full access see the price EMIT pays. View only and add loads do not. Carrier pay is not stored and is hidden from every EMIT role, every permission, and from Select while viewing as EMIT. The portal is the confirmation. No order email is sent. EMIT signs in with a password a Select admin sets. Select admins sign in with Google and can mark an EMIT user as an EMIT admin or a regular user. View-as is read-only. Microsoft is optional. Receiver companies and contact emails are edited in admin. Receivers use a private link and do not sign in. A Select admin can paste a public tracking link on each load. The public hostname is `PORTAL_PUBLIC_URL`, not a name baked into the code. Vercel hosting uses Turso for the database and Vercel Blob for document and photo bytes. Local dev still uses SQLite and files.
 
 Still open:
 

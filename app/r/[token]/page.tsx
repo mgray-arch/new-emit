@@ -25,43 +25,25 @@ export default async function ReceiverLinkPage({ params }: { params: Promise<{ t
         </div>
       </header>
       {body.loads.length === 0 && <p>No deliveries are posted for {body.company} yet.</p>}
-      {body.loads.map((load) => (
-        <article className="receiver-card" key={load.id}>
-          <h2>
-            {load.salesOrderNumber} · Select load {formatLoadNumber(load.loadNumber)}
-          </h2>
+      {body.loads.map((load, index) => (
+        <article className="receiver-card" key={`${load.loadNumber ?? "load"}-${index}`}>
+          <h2>Select load {formatLoadNumber(load.loadNumber)}</h2>
           <p className="lede">
             {STAGE_LABEL[load.trackingStage]} · {STATUS_LABEL[load.portalStatus]}
           </p>
           <Timeline order={load} />
           <ol className="stop-list">
-            {load.stops.map((stop, index) => (
-              <li key={`${stop.kind}-${index}`}>
-                {stop.kind === "pickup" ? "Pickup" : "Drop"} · {stop.company} · {stop.city}, {stop.state}
+            {load.stops.map((stop, stopIndex) => (
+              <li key={`${stop.kind}-${stopIndex}`}>
+                {stop.kind === "pickup" ? "Pickup" : "Drop"} · {stop.city}, {stop.state}
               </li>
             ))}
           </ol>
           <p className="mini">
             Ship {formatDay(load.shipDate)} · Must deliver {formatDay(load.mustDeliverDate)}
-            {load.truckType ? ` · ${load.truckType}` : ""}
           </p>
           <p>Latest ETA: {load.latestEta ? formatWhen(load.latestEta) : "Not posted yet"}</p>
           <TrackLink href={load.trackingLink} />
-          {load.trackingUrl && (
-            <p>
-              <a href={load.trackingUrl}>Portal status</a>
-            </p>
-          )}
-          {load.photos.length > 0 && (
-            <div className="photo-grid">
-              {load.photos.map((photo) => (
-                <figure className="photo-card" key={photo.id}>
-                  <img src={`/api/r/${token}/photos/${photo.id}`} alt={photo.filename} />
-                  <figcaption>{photo.filename}</figcaption>
-                </figure>
-              ))}
-            </div>
-          )}
         </article>
       ))}
     </main>
