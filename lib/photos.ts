@@ -93,6 +93,19 @@ export function photoHoldReason(input: {
   return sensitiveReason([input.filename, input.source, input.subject ?? "", printableStrings(input.bytes)].join("\n"));
 }
 
+/** Receiver pages never receive a held photo, or one whose name, subject, or embedded text is a rate confirmation or carrier pay. */
+export function hiddenFromReceiver(photo: {
+  held: boolean;
+  filename: string;
+  subject?: string | null;
+  bytes?: Uint8Array;
+}): boolean {
+  if (photo.held) return true;
+  const parts = [photo.filename, photo.subject ?? ""];
+  if (photo.bytes) parts.push(printableStrings(photo.bytes));
+  return sensitiveReason(parts.join("\n")) != null;
+}
+
 export interface CarrierPhoto {
   id: string;
   loadId: string;

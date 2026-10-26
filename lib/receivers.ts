@@ -1,8 +1,9 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { assertNoCarrierFields } from "@/lib/customer-view";
 import type { PortalContext } from "@/lib/db";
 import { PortalError } from "@/lib/http";
 import { listOrders } from "@/lib/orders";
-import { listCarrierPhotos } from "@/lib/photos";
+import { hiddenFromReceiver, listCarrierPhotos, readCarrierPhoto } from "@/lib/photos";
 import { portalPublicUrl } from "@/lib/public-url";
 import type { PortalStatus, StopKind, TimelineEvent, TrackingStage } from "@/lib/types";
 
@@ -159,6 +160,49 @@ export async function receiverCompanyForToken(
   return row ?? null;
 }
 
+const FORBIDDEN_RECEIVER_KEY =
+  /^(carrierpay|carrierrate|carriercost|carriername|carriermc|staffnotes|customercost|customerrate|ratereason|rateconfirmation|ratecon|documents|comments|bolcount|attachmentcount|pendingreviewcount)$/;
+
+/** The receiver response is an allowlist. A forbidden key fails the request instead of being sent. */
+export function assertReceiverPayload(value: unknown): void {
+  const walk = (node: unknown) => {
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+      return;
+    }
+    if (!node || typeof node !== "object") return;
+    for (const [key, child] of Object.entries(node)) {
+      if (FORBIDDEN_RECEIVER_KEY.test(key.toLowerCase().replace(/_/g, ""))) {
+        throw new Error("Receiver payload contained a forbidden field");
+      }
+      walk(child);
+    }
+  };
+  walk(value);
+  assertNoCarrierFields(value);
+}
+
+function deliversToCompany(load: ReceiverShipment, company: string): boolean {
+  const target = company.trim().toLowerCase();
+  return load.stops.some((stop) => stop.kind === "drop" && stop.company.trim().toLowerCase() === target);
+}
+
+async function photosForReceiver(ctx: PortalContext, loadId: string): Promise<ReceiverShipment["photos"]> {
+  const listed = await listCarrierPhotos(ctx, loadId, false);
+  const photos: ReceiverShipment["photos"] = [];
+  for (const photo of listed) {
+    const full = await readCarrierPhoto(ctx, photo.id);
+    if (!full || hiddenFromReceiver(full)) continue;
+    photos.push({
+      id: photo.id,
+      filename: photo.filename,
+      mediaType: photo.mediaType,
+      receivedAt: photo.receivedAt,
+    });
+  }
+  return photos;
+}
+
 /** Loads, tracking, and photos for one receiver. No cost, documents, or comments. */
 export async function shipmentsForReceiver(ctx: PortalContext, company: string): Promise<ReceiverShipment[]> {
   const first = await listOrders(ctx, { receiverCompany: company, page: 1, pageSize: 50 });
@@ -167,7 +211,7 @@ export async function shipmentsForReceiver(ctx: PortalContext, company: string):
   for (let page = 2; page <= Math.ceil(first.total / pageSize); page += 1) {
     orders.push(...(await listOrders(ctx, { receiverCompany: company, page, pageSize })).orders);
   }
-  return Promise.all(orders.map(async (order) => ({
+  const shipments = await Promise.all(orders.map(async (order) => ({
     id: order.id,
     salesOrderNumber: order.salesOrderNumber,
     loadNumber: order.loadNumber,
@@ -186,11 +230,19 @@ export async function shipmentsForReceiver(ctx: PortalContext, company: string):
     truckType: order.truckType,
     trackingUrl: order.trackingUrl,
     trackingLink: order.trackingLink,
-    photos: (await listCarrierPhotos(ctx, order.id, false)).map((photo) => ({
-      id: photo.id,
-      filename: photo.filename,
-      mediaType: photo.mediaType,
-      receivedAt: photo.receivedAt,
-    })),
+    photos: await photosForReceiver(ctx, order.id),
   })));
+  return shipments.filter((load) => deliversToCompany(load, company));
+}
+
+/** Null when the token is missing, disabled, or already rotated. The body never includes pay or documents. */
+export async function receiverPortal(
+  ctx: PortalContext,
+  token: string,
+): Promise<{ company: string; loads: ReceiverShipment[] } | null> {
+  const receiver = await receiverCompanyForToken(ctx, token);
+  if (!receiver) return null;
+  const body = { company: receiver.company, loads: await shipmentsForReceiver(ctx, receiver.company) };
+  assertReceiverPayload(body);
+  return body;
 }
