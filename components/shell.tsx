@@ -13,6 +13,7 @@ interface Me {
   actorRole?: "customer" | "emit_viewer" | "emit_admin" | "admin";
   viewAs?: ViewAsPreview | null;
   readOnly?: boolean;
+  chatEnabled?: boolean;
 }
 
 export default function Shell({ children }: { children: React.ReactNode }) {
@@ -56,7 +57,13 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     setTheme(next);
   }
 
+  const chatEnabled = Boolean(me?.chatEnabled);
+
   useEffect(() => {
+    if (!chatEnabled) {
+      setUnread(0);
+      return;
+    }
     let stop = false;
     async function pullUnread() {
       try {
@@ -76,7 +83,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       window.clearInterval(timer);
       window.removeEventListener("emit-messages-read", pullUnread);
     };
-  }, [pathname]);
+  }, [pathname, chatEnabled]);
 
   useEffect(() => {
     fetch("/api/me")
@@ -115,12 +122,16 @@ export default function Shell({ children }: { children: React.ReactNode }) {
 
   const links = [
     { href: "/", label: "Loads", on: pathname === "/" },
-    {
-      href: "/messages",
-      label: "Messages",
-      on: pathname === "/messages",
-      title: unread > 0 ? `Messages, ${unread} unread` : "Messages with Select",
-    },
+    ...(chatEnabled
+      ? [
+          {
+            href: "/messages",
+            label: "Messages",
+            on: pathname === "/messages",
+            title: unread > 0 ? `Messages, ${unread} unread` : "Messages with Select",
+          },
+        ]
+      : []),
     { href: "/ask", label: "Ask", on: pathname === "/ask", title: "Ask about an order" },
     ...(me?.role === "admin" || me?.role === "emit_admin"
       ? [{ href: "/locations", label: "Locations", on: pathname === "/locations" }]
@@ -217,6 +228,16 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             <BrandLogo />
             <span className="brand-name">Loads</span>
           </Link>
+          {chatEnabled ? (
+            <Link
+              href="/messages"
+              className="mobile-messages"
+              aria-label={unread > 0 ? `Messages, ${unread} unread` : "Messages"}
+            >
+              <span>Messages</span>
+              {unread > 0 ? <span className="nav-count">{unread > 99 ? "99+" : unread}</span> : null}
+            </Link>
+          ) : null}
         </header>
         {demo && <div className="demo-bar">Test environment. These shipments are not live SAM data.</div>}
         {me?.viewAs ? (

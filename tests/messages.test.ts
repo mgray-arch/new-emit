@@ -1,5 +1,8 @@
 import { readFileSync } from "node:fs";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { PATCH as patchUser } from "@/app/api/admin/users/[id]/route";
+import { POST as createUser } from "@/app/api/admin/users/route";
+import { GET as meRoute } from "@/app/api/me/route";
 import { GET as listMessagesRoute, POST as postMessageRoute } from "@/app/api/messages/route";
 import { GET as loadOptionsRoute } from "@/app/api/messages/loads/route";
 import { POST as markReadRoute } from "@/app/api/messages/read/route";
@@ -26,6 +29,14 @@ beforeAll(async () => {
     savedEnv[key] = process.env[key];
     delete process.env[key];
   }
+  await ctx.db
+    .prepare(
+      `INSERT INTO users (id, email, name, role, permission, active, password_epoch, chat_enabled, created_at)
+       VALUES
+         ('customer-1', 'chat.on@emit.example', 'Chat On', 'customer', 'add', 1, 0, 1, '2026-10-14T18:00:00.000Z'),
+         ('viewer-1', 'chat.viewer@emit.example', 'View Only', 'emit_viewer', 'view', 1, 0, 1, '2026-10-14T18:00:00.000Z')`,
+    )
+    .run();
 });
 
 afterEach(() => {
@@ -194,6 +205,131 @@ describe("message authorization", () => {
     expect(ignoredCookie.status).toBe(201);
     expect((await ignoredCookie.json()).message.side).toBe("emit");
     expect(await messageCount()).toBe(before + 2);
+  });
+});
+
+describe("chat stays off until Select enables it", () => {
+  it("rejects reads and posts for an EMIT user, and leaves Select staff on", async () => {
+    const seeded = (await ctx.db.prepare(`SELECT id, chat_enabled FROM users WHERE email = ?`).get("m.gray@emit.example")) as {
+      id: string;
+      chat_enabled: number;
+    };
+    expect(Number(seeded.chat_enabled)).toBe(0);
+    const off = await sessionCookie({
+      userId: seeded.id,
+      email: "m.gray@emit.example",
+      name: "M. Gray",
+      role: "customer",
+      permission: "add",
+      passwordEpoch: 0,
+    });
+    const select = await sessionCookie(adminSession());
+    const before = await messageCount();
+
+    const listed = await listMessagesRoute(new Request("http://portal.test/api/messages", { headers: headers(off) }));
+    const posted = await postMessageRoute(
+      new Request("http://portal.test/api/messages", {
+        method: "POST",
+        headers: headers(off, true),
+        body: JSON.stringify({ body: "Should not store while chat is off" }),
+      }),
+    );
+    const unread = await unreadRoute(new Request("http://portal.test/api/messages/unread", { headers: headers(off) }));
+    const loads = await loadOptionsRoute(new Request("http://portal.test/api/messages/loads", { headers: headers(off) }));
+    const marked = await markReadRoute(
+      new Request("http://portal.test/api/messages/read", { method: "POST", headers: headers(off) }),
+    );
+    for (const response of [listed, posted, unread, loads, marked]) {
+      expect(response.status).toBe(403);
+      expect((await response.json()).error).toMatch(/turned off/i);
+    }
+    expect(await messageCount()).toBe(before);
+    const stored = JSON.stringify(await ctx.db.prepare(`SELECT body FROM messages`).all());
+    expect(stored).not.toContain("Should not store while chat is off");
+
+    const selectList = await listMessagesRoute(new Request("http://portal.test/api/messages", { headers: headers(select) }));
+    expect(selectList.status).toBe(200);
+    const selectPost = await postMessageRoute(
+      new Request("http://portal.test/api/messages", {
+        method: "POST",
+        headers: headers(select, true),
+        body: JSON.stringify({ body: "Select can write while EMIT chat is off" }),
+      }),
+    );
+    expect(selectPost.status).toBe(201);
+
+    const meOff = await meRoute(new Request("http://portal.test/api/me", { headers: headers(off) }));
+    expect((await meOff.json()).chatEnabled).toBe(false);
+    const meSelect = await meRoute(new Request("http://portal.test/api/me", { headers: headers(select) }));
+    expect((await meSelect.json()).chatEnabled).toBe(true);
+    const preview = await meRoute(
+      new Request("http://portal.test/api/me", { headers: headers(`${select}; portal_view_as=regular:view`) }),
+    );
+    expect((await preview.json()).chatEnabled).toBe(true);
+
+    const turnedOn = await patchUser(
+      new Request(`http://portal.test/api/admin/users/${seeded.id}`, {
+        method: "PATCH",
+        headers: headers(select, true),
+        body: JSON.stringify({ chatEnabled: true }),
+      }),
+      { params: Promise.resolve({ id: seeded.id }) },
+    );
+    expect(turnedOn.status).toBe(200);
+    expect((await turnedOn.json()).user.chatEnabled).toBe(true);
+    const allowed = await postMessageRoute(
+      new Request("http://portal.test/api/messages", {
+        method: "POST",
+        headers: headers(off, true),
+        body: JSON.stringify({ body: "Chat is on now" }),
+      }),
+    );
+    expect(allowed.status).toBe(201);
+    expect((await (await meRoute(new Request("http://portal.test/api/me", { headers: headers(off) }))).json()).chatEnabled).toBe(true);
+
+    const turnedOff = await patchUser(
+      new Request(`http://portal.test/api/admin/users/${seeded.id}`, {
+        method: "PATCH",
+        headers: headers(select, true),
+        body: JSON.stringify({ chatEnabled: false }),
+      }),
+      { params: Promise.resolve({ id: seeded.id }) },
+    );
+    expect((await turnedOff.json()).user.chatEnabled).toBe(false);
+    const blockedAgain = await postMessageRoute(
+      new Request("http://portal.test/api/messages", {
+        method: "POST",
+        headers: headers(off, true),
+        body: JSON.stringify({ body: "Should not store after chat is turned off" }),
+      }),
+    );
+    expect(blockedAgain.status).toBe(403);
+    const bodies = JSON.stringify(await ctx.db.prepare(`SELECT body FROM messages`).all());
+    expect(bodies).toContain("Chat is on now");
+    expect(bodies).not.toContain("Should not store after chat is turned off");
+
+    const created = await createUser(
+      new Request("http://portal.test/api/admin/users", {
+        method: "POST",
+        headers: headers(select, true),
+        body: JSON.stringify({ name: "No Chat", email: "no.chat@emit.example", password: "Temp-pass-1" }),
+      }),
+    );
+    expect(created.status).toBe(201);
+    expect((await created.json()).user.chatEnabled).toBe(false);
+    const createdOn = await createUser(
+      new Request("http://portal.test/api/admin/users", {
+        method: "POST",
+        headers: headers(select, true),
+        body: JSON.stringify({
+          name: "Yes Chat",
+          email: "yes.chat@emit.example",
+          password: "Temp-pass-1",
+          chatEnabled: true,
+        }),
+      }),
+    );
+    expect((await createdOn.json()).user.chatEnabled).toBe(true);
   });
 });
 

@@ -14,6 +14,7 @@ const createSchema = z.object({
   generatePassword: z.boolean().optional(),
   access: z.enum(["admin", "regular"]).optional(),
   permission: z.enum(["view", "add", "pricing", "full"]).optional(),
+  chatEnabled: z.boolean().optional(),
 });
 
 export async function GET(req: Request) {

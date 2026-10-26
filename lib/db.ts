@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS users (
   active INTEGER NOT NULL DEFAULT 1,
   password_changed_at TEXT,
   password_epoch INTEGER NOT NULL DEFAULT 0,
+  chat_enabled INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
 
@@ -385,6 +386,7 @@ export async function openDatabase(file?: string): Promise<SqlDatabase> {
   await migrateSamBuild(db);
   await migrateEnteredBy(db);
   await migrateDocumentUploaders(db);
+  await migrateChatEnabled(db);
   await db.exec(`DROP TABLE IF EXISTS outbox`);
   return db;
 }
@@ -717,6 +719,11 @@ async function rebuildUsersForRoleOnce(db: SqlDatabase, spec: UserRebuild): Prom
       DROP TABLE users;
       ALTER TABLE ${spec.table} RENAME TO users;
     `);
+}
+
+/** EMIT chat is off until Select turns it on. Select staff are not gated by this column. */
+async function migrateChatEnabled(db: SqlDatabase): Promise<void> {
+  await ensureColumn(db, "users", "chat_enabled", "INTEGER NOT NULL DEFAULT 0");
 }
 
 /** Older document tables have no uploader. The bot upload log is created with the schema. */

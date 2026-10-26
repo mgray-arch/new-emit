@@ -22,6 +22,7 @@ interface Me {
   role: PortalRole;
   permission?: "view" | "add" | "pricing" | "full" | null;
   readOnly?: boolean;
+  chatEnabled?: boolean;
 }
 
 export default function OrderPage() {
@@ -89,11 +90,13 @@ export default function OrderPage() {
             <p className="lede">
               {order.salesOrderNumber} · Select load {formatLoadNumber(order.loadNumber)}
             </p>
-            <p>
-              <Link href={`/messages?load=${order.id}`} className="text-link">
-                Message about this load
-              </Link>
-            </p>
+            {me?.chatEnabled ? (
+              <p>
+                <Link href={`/messages?load=${order.id}`} className="text-link">
+                  Message about this load
+                </Link>
+              </p>
+            ) : null}
             <div className="date-grid">
               <div className="date-pair">
                 <span className="k">Pickup</span>

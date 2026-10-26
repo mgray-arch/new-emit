@@ -11,6 +11,7 @@ interface EmitUser {
   access: "admin" | "regular";
   permission: "view" | "add" | "pricing" | "full";
   emitAdmin: boolean;
+  chatEnabled: boolean;
   hasPassword: boolean;
   createdAt: string;
 }
@@ -32,6 +33,7 @@ export default function UsersPage() {
   const [sharedPassword, setSharedPassword] = useState("");
   const [permission, setPermission] = useState<EmitUser["permission"]>("add");
   const [access, setAccess] = useState<EmitUser["access"]>("regular");
+  const [chatEnabled, setChatEnabled] = useState(false);
   const [resetFor, setResetFor] = useState<string | null>(null);
   const [resetPassword, setResetPassword] = useState("");
 
@@ -70,6 +72,7 @@ export default function UsersPage() {
         generatePassword: generate,
         access,
         permission,
+        chatEnabled,
       }),
     });
     const body = await response.json();
@@ -80,6 +83,7 @@ export default function UsersPage() {
     setName("");
     setEmail("");
     setPassword("");
+    setChatEnabled(false);
     showResult(body, `Created ${body.user.email}.`);
     await load();
   }
@@ -100,7 +104,7 @@ export default function UsersPage() {
     await load();
   }
 
-  async function saveUser(user: EmitUser, patch: { access?: EmitUser["access"]; permission?: EmitUser["permission"] }) {
+  async function saveUser(user: EmitUser, patch: { access?: EmitUser["access"]; permission?: EmitUser["permission"]; chatEnabled?: boolean }) {
     setError("");
     const response = await fetch(`/api/admin/users/${user.id}`, {
       method: "PATCH",
@@ -110,6 +114,11 @@ export default function UsersPage() {
     const body = await response.json();
     if (!response.ok) {
       setError(body.error || "Could not update that user");
+      return;
+    }
+    if (patch.chatEnabled !== undefined && patch.access === undefined && patch.permission === undefined) {
+      setMessage(patch.chatEnabled ? `${user.email} can use Messages.` : `${user.email} cannot use Messages.`);
+      await load();
       return;
     }
     const nextPermission = patch.permission ?? user.permission;
@@ -187,6 +196,15 @@ export default function UsersPage() {
               ))}
             </select>
           </div>
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={chatEnabled}
+              onChange={(event) => setChatEnabled(event.target.checked)}
+            />
+            <span>Chat enabled</span>
+          </label>
+          <p className="mini">Off by default. This person can open Messages only when this is checked. Select always can.</p>
           <div className="field">
             <label htmlFor="new-password">Temporary password</label>
             <input
@@ -240,6 +258,15 @@ export default function UsersPage() {
               </select>
             </label>
             <p className="mini">{PERMISSIONS.find((item) => item.value === user.permission)?.detail}</p>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={user.chatEnabled}
+                aria-label={`Chat enabled for ${user.email}`}
+                onChange={(event) => void saveUser(user, { chatEnabled: event.target.checked })}
+              />
+              <span>Chat enabled</span>
+            </label>
             <div className="actions" style={{ justifyContent: "flex-start" }}>
               <button className="btn secondary" type="button" onClick={() => setActive(user, !user.active)}>
                 {user.active ? "Deactivate" : "Activate"}

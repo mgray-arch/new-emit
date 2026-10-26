@@ -13,6 +13,7 @@ const patchSchema = z.object({
   emitAdmin: z.boolean().optional(),
   access: z.enum(["admin", "regular"]).optional(),
   permission: z.enum(["view", "add", "pricing", "full"]).optional(),
+  chatEnabled: z.boolean().optional(),
 });
 
 export async function PATCH(req: Request, context: { params: Promise<{ id: string }> }) {

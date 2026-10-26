@@ -60,6 +60,8 @@ export default function MessagesPanel() {
   const [loadId, setLoadId] = useState("");
   const [loadQuery, setLoadQuery] = useState("");
   const [loads, setLoads] = useState<LoadOption[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [chatOn, setChatOn] = useState<boolean | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const readOnlyRef = useRef(false);
   const markReadRef = useRef(false);
@@ -75,12 +77,14 @@ export default function MessagesPanel() {
     let cancel = false;
     fetch("/api/me")
       .then((response) => (response.ok ? response.json() : null))
-      .then((me: { readOnly?: boolean } | null) => {
+      .then((me: { readOnly?: boolean; chatEnabled?: boolean } | null) => {
         if (cancel) return;
         const next = Boolean(me?.readOnly);
+        const enabled = Boolean(me?.chatEnabled);
         readOnlyRef.current = next;
-        markReadRef.current = Boolean(me) && !next;
+        markReadRef.current = Boolean(me) && enabled && !next;
         setReadOnly(next);
+        setChatOn(me ? enabled : null);
         setAccessKnown(true);
       })
       .catch(() => {
@@ -92,6 +96,7 @@ export default function MessagesPanel() {
   }, []);
 
   useEffect(() => {
+    if (chatOn !== true) return;
     const timer = window.setTimeout(() => {
       const params = new URLSearchParams();
       if (loadQuery.trim()) params.set("q", loadQuery.trim());
@@ -104,13 +109,20 @@ export default function MessagesPanel() {
         .catch(() => undefined);
     }, 200);
     return () => window.clearTimeout(timer);
-  }, [loadQuery, loadId]);
+  }, [loadQuery, loadId, chatOn]);
 
   useEffect(() => {
     let cancel = false;
     async function pull() {
       try {
         const response = await fetch("/api/messages");
+        if (response.status === 403) {
+          if (!cancel) {
+            setChatOn(false);
+            setLoading(false);
+          }
+          return;
+        }
         if (!response.ok) {
           if (!cancel) setProblem("We couldn't load messages. Refresh the page and try again.");
           return;
@@ -133,20 +145,49 @@ export default function MessagesPanel() {
         if (!cancel) setLoading(false);
       }
     }
-    if (!accessKnown) return;
+    if (!accessKnown || chatOn !== true) {
+      if (chatOn === false && !cancel) setLoading(false);
+      return;
+    }
     void pull();
     const timer = window.setInterval(() => void pull(), POLL_MS);
     return () => {
       cancel = true;
       window.clearInterval(timer);
     };
-  }, [accessKnown]);
+  }, [accessKnown, chatOn]);
 
   useEffect(() => {
     const el = scroller.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
   }, [newest]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    function sync() {
+      const current = window.visualViewport;
+      if (!current) return;
+      const keyboard = Math.max(0, window.innerHeight - current.height - current.offsetTop);
+      root.style.setProperty("--vv-height", `${current.height}px`);
+      root.style.setProperty("--vv-offset", `${current.offsetTop}px`);
+      root.style.setProperty("--keyboard-inset", `${keyboard}px`);
+    }
+    sync();
+    viewport.addEventListener("resize", sync);
+    viewport.addEventListener("scroll", sync);
+    window.addEventListener("orientationchange", sync);
+    return () => {
+      viewport.removeEventListener("resize", sync);
+      viewport.removeEventListener("scroll", sync);
+      window.removeEventListener("orientationchange", sync);
+      root.style.removeProperty("--vv-height");
+      root.style.removeProperty("--vv-offset");
+      root.style.removeProperty("--keyboard-inset");
+    };
+  }, []);
 
   async function loadEarlier() {
     const oldest = messages[0];
@@ -183,9 +224,27 @@ export default function MessagesPanel() {
     }
   }
 
+  const selectedLoad = loads.find((load) => load.id === loadId) ?? null;
+
+  function chooseLoad(id: string) {
+    setLoadId(id);
+    setPickerOpen(false);
+  }
+
+  if (chatOn === false) {
+    return (
+      <Shell>
+        <main className="page">
+          <h1>Messages</h1>
+          <p className="empty">Chat is turned off for this account. Ask Select to enable it.</p>
+        </main>
+      </Shell>
+    );
+  }
+
   return (
     <Shell>
-      <main className="page">
+      <main className="page messages-page">
         <h1>Messages</h1>
         <p className="lede">
           One thread for EMIT and Select. Pick a load or type its number. People reply here. The assistant does not. Carrier
@@ -229,23 +288,46 @@ export default function MessagesPanel() {
           <p className="mini">View-as is read-only. Switch back to Select view to send a message.</p>
         ) : (
           <form className="composer" onSubmit={(event) => void send(event)}>
-            <label className="field">
-              <span>Load, if this is about one</span>
-              <input
-                aria-label="Search loads"
-                placeholder="Search load number, SO, or city"
-                value={loadQuery}
-                onChange={(event) => setLoadQuery(event.target.value)}
-              />
-              <select aria-label="Load" value={loadId} onChange={(event) => setLoadId(event.target.value)}>
-                <option value="">No specific load</option>
-                {loads.map((load) => (
-                  <option key={load.id} value={load.id}>
-                    {optionLabel(load)}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="load-picker">
+              <span className="label" id="load-picker-label">
+                Load, if this is about one
+              </span>
+              <button
+                type="button"
+                className="load-picker-toggle"
+                aria-expanded={pickerOpen}
+                aria-controls="load-picker-list"
+                aria-labelledby="load-picker-label"
+                onClick={() => setPickerOpen((open) => !open)}
+              >
+                <span>{selectedLoad ? optionLabel(selectedLoad) : loadId ? "Selected load" : "No specific load"}</span>
+                <span className="load-picker-action">{pickerOpen ? "Close" : "Choose"}</span>
+              </button>
+              {pickerOpen ? (
+                <div id="load-picker-list" className="load-picker-panel">
+                  <input
+                    aria-label="Search loads"
+                    placeholder="Search load number, SO, or city"
+                    value={loadQuery}
+                    onChange={(event) => setLoadQuery(event.target.value)}
+                  />
+                  <button type="button" className={loadId ? "load-picker-option" : "load-picker-option on"} onClick={() => chooseLoad("")}>
+                    No specific load
+                  </button>
+                  {loads.map((load) => (
+                    <button
+                      key={load.id}
+                      type="button"
+                      className={load.id === loadId ? "load-picker-option on" : "load-picker-option"}
+                      onClick={() => chooseLoad(load.id)}
+                    >
+                      {optionLabel(load)}
+                    </button>
+                  ))}
+                  {loads.length === 0 ? <p className="mini">No loads match that search.</p> : null}
+                </div>
+              ) : null}
+            </div>
             <label className="field">
               <span>Message</span>
               <textarea

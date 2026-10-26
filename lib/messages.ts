@@ -3,6 +3,7 @@ import type { PortalContext } from "@/lib/db";
 import { withTransaction } from "@/lib/db";
 import { PortalError } from "@/lib/http";
 import { likeContains } from "@/lib/orders";
+import { chatEnabledFor } from "@/lib/users";
 import {
   messagePreview,
   messageThreadUrl,
@@ -72,14 +73,14 @@ export function cleanMessageBody(input: string): string {
     .trim();
 }
 
-function assertCanRead(session: Session): void {
+async function assertCanRead(ctx: PortalContext, session: Session): Promise<void> {
   if (messageAccess(session) === "none") throw new PortalError("Forbidden", 403);
+  if (!(await chatEnabledFor(ctx, session))) throw new PortalError("Chat is turned off for this account.", 403);
 }
 
-function assertCanWrite(session: Session): void {
-  const access = messageAccess(session);
-  if (access === "none") throw new PortalError("Forbidden", 403);
-  if (access !== "write") {
+async function assertCanWrite(ctx: PortalContext, session: Session): Promise<void> {
+  await assertCanRead(ctx, session);
+  if (messageAccess(session) !== "write") {
     throw new PortalError("View-as is read-only. Switch back to Select view to change anything.", 403);
   }
 }
@@ -192,7 +193,7 @@ export async function listMessages(
   session: Session,
   beforeSeq: number | null,
 ): Promise<{ messages: MessageView[]; hasMore: boolean }> {
-  assertCanRead(session);
+  await assertCanRead(ctx, session);
   const rows = (await ctx.db
     .prepare(
       `SELECT ${MESSAGE_COLUMNS} FROM messages
@@ -208,7 +209,7 @@ export async function listMessages(
 }
 
 export async function unreadCount(ctx: PortalContext, session: Session): Promise<number> {
-  assertCanRead(session);
+  await assertCanRead(ctx, session);
   const row = await ctx.db
     .prepare(
       `SELECT COUNT(*) AS n FROM messages
@@ -220,7 +221,7 @@ export async function unreadCount(ctx: PortalContext, session: Session): Promise
 }
 
 export async function markMessagesRead(ctx: PortalContext, session: Session): Promise<void> {
-  assertCanWrite(session);
+  await assertCanWrite(ctx, session);
   await ctx.db
     .prepare(
       `INSERT INTO message_reads (user_id, read_seq)
@@ -231,7 +232,7 @@ export async function markMessagesRead(ctx: PortalContext, session: Session): Pr
 }
 
 export async function searchMessageLoads(ctx: PortalContext, session: Session, query: string, includeId: string | null): Promise<LoadOption[]> {
-  assertCanRead(session);
+  await assertCanRead(ctx, session);
   const q = query.trim();
   const rows = q
     ? ((await ctx.db
@@ -269,7 +270,7 @@ export async function postMessage(
   session: Session,
   input: { body: string; loadId?: string | null },
 ): Promise<MessageView> {
-  assertCanWrite(session);
+  await assertCanWrite(ctx, session);
   const body = cleanMessageBody(input.body);
   if (!body) throw new PortalError("Write a message.", 400);
   if (body.length > 2000) throw new PortalError("Keep the message under 2000 characters.", 400);
