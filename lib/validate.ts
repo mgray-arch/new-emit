@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { HH_MM } from "@/lib/ship-time";
-import { PORTAL_STATUSES, RATE_REASONS, TRANSIT_OPTIONS, TRUCK_TYPES } from "@/lib/types";
+import { PORTAL_STATUSES, RATE_REASONS, TRANSIT_OPTIONS } from "@/lib/types";
 
 const dateField = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a YYYY-MM-DD date").nullable().optional();
 
@@ -36,7 +36,7 @@ const orderFields = {
   destination: placeSchema.optional(),
   stops: z.array(stopSchema).max(25).optional(),
   portalStatus: z.enum(PORTAL_STATUSES).optional(),
-  truckType: z.enum(TRUCK_TYPES).nullable().optional(),
+  truckType: z.string().trim().min(1).max(80).nullable().optional(),
   transit: z.enum(TRANSIT_OPTIONS).nullable().optional(),
   shipDate: dateField,
   shipTime: z.string().regex(HH_MM, "Use HH:MM").nullable().optional(),

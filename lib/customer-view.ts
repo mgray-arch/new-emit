@@ -9,7 +9,6 @@ import type {
   TimelineEvent,
   TrackingStage,
   TransitOption,
-  TruckType,
 } from "@/lib/types";
 import {
   PORTAL_STATUSES,
@@ -22,6 +21,7 @@ import {
 import { portalPublicUrl } from "@/lib/public-url";
 import { redactSensitiveText } from "@/lib/sensitive";
 import { samLoadUrl } from "@/lib/sam-link";
+import { sanitizeSchedule } from "@/lib/stop-schedule";
 import { canSeePricing, resolveAccess, type Viewer } from "@/lib/types";
 import { parseTrackingLink } from "@/lib/tracking-link";
 
@@ -95,11 +95,13 @@ function serializeStops(value: unknown, origin: Place, destination: Place): Stop
       const row = item as Record<string, unknown>;
       const kind = row.kind === "pickup" || row.kind === "drop" ? row.kind : null;
       if (!kind) continue;
+      const schedule = sanitizeSchedule(row.schedule);
       parsed.push({
         id: str(row.id) || `stop-${parsed.length + 1}`,
         kind,
         place: serializePlace(row.place),
         locationId: typeof row.locationId === "string" && row.locationId ? row.locationId : null,
+        ...(schedule ? { schedule } : {}),
       });
     }
   }
@@ -149,7 +151,7 @@ export function serializeCustomerOrder(value: unknown, options?: CustomerViewOpt
     origin: pickup.place,
     destination: drop.place,
     stops,
-    truckType: oneOf(raw.truckType, TRUCK_TYPES),
+    truckType: truckLabel(raw.truckType),
     transit: oneOf(raw.transit, TRANSIT_OPTIONS),
     shipDate: strOrNull(raw.shipDate),
     shipTime: strOrNull(raw.shipTime),
@@ -196,6 +198,13 @@ export function presentCustomerOrder(order: CustomerOrder, viewer: Viewer): Cust
     if (url) view.samUrl = url;
   }
   return view;
+}
+
+function truckLabel(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().replace(/\s+/g, " ");
+  if (!trimmed || trimmed.length > 80) return null;
+  return oneOf(trimmed, TRUCK_TYPES) ?? trimmed;
 }
 
 function numberOrZero(value: unknown): number {

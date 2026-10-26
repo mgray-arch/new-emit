@@ -23,7 +23,7 @@ Saved delivery locations are searched from the drop stop. Pickup yards stay the 
 - Uploads are split to single pages (pdf-lib) and text is extracted (unpdf, plus a literal PDF text fallback). Decisions are pass, block, or uncertain. Empty text, images, and unknown types are held. Customer documents and internal documents are separate tables. Pending count on the load is the only signal the customer query needs. An admin approve copies the page into customer documents. A customer cannot download a quarantined page.
 - Auth is a server-side httpOnly JWT (`portal_session`). Middleware and each handler check it. Admin paths require a Select staff email. Secrets stay in environment variables. There is no open database policy: the app uses a server-side SQLite file, not client-exposed row security.
 - New-order requests are validated with Zod. Carrier fields posted by a client are ignored. There is nowhere to write them.
-- Unauthenticated routes are the per-load tracking page, the per-receiver private link, and the machine ingest paths (carrier photos, `POST /api/integrations/documents`, and `POST /api/integrations/tracking-link`). The bot paths check `BOT_UPLOAD_KEY` in constant time, rate-limit by IP, and cannot list or delete. They are not an open order API.
+- Unauthenticated routes are the per-load tracking page, the per-receiver private link, and the machine ingest paths (carrier photos, `POST /api/integrations/documents`, `POST /api/integrations/tracking-link`, and `POST /api/integrations/loads/import`). The bot paths check `BOT_UPLOAD_KEY` in constant time, rate-limit by IP, and cannot list or delete. They are not an open order API. The load import stores an allowlist and drops carrier pay, carrier name, MC, and rate confirmations.
 
 Staff can still read the text excerpt of a quarantined page and download it from the Select-only quarantine list. A page or photo the screener flagged as a rate confirmation cannot be released to EMIT. Approve is rejected. Delete removes the file. An unclear read can be approved, which records the admin email and the time, or deleted.
 
@@ -112,11 +112,11 @@ Gallery reads, all session-authenticated and scoped like the load:
 
 ## Bot document upload
 
-`POST /api/integrations/documents` and `POST /api/integrations/tracking-link`
+`POST /api/integrations/documents`, `POST /api/integrations/tracking-link`, and `POST /api/integrations/loads/import`
 
-Mike's bot attaches a BOL (or a POD or photo) and can set the public tracking link from email. Both use `Authorization: Bearer <BOT_UPLOAD_KEY>`. There is no second secret. The key is at least 16 characters, compared in constant time, and a missing, short, or wrong key is 401. An admin session cookie is not accepted. Middleware lets both paths through so the bot gets JSON instead of a login redirect; each handler still rejects every request without the key. Each route exports POST only.
+Mike's bot attaches a BOL (or a POD or photo), can set the public tracking link from email, and can backfill historical EMIT loads. All three use `Authorization: Bearer <BOT_UPLOAD_KEY>`. There is no second secret. The key is at least 16 characters, compared in constant time, and a missing, short, or wrong key is 401. An admin session cookie is not accepted. Middleware lets these paths through so the bot gets JSON instead of a login redirect; each handler still rejects every request without the key. Each route exports POST only. The load import does not copy documents or carrier pay.
 
-Sixty requests per IP per minute, shared by both paths, including failed keys. Over the limit is 429 with `Retry-After`. The bucket is separate from the login lockout.
+Sixty requests per IP per minute, shared by all three paths, including failed keys. Over the limit is 429 with `Retry-After`. The bucket is separate from the login lockout.
 
 Either call names the load with `loadNumber` (or `load_number`) and/or `salesOrderNumber` (or `sales_order_number`). The load number is the Select number, for example `458934-1`. A sales order number is enough when the Select number is not on the load yet. Sending both requires them to be the same load. No match is 404. More than one match, or a mismatched pair, is 409 and does not guess.
 
@@ -223,7 +223,7 @@ There is no public test URL in this environment.
 | `GOOGLE_HOSTED_DOMAIN` | Default `goselect.com` | Workspace domain check. |
 | `AI_API_KEY`, optional `AI_BASE_URL`, `AI_MODEL` | Select | OpenAI-compatible chat. Blank uses the built-in answerer. |
 | `CARRIER_PHOTO_INGEST_TOKEN` | Select | Bearer token for the photo ingest API. At least 16 characters. |
-| `BOT_UPLOAD_KEY` | Select | Bearer token for `POST /api/integrations/documents` and `POST /api/integrations/tracking-link`. At least 16 characters. One key for both. |
+| `BOT_UPLOAD_KEY` | Select | Bearer token for `POST /api/integrations/documents`, `POST /api/integrations/tracking-link`, and `POST /api/integrations/loads/import`. At least 16 characters. One key for all three. |
 | `SAM_API_BASE_URL`, `SAM_API_TOKEN`, `SAM_CUSTOMER_ID` | Mike, already requested | Live orders. Not connected until the HTTP contract is confirmed. |
 
 `PORTAL_DB_PATH` defaults to `./data/portal.db` and is used only when `TURSO_DATABASE_URL` is unset. `PORTAL_BLOB_DIR` defaults to `./data/blobs` when Blob is unset.
