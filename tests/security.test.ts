@@ -126,7 +126,15 @@ describe("carrier pay never reaches EMIT", () => {
         expect(names).not.toContain("bytes");
       }
     }
-    const sources = ["lib/orders.ts", "lib/types.ts", "lib/seed.ts", "lib/sam.ts"]
+    const sources = [
+      "lib/orders.ts",
+      "lib/types.ts",
+      "lib/seed.ts",
+      "lib/sam.ts",
+      "lib/messages.ts",
+      "lib/message-notify.ts",
+      "lib/message-types.ts",
+    ]
       .map((file) => readFileSync(file, "utf8"))
       .join("\n");
     expect(sources).not.toMatch(/carrier_pay_cents|carrier_name|carrier_mc|staff_notes|carrierPayCents|staffNotes/);

@@ -1,4 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { PATCH as setOwnerRoute } from "@/app/api/admin/orders/[id]/owner/route";
+import { GET as listOrdersRoute } from "@/app/api/orders/route";
 import { GET as getOrderRoute } from "@/app/api/orders/[id]/route";
 import { POST as createOrderRoute } from "@/app/api/orders/route";
 import { presentCustomerOrder } from "@/lib/customer-view";
@@ -52,21 +54,24 @@ function destination(state: string) {
 }
 
 describe("load owner", () => {
-  it("assigns Drew, Ainsley, or Unassigned without guessing", () => {
-    expect(assignLoadOwner({ customer: "EMIT", destinationState: "TX", equipment: "53' Flatbed" })).toBe("Drew");
-    expect(assignLoadOwner({ customer: "EMIT", destinationState: "Texas", equipment: "Flatbed" })).toBe("Drew");
-    expect(assignLoadOwner({ customer: "emit", destinationState: "tx", equipment: "Hot Shot" })).toBe("Drew");
-    expect(assignLoadOwner({ customer: "EMIT", destinationState: "TX", equipment: "hot-shot" })).toBe("Drew");
-    expect(assignLoadOwner({ customer: "EMIT", destinationState: "CO", equipment: "48' Flatbed" })).toBe("Ainsley");
-    expect(assignLoadOwner({ customer: "EMIT", destinationState: "TX", equipment: "24' Box Truck" })).toBe("Ainsley");
-    expect(assignLoadOwner({ customer: "EMIT", destinationState: null, equipment: "Multi Stop Box Truck" })).toBe("Ainsley");
-    expect(assignLoadOwner({ customer: "EMIT", destinationState: "OK", equipment: null })).toBe("Ainsley");
-    expect(assignLoadOwner({ customer: "Acme Steel", destinationState: null, equipment: null })).toBe("Ainsley");
-    expect(assignLoadOwner({ customer: "EMIT", destinationState: "TX", equipment: null })).toBe("Unassigned");
-    expect(assignLoadOwner({ customer: "EMIT", destinationState: "TX", equipment: "Sprinter Van" })).toBe("Unassigned");
-    expect(assignLoadOwner({ customer: "EMIT", destinationState: "TX", equipment: "Conestoga" })).toBe("Unassigned");
-    expect(assignLoadOwner({ customer: "EMIT", destinationState: null, equipment: "53' Flatbed" })).toBe("Unassigned");
-    expect(assignLoadOwner({ customer: "", destinationState: "TX", equipment: "Flatbed" })).toBe("Unassigned");
+  it("gives Drew flatbed and hot shot into Texas, and Ainsley everything else", () => {
+    expect(assignLoadOwner({ destinationState: "TX", equipment: "53' Flatbed" })).toEqual({ owner: "Drew", needsCheck: false });
+    expect(assignLoadOwner({ destinationState: "Texas", equipment: "Flatbed" })).toEqual({ owner: "Drew", needsCheck: false });
+    expect(assignLoadOwner({ destinationState: "tx", equipment: "Hot Shot" })).toEqual({ owner: "Drew", needsCheck: false });
+    expect(assignLoadOwner({ destinationState: "TX", equipment: "hot-shot" })).toEqual({ owner: "Drew", needsCheck: false });
+    expect(assignLoadOwner({ destinationState: "CO", equipment: "48' Flatbed" })).toEqual({ owner: "Ainsley", needsCheck: false });
+    expect(assignLoadOwner({ destinationState: "OK", equipment: "Hot Shot" })).toEqual({ owner: "Ainsley", needsCheck: false });
+    expect(assignLoadOwner({ destinationState: "TX", equipment: "24' Box Truck" })).toEqual({ owner: "Ainsley", needsCheck: false });
+    expect(assignLoadOwner({ destinationState: "TX", equipment: "Multi Stop Box Truck" })).toEqual({ owner: "Ainsley", needsCheck: false });
+    expect(assignLoadOwner({ destinationState: "TX", equipment: "Sprinter Van" })).toEqual({ owner: "Ainsley", needsCheck: false });
+    expect(assignLoadOwner({ destinationState: "TX", equipment: "Conestoga" })).toEqual({ owner: "Ainsley", needsCheck: false });
+    expect(assignLoadOwner({ destinationState: "TX", equipment: "LTL" })).toEqual({ owner: "Ainsley", needsCheck: false });
+    expect(assignLoadOwner({ destinationState: null, equipment: "Multi Stop Box Truck" })).toEqual({ owner: "Ainsley", needsCheck: true });
+    expect(assignLoadOwner({ destinationState: "OK", equipment: null })).toEqual({ owner: "Ainsley", needsCheck: true });
+    expect(assignLoadOwner({ destinationState: "TX", equipment: null })).toEqual({ owner: "Ainsley", needsCheck: true });
+    expect(assignLoadOwner({ destinationState: "TX", equipment: "   " })).toEqual({ owner: "Ainsley", needsCheck: true });
+    expect(assignLoadOwner({ destinationState: null, equipment: "53' Flatbed" })).toEqual({ owner: "Ainsley", needsCheck: true });
+    expect(assignLoadOwner({ destinationState: null, equipment: null })).toEqual({ owner: "Ainsley", needsCheck: true });
   });
 });
 
@@ -86,14 +91,14 @@ describe("new load slack text", () => {
   it("names the owner and who entered the load, and never includes a price", () => {
     const text = newLoadSlackText(notice, {});
     expect(text).toContain("Owner: Drew");
+    expect(text).not.toContain("Needs a human check");
     expect(text).toContain("Entered by: Jane Doe (jane@emit.example)");
     expect(text).not.toMatch(/carrier|8765|customerCost|\$/i);
-    expect(newLoadSlackText({ ...notice, owner: "Unassigned", equipment: null }, { SLACK_USER_ID_DREW: "UDREW123" })).toContain(
-      "Owner: Unassigned",
-    );
-    expect(newLoadSlackText({ ...notice, owner: "Unassigned", equipment: null }, { SLACK_USER_ID_DREW: "UDREW123" })).toContain(
-      "Equipment: not set",
-    );
+    const unclear = newLoadSlackText({ ...notice, owner: "Ainsley", equipment: null, needsCheck: true }, {});
+    expect(unclear).toContain("Owner: Ainsley");
+    expect(unclear).toContain("Needs a human check. Equipment or destination was missing.");
+    expect(unclear).toContain("Equipment: not set");
+    expect(unclear).not.toContain("<@");
   });
 
   it("mentions a Slack user id and falls back to the plain name", () => {
@@ -139,6 +144,13 @@ describe("entered by on a new load", () => {
     const created = (await quiet.json()).order as CustomerOrder;
     expect(created.enteredByName).toBe("M. Gray");
     expect(created.enteredByEmail).toBe("m.gray@emit.example");
+    expect(created).not.toHaveProperty("owner");
+    expect(created).not.toHaveProperty("ownerNeedsCheck");
+    const quietRow = (await ctx.db.prepare(`SELECT owner, owner_needs_check FROM loads WHERE sales_order_number = ?`).get("SO-QUIET")) as {
+      owner: string;
+      owner_needs_check: number;
+    };
+    expect(quietRow).toEqual({ owner: "Drew", owner_needs_check: 0 });
     expect(formatEnteredBy(created.enteredByName, created.enteredByEmail)).toBe("M. Gray (m.gray@emit.example)");
     expect(created.customerCost).toBeUndefined();
     expect(created.pendingReviewCount).toBeUndefined();
@@ -173,6 +185,8 @@ describe("entered by on a new load", () => {
     const selectOrder = (await selectView.json()).order as CustomerOrder;
     expect(selectOrder.enteredByName).toBe("M. Gray");
     expect(selectOrder.enteredByEmail).toBe("m.gray@emit.example");
+    expect(selectOrder.owner).toBe("Drew");
+    expect(selectOrder.ownerNeedsCheck).toBe(false);
     expect(formatEnteredBy(selectOrder.enteredByName, selectOrder.enteredByEmail)).toBe("M. Gray (m.gray@emit.example)");
 
     const emitView = await getOrderRoute(new Request("http://portal.test/api/orders/" + id, { headers: headers(cookie) }), {
@@ -181,6 +195,8 @@ describe("entered by on a new load", () => {
     const emitOrder = (await emitView.json()).order as CustomerOrder;
     expect(emitOrder.enteredByName).toBe("M. Gray");
     expect(emitOrder.enteredByEmail).toBe("m.gray@emit.example");
+    expect(emitOrder).not.toHaveProperty("owner");
+    expect(emitOrder).not.toHaveProperty("ownerNeedsCheck");
     expect(emitOrder.customerCost).toBeUndefined();
     expect(emitOrder.pendingReviewCount).toBeUndefined();
     expect(JSON.stringify(emitOrder)).not.toMatch(/carrierPay|carrier_pay|8765|pendingReviewCount|samBuild/);
@@ -215,6 +231,8 @@ describe("entered by on a new load", () => {
     const preview = presentCustomerOrder(selectOrder, { role: "admin", viewAs: { access: "regular", permission: "add" } });
     expect(preview.enteredByName).toBe("M. Gray");
     expect(preview.enteredByEmail).toBe("m.gray@emit.example");
+    expect(preview).not.toHaveProperty("owner");
+    expect(preview).not.toHaveProperty("ownerNeedsCheck");
     expect(preview.customerCost).toBeUndefined();
     expect(preview.pendingReviewCount).toBeUndefined();
     expect(JSON.stringify(preview)).not.toMatch(/carrierPay|carrier_pay|8765|pendingReviewCount|samBuild/);
@@ -225,6 +243,7 @@ describe("entered by on a new load", () => {
     );
     const viewAsOrder = (await viewAs.json()).order as CustomerOrder;
     expect(viewAsOrder.enteredByEmail).toBe("m.gray@emit.example");
+    expect(viewAsOrder).not.toHaveProperty("owner");
     expect(viewAsOrder.customerCost).toBeUndefined();
     expect(viewAsOrder.pendingReviewCount).toBeUndefined();
     expect(JSON.stringify(viewAsOrder)).not.toMatch(/carrierPay|carrier_pay|samBuild/);
@@ -233,7 +252,7 @@ describe("entered by on a new load", () => {
       ...selectOrder,
       carrierPay: 8765.43,
     } as CustomerOrder);
-    expect(JSON.stringify(payload)).not.toMatch(/enteredBy|m\.gray@emit\.example|carrierPay|8765/);
+    expect(JSON.stringify(payload)).not.toMatch(/enteredBy|m\.gray@emit\.example|carrierPay|8765|owner/);
     expect(payload.createdBy).toBe("M. Gray");
 
     const older = await ctx.db.prepare(`SELECT id FROM loads WHERE entered_by_email IS NULL LIMIT 1`).get();
@@ -245,6 +264,82 @@ describe("entered by on a new load", () => {
     expect(oldOrder.enteredByName).toBeNull();
     expect(oldOrder.enteredByEmail).toBeNull();
     expect(formatEnteredBy(oldOrder.enteredByName, oldOrder.enteredByEmail)).toBe("Unknown");
+  });
+
+  it("stores Ainsley when the equipment is missing, mentions her, and does not ping again on reassignment", async () => {
+    process.env.SLACK_NEW_LOADS_WEBHOOK_URL = "https://hooks.slack.test/new-loads";
+    process.env.SLACK_USER_ID_AINSLEY = "UAINSLEY1";
+    const posts: string[] = [];
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      posts.push(`${url}\n${String(init?.body)}`);
+      return new Response("ok", { status: 200 });
+    });
+    const cookie = await sessionCookie(customerSession());
+    const admin = await sessionCookie(adminSession());
+    const created = await createOrderRoute(
+      new Request("http://portal.test/api/orders", {
+        method: "POST",
+        headers: headers(cookie),
+        body: JSON.stringify({
+          salesOrderNumber: "SO-CHECK",
+          origin: emit,
+          destination: destination("TX"),
+          customerCost: 2200,
+        }),
+      }),
+    );
+    expect(created.status).toBe(201);
+    const emitOrder = (await created.json()).order as CustomerOrder;
+    expect(emitOrder).not.toHaveProperty("owner");
+    expect(JSON.stringify(emitOrder)).not.toMatch(/"owner"|Ainsley|2200/);
+    const id = emitOrder.id;
+    const row = (await ctx.db.prepare(`SELECT owner, owner_needs_check FROM loads WHERE id = ?`).get(id)) as {
+      owner: string;
+      owner_needs_check: number;
+    };
+    expect(row).toEqual({ owner: "Ainsley", owner_needs_check: 1 });
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toContain("Owner: <@UAINSLEY1>");
+    expect(posts[0]).toContain("Needs a human check. Equipment or destination was missing.");
+    expect(posts[0]).not.toMatch(/2200|carrier|8765/);
+
+    const listed = await listOrdersRoute(new Request("http://portal.test/api/orders?q=SO-CHECK", { headers: headers(cookie) }));
+    expect(JSON.stringify(await listed.json())).not.toMatch(/"owner"|ownerNeedsCheck|Ainsley/);
+    const selectList = await listOrdersRoute(new Request("http://portal.test/api/orders?q=SO-CHECK", { headers: headers(admin) }));
+    const selectRow = (await selectList.json()).orders.find((order: CustomerOrder) => order.id === id);
+    expect(selectRow.owner).toBe("Ainsley");
+    expect(selectRow.ownerNeedsCheck).toBe(true);
+
+    const moved = await setOwnerRoute(
+      new Request(`http://portal.test/api/admin/orders/${id}/owner`, {
+        method: "PATCH",
+        headers: headers(admin),
+        body: JSON.stringify({ owner: "Drew" }),
+      }),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(moved.status).toBe(200);
+    expect((await moved.json()).order).toMatchObject({ owner: "Drew", ownerNeedsCheck: false });
+    expect(posts).toHaveLength(1);
+
+    const denied = await setOwnerRoute(
+      new Request(`http://portal.test/api/admin/orders/${id}/owner`, {
+        method: "PATCH",
+        headers: headers(cookie),
+        body: JSON.stringify({ owner: "Ainsley" }),
+      }),
+      { params: Promise.resolve({ id }) },
+    );
+    expect(denied.status).toBe(403);
+    const after = (await ctx.db.prepare(`SELECT owner FROM loads WHERE id = ?`).get(id)) as { owner: string };
+    expect(after.owner).toBe("Drew");
+    expect(posts).toHaveLength(1);
+
+    const preview = await getOrderRoute(
+      new Request("http://portal.test/api/orders/" + id, { headers: headers(`${admin}; portal_view_as=regular:add`) }),
+      { params: Promise.resolve({ id }) },
+    );
+    expect((await preview.json()).order).not.toHaveProperty("owner");
   });
 
   it("still saves the load when Slack does not answer", async () => {

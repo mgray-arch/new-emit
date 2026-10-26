@@ -52,5 +52,10 @@ describe("boundaries", () => {
     expect(isPublicPath("/api/documents/abc")).toBe(false);
     expect(isPublicPath("/api/carrier-photos/abc")).toBe(false);
     expect(isPublicPath("/api/orders/abc/photos")).toBe(false);
+    expect(isPublicPath("/messages")).toBe(false);
+    expect(isPublicPath("/api/messages")).toBe(false);
+    expect(isPublicPath("/api/messages/unread")).toBe(false);
+    expect(isPublicPath("/api/messages/read")).toBe(false);
+    expect(isPublicPath("/api/messages/loads")).toBe(false);
   });
 });

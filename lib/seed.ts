@@ -8,6 +8,7 @@ import { withTransaction } from "@/lib/db";
 import { ingestDocument } from "@/lib/documents";
 import { ingestCarrierPhoto, solidPng } from "@/lib/photos";
 import { backfillDropLocations } from "@/lib/locations";
+import { assignLoadOwner } from "@/lib/load-owner";
 import { demoTrackingToken, timelineThrough } from "@/lib/orders";
 import type { Place, PortalStatus, RateReason, TrackingStage, TransitOption, TruckType } from "@/lib/types";
 
@@ -887,8 +888,8 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
          id, sales_order_number, load_number, portal_status, tracking_stage, timeline_json,
          origin_json, destination_json, stops_json, truck_type, transit, ship_date, ship_time,
          must_deliver_date, truck_eta, latest_eta, tracking_token, customer_cost_cents,
-         rate_reason, comments, created_by, created_at, updated_at, pending_review_count
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+         rate_reason, comments, created_by, owner, owner_needs_check, created_at, updated_at, pending_review_count
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
     );
 
     for (const load of LOADS) {
@@ -897,6 +898,7 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
       const latestEta =
         load.etaOffset == null ? null : denverLocalToISO(addDaysISO(today, load.etaOffset), "15:00");
       const anchor = latestEta ?? denverLocalToISO(shipDate, load.shipTime);
+      const assignment = assignLoadOwner({ destinationState: load.destination.state, equipment: load.truckType });
       await insertLoad.run(
         randomUUID(),
         load.salesOrderNumber,
@@ -919,6 +921,8 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
         load.rateReason,
         load.comments,
         load.createdBy,
+        assignment.owner,
+        assignment.needsCheck ? 1 : 0,
         createdAt,
         createdAt,
       );
