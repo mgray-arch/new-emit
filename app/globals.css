@@ -578,11 +578,28 @@ td select {
 }
 .sidenav-links { display: grid; gap: 4px; align-content: start; }
 .sidenav-links a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   text-decoration: none;
   color: var(--muted);
   padding: 8px 10px;
   border-radius: 8px;
   font-weight: 650;
+}
+.nav-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--orange);
+  color: #1a1208;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1;
 }
 .sidenav-links a.active, .sidenav-links a:hover { background: var(--bg-2); color: var(--text); }
 .sidenav-foot { margin-top: auto; display: grid; gap: 8px; }
@@ -862,7 +879,189 @@ html[data-theme="light"] .pill.status-cancelled { background: #efe8dc; color: #3
   .sam-build { display: flex; width: 100%; }
   .sam-build .btn, .sam-build a.btn { flex: 1 1 auto; text-align: center; }
 }
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: min(62vh, 680px);
+  overflow-y: auto;
+  padding: 4px 2px 8px;
+  margin-bottom: 8px;
+}
+.msg {
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  border-radius: 12px;
+  padding: 10px 12px;
+  max-width: min(680px, 100%);
+}
+.msg.mine { margin-left: auto; background: var(--tab-on); }
+.msg-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.msg-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 0; }
+.msg-body .text-link { padding: 0; display: inline; min-height: 0; }
+.msg-load { margin-top: 8px; font-size: 13px; overflow-wrap: anywhere; max-width: 100%; }
+.msg-load .text-link { overflow-wrap: anywhere; max-width: 100%; }
+.composer { display: grid; gap: 8px; margin-top: 8px; min-width: 0; }
+.composer textarea,
+.composer input,
+.composer select { width: 100%; max-width: 100%; }
+.composer textarea { min-height: 96px; resize: vertical; }
+.composer-actions { display: flex; justify-content: flex-end; }
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 8px 0;
+  font-weight: 650;
+  cursor: pointer;
+}
+.check-row input { width: 22px; height: 22px; margin: 0; accent-color: var(--orange); flex: 0 0 auto; }
+.load-picker { display: grid; gap: 6px; min-width: 0; }
+.load-picker-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  text-align: left;
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font: inherit;
+}
+.load-picker-toggle > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.load-picker-action { flex: 0 0 auto; color: var(--muted); font-size: 13px; font-weight: 700; }
+.load-picker-panel {
+  display: grid;
+  gap: 4px;
+  max-height: min(40vh, 280px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 8px;
+}
+.load-picker-panel input {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.load-picker-option {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  text-align: left;
+  background: transparent;
+  color: var(--text);
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  overflow-wrap: anywhere;
+}
+.load-picker-option.on { background: var(--tab-on); }
+html[data-theme="light"] .msg.mine { background: #f8efe4; }
+html[data-theme="light"] .load-picker-option.on { background: #f8efe4; }
+
 @media (max-width: 520px) {
   .tabs { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
   .tab { justify-content: center; }
+}
+
+@media (max-width: 860px) {
+  .mobile-bar {
+    padding-top: max(8px, env(safe-area-inset-top));
+    padding-right: max(14px, env(safe-area-inset-right));
+    padding-bottom: 8px;
+    padding-left: max(14px, env(safe-area-inset-left));
+  }
+  .mobile-bar .brand { min-width: 0; }
+  .mobile-messages {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 8px 2px;
+    flex: 0 0 auto;
+    text-decoration: none;
+    color: var(--text);
+    font-weight: 700;
+  }
+  .sidenav-links { min-height: 0; overflow-y: auto; }
+  .sidenav.open {
+    height: 100dvh;
+    padding-top: max(16px, env(safe-area-inset-top));
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+  body:has(.messages-page) { overflow: hidden; }
+  .app-shell:has(.messages-page) {
+    height: var(--vv-height, 100dvh);
+    min-height: 0;
+    overflow: hidden;
+    transform: translateY(var(--vv-offset, 0px));
+  }
+  .app-main:has(.messages-page) {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
+  }
+  .page.messages-page {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    max-width: none;
+    padding: 12px 14px calc(8px + max(env(safe-area-inset-bottom) - var(--keyboard-inset, 0px), 0px));
+    padding-left: max(14px, env(safe-area-inset-left));
+    padding-right: max(14px, env(safe-area-inset-right));
+  }
+  .messages-page h1 { font-size: 22px; }
+  .messages-page .lede { margin: 4px 0 8px; }
+  .messages-page .thread {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    overflow-x: hidden;
+    overflow-y: auto;
+    margin-bottom: 0;
+  }
+  .messages-page .msg { max-width: 92%; }
+  .messages-page .msg-body { font-size: 16px; }
+  .messages-page .composer {
+    flex: 0 0 auto;
+    position: sticky;
+    bottom: 0;
+    margin-top: 0;
+    padding-top: 8px;
+    background: var(--bg);
+    border-top: 1px solid var(--line);
+  }
+  .messages-page .composer textarea {
+    min-height: 72px;
+    max-height: 120px;
+    font-size: 16px;
+  }
+  .messages-page .composer-actions .btn { width: 100%; min-height: 44px; }
+  .messages-page .load-picker-panel { max-height: min(40vh, 240px); }
 }

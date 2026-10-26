@@ -124,6 +124,10 @@ export interface CustomerOrder {
   enteredByName?: string | null;
   /** Who submitted the load. Null on older loads. Name and email only. */
   enteredByEmail?: string | null;
+  /** Select only. Drew or Ainsley. Omitted for every EMIT user and for view-as. Null on older loads. */
+  owner?: "Drew" | "Ainsley" | null;
+  /** Select only. True when the auto-assign had no equipment or destination. */
+  ownerNeedsCheck?: boolean;
   createdAt: string;
   updatedAt: string;
   attachmentCount: number;
@@ -224,10 +228,16 @@ export function resolveAccess(viewer: Viewer): ResolvedAccess {
   return { role, permission, select: false, viewAs: null };
 }
 
-/** Customer price only: what EMIT pays Select. Carrier pay is never included by this check. */
+/**
+ * Customer price only: what EMIT pays Select. Carrier pay is never included.
+ * A regular EMIT user never sees it, including see pricing, full access, and
+ * the Select "view as regular user" preview. An EMIT admin sees it with see
+ * pricing or full access. Select staff always see it.
+ */
 export function canSeePricing(viewer: Viewer): boolean {
   const access = resolveAccess(viewer);
   if (access.select) return true;
+  if (access.role !== "emit_admin") return false;
   return access.permission === "pricing" || access.permission === "full";
 }
 

@@ -34,11 +34,13 @@ import {
   type CustomerDocument,
   type CustomerOrder,
   type PortalRole,
+  type ViewAsPreview,
 } from "@/lib/types";
 
 interface Me {
   role: PortalRole;
   permission?: "view" | "add" | "pricing" | "full" | null;
+  viewAs?: ViewAsPreview | null;
   readOnly?: boolean;
 }
 
@@ -507,6 +509,12 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                     {order.stops.length > 2 ? ` · ${order.stops.length} stops` : ""} · {fileSummary({ ...order, pendingReviewCount: 0 })}
                   </div>
                   <div className="load-meta">Entered by: {formatEnteredBy(order.enteredByName, order.enteredByEmail)}</div>
+                  {selectView ? (
+                    <div className="load-meta">
+                      Owner: {order.owner ?? "Not set"}
+                      {order.ownerNeedsCheck ? " · Needs a check" : ""}
+                    </div>
+                  ) : null}
                   {reasons.length > 0 && <div className="hold">{reasons.join(" · ")}</div>}
                   {selectView && (order.pendingReviewCount ?? 0) > 0 ? (
                     <div className="hold">{order.pendingReviewCount} in review</div>

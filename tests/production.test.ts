@@ -559,10 +559,20 @@ describe("Select load numbers", () => {
     const pending = await upgraded.prepare(`SELECT load_number FROM loads WHERE id = ?`).get("old-2");
     expect(pending?.load_number).toBeNull();
     const columns = (await upgraded.prepare(`PRAGMA table_info(users)`).all()) as Array<{ name: string }>;
-    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining(["active", "password_epoch"]));
+    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining(["active", "password_epoch", "chat_enabled"]));
+    const fresh = await upgraded.prepare(`SELECT chat_enabled FROM users WHERE email = ?`).get("lead@emit.example");
+    if (!fresh) {
+      await upgraded
+        .prepare(`INSERT INTO users (id, email, name, role, created_at) VALUES ('u-chat', 'chat.off@emit.example', 'Off', 'customer', '2026-10-02T00:00:00.000Z')`)
+        .run();
+    }
+    const chatFlag = await upgraded
+      .prepare(`SELECT chat_enabled FROM users WHERE email IN ('lead@emit.example', 'chat.off@emit.example')`)
+      .get();
+    expect(Number(chatFlag?.chat_enabled ?? 0)).toBe(0);
     const loadColumns = (await upgraded.prepare(`PRAGMA table_info(loads)`).all()) as Array<{ name: string }>;
     expect(loadColumns.map((column) => column.name)).toEqual(
-      expect.arrayContaining(["tracking_link", "tracking_link_source", "sam_build_status", "sam_build_error", "sam_build_at"]),
+      expect.arrayContaining(["tracking_link", "tracking_link_source", "sam_build_status", "sam_build_error", "sam_build_at", "owner", "owner_needs_check"]),
     );
     const customerDocs = (await upgraded.prepare(`PRAGMA table_info(customer_documents)`).all()) as Array<{ name: string }>;
     const internalDocs = (await upgraded.prepare(`PRAGMA table_info(internal_documents)`).all()) as Array<{ name: string }>;

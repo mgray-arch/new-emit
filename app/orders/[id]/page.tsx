@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import DocumentLinks from "@/components/document-links";
+import LoadOwnerField from "@/components/load-owner-field";
 import PhotoGallery from "@/components/photo-gallery";
 import SamBuildButton from "@/components/sam-build-button";
 import SelectLoadField from "@/components/select-load-field";
@@ -16,12 +17,14 @@ import { denverDate, formatDay, formatWhen } from "@/lib/dates";
 import { formatEnteredBy } from "@/lib/entered-by";
 import { displayStatus, fileSummary } from "@/lib/load-list";
 import { toast } from "@/lib/toast";
-import { canAddLoads, canSeePricing, formatLoadNumber, formatPlace, type CustomerOrder, type PortalRole } from "@/lib/types";
+import { canAddLoads, canSeePricing, formatLoadNumber, formatPlace, type CustomerOrder, type PortalRole, type ViewAsPreview } from "@/lib/types";
 
 interface Me {
   role: PortalRole;
   permission?: "view" | "add" | "pricing" | "full" | null;
+  viewAs?: ViewAsPreview | null;
   readOnly?: boolean;
+  chatEnabled?: boolean;
 }
 
 export default function OrderPage() {
@@ -89,6 +92,13 @@ export default function OrderPage() {
             <p className="lede">
               {order.salesOrderNumber} · Select load {formatLoadNumber(order.loadNumber)}
             </p>
+            {me?.chatEnabled ? (
+              <p>
+                <Link href={`/messages?load=${order.id}`} className="text-link">
+                  Message about this load
+                </Link>
+              </p>
+            ) : null}
             <div className="date-grid">
               <div className="date-pair">
                 <span className="k">Pickup</span>
@@ -206,6 +216,17 @@ export default function OrderPage() {
                 {order.truckType || "Truck type not set"} · {order.transit || "Transit not set"} · Created by {order.createdBy}
               </p>
               <p className="mini">Entered by: {formatEnteredBy(order.enteredByName, order.enteredByEmail)}</p>
+              {selectView ? (
+                <LoadOwnerField
+                  orderId={order.id}
+                  owner={order.owner ?? null}
+                  needsCheck={order.ownerNeedsCheck === true}
+                  onUpdated={(next) => {
+                    setOrder(next);
+                    toast("Owner saved.");
+                  }}
+                />
+              ) : null}
             </section>
 
             <section className="detail-section">
