@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 import { PDFDocument } from "pdf-lib";
 import type { PortalContext, SqlDatabase } from "@/lib/db";
 import { withTransaction } from "@/lib/db";
+import { readImageText, readPdfPageText } from "@/lib/ocr";
 import { sensitiveReason } from "@/lib/sensitive";
-import { readStoredBytes, writeStoredBytes } from "@/lib/storage";
+import { deleteStoredBytes, readStoredBytes, writeStoredBytes } from "@/lib/storage";
 import type { CustomerDocument, ReviewItem } from "@/lib/types";
 import { PortalError } from "@/lib/http";
 import { safeFilename } from "@/lib/document-view";
@@ -23,6 +24,50 @@ export function screenPageText(text: string | null | undefined): { decision: Scr
   const reason = sensitiveReason(trimmed);
   if (reason) return { decision: "block", reason };
   return { decision: "pass", reason: "No rate-confirmation signals found." };
+}
+
+const UNCLEAR_REASON = "OCR was not confident enough to show this file to EMIT.";
+
+/** Screen extracted text together with OCR of the pixels. A failed or unclear read stays with Select. */
+export async function screenPageBytes(page: {
+  bytes: Uint8Array;
+  text: string | null;
+  mediaType: string;
+}): Promise<{ decision: ScreenDecision; reason: string; text: string | null }> {
+  if (page.mediaType === "text/plain") {
+    const screened = screenPageText(page.text);
+    return { ...screened, text: page.text };
+  }
+  const visual =
+    page.mediaType === "application/pdf"
+      ? await readPdfPageText(page.bytes)
+      : page.mediaType === "image/png" || page.mediaType === "image/jpeg"
+        ? await readImageText(page.bytes)
+        : { ok: false, text: "", confidence: 0, reason: "OCR could not read this file. It stays with Select until someone reviews it." };
+  if (!visual.ok) {
+    return {
+      decision: "uncertain",
+      reason: visual.reason ?? "OCR could not read this file. It stays with Select until someone reviews it.",
+      text: page.text,
+    };
+  }
+  const layer = page.text?.trim() ?? "";
+  const seen = visual.text.trim();
+  const combined = [layer, seen].filter(Boolean).join("\n");
+  const signal = sensitiveReason(combined);
+  if (signal) return { decision: "block", reason: signal, text: combined || null };
+  if (seen && visual.confidence < 40) {
+    return { decision: "uncertain", reason: UNCLEAR_REASON, text: combined || null };
+  }
+  if (!seen && layer.length >= 20) {
+    return {
+      decision: "uncertain",
+      reason: "OCR did not read this page, so it stays with Select until someone reviews it.",
+      text: page.text,
+    };
+  }
+  const screened = screenPageText(combined || null);
+  return { ...screened, text: combined || page.text };
 }
 
 export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
@@ -106,11 +151,14 @@ function mediaTypeFor(kind: "pdf" | "png" | "jpeg" | "text" | "other"): string {
   }
 }
 
-async function refreshPending(db: SqlDatabase, loadId: string): Promise<void> {
-  const row = await db
+export async function refreshLoadReviewCount(db: SqlDatabase, loadId: string): Promise<void> {
+  const docs = await db
     .prepare(`SELECT COUNT(*) AS n FROM internal_documents WHERE load_id = ? AND review_status = 'pending'`)
     .get(loadId);
-  await db.prepare(`UPDATE loads SET pending_review_count = ? WHERE id = ?`).run(Number(row?.n ?? 0), loadId);
+  const photos = await db.prepare(`SELECT COUNT(*) AS n FROM carrier_photos WHERE load_id = ? AND held = 1`).get(loadId);
+  await db
+    .prepare(`UPDATE loads SET pending_review_count = ? WHERE id = ?`)
+    .run(Number(docs?.n ?? 0) + Number(photos?.n ?? 0), loadId);
 }
 
 export interface IngestResult {
@@ -164,7 +212,8 @@ export async function ingestDocument(
     storageKey: string;
   }> = [];
   for (const [index, page] of pages.entries()) {
-    const screened = screenPageText(page.text);
+    const screened = await screenPageBytes(page);
+    page.text = screened.text;
     const id = randomUUID();
     const prefix = screened.decision === "pass" ? "customer-documents" : "internal-documents";
     const storageKey = await writeStoredBytes(`${prefix}/${id}`, page.bytes, page.mediaType);
@@ -207,7 +256,7 @@ export async function ingestDocument(
         );
       heldIds.push(item.id);
     }
-    await refreshPending(ctx.db, input.loadId);
+    await refreshLoadReviewCount(ctx.db, input.loadId);
   });
   return { releasedIds, heldIds };
 }
@@ -256,8 +305,13 @@ function allowedMedia(value: string): string {
   return "application/octet-stream";
 }
 
+function photoScreen(reason: string | null): "block" | "uncertain" {
+  if (!reason || reason.startsWith("OCR ")) return "uncertain";
+  return sensitiveReason(reason) ? "block" : "uncertain";
+}
+
 export async function listReviewQueue(ctx: PortalContext): Promise<ReviewItem[]> {
-  const rows = await ctx.db
+  const docs = await ctx.db
     .prepare(
       `SELECT d.id, d.load_id, d.kind, d.screen_result, d.screen_reason, d.review_status, d.filename,
               d.media_type, d.page_index, d.page_count, d.text_excerpt, d.created_at,
@@ -268,56 +322,90 @@ export async function listReviewQueue(ctx: PortalContext): Promise<ReviewItem[]>
        ORDER BY d.created_at DESC`,
     )
     .all();
-  return rows.map((row) => ({
-    id: String(row.id),
-    loadId: String(row.load_id),
-    salesOrderNumber: String(row.sales_order_number ?? ""),
-    loadNumber: row.load_number == null || row.load_number === "" ? null : String(row.load_number),
-    kind: String(row.kind),
-    screenResult: row.screen_result === "block" ? "block" : "uncertain",
-    screenReason: String(row.screen_reason ?? ""),
-    reviewStatus: "pending",
-    filename: String(row.filename),
-    mediaType: String(row.media_type),
-    pageIndex: Number(row.page_index),
-    pageCount: Number(row.page_count),
-    textExcerpt: row.text_excerpt == null ? null : String(row.text_excerpt),
-    createdAt: String(row.created_at),
-  }));
+  const photos = await ctx.db
+    .prepare(
+      `SELECT p.id, p.load_id, p.filename, p.media_type, p.hold_reason, p.created_at,
+              l.sales_order_number, l.load_number
+       FROM carrier_photos p
+       LEFT JOIN loads l ON l.id = p.load_id
+       WHERE p.held = 1
+       ORDER BY p.created_at DESC`,
+    )
+    .all();
+  const items: ReviewItem[] = [
+    ...docs.map((row) => ({
+      id: String(row.id),
+      loadId: String(row.load_id),
+      salesOrderNumber: String(row.sales_order_number ?? ""),
+      loadNumber: row.load_number == null || row.load_number === "" ? null : String(row.load_number),
+      source: "document" as const,
+      kind: String(row.kind),
+      screenResult: row.screen_result === "block" ? ("block" as const) : ("uncertain" as const),
+      screenReason: String(row.screen_reason ?? ""),
+      reviewStatus: "pending" as const,
+      filename: String(row.filename),
+      mediaType: String(row.media_type),
+      pageIndex: Number(row.page_index),
+      pageCount: Number(row.page_count),
+      textExcerpt: row.text_excerpt == null ? null : String(row.text_excerpt),
+      createdAt: String(row.created_at),
+    })),
+    ...photos.map((row) => {
+      const reason = row.hold_reason == null ? "" : String(row.hold_reason);
+      return {
+        id: String(row.id),
+        loadId: String(row.load_id),
+        salesOrderNumber: String(row.sales_order_number ?? ""),
+        loadNumber: row.load_number == null || row.load_number === "" ? null : String(row.load_number),
+        source: "photo" as const,
+        kind: "photo",
+        screenResult: photoScreen(reason),
+        screenReason: reason,
+        reviewStatus: "pending" as const,
+        filename: String(row.filename),
+        mediaType: String(row.media_type),
+        pageIndex: 1,
+        pageCount: 1,
+        textExcerpt: reason || null,
+        createdAt: String(row.created_at),
+      };
+    }),
+  ];
+  return items.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
 }
 
 export async function reviewDocument(
   ctx: PortalContext,
   id: string,
-  action: "approve" | "reject",
+  action: "approve" | "delete",
   reviewer: string,
-  options?: { confirm?: boolean },
-): Promise<{ reviewedBy: string; reviewedAt: string; reviewStatus: "approved" | "rejected" }> {
+): Promise<{ reviewedBy: string; reviewedAt: string; reviewStatus: "approved" | "deleted" }> {
   const row = await ctx.db
     .prepare(
       `SELECT id, load_id, review_status, filename, media_type, storage_key, kind, screen_result, uploaded_by
        FROM internal_documents WHERE id = ?`,
     )
     .get(id);
-  if (!row || row.review_status !== "pending") throw new PortalError("That page is not waiting for review", 404);
-  if (action === "approve" && row.screen_result === "block" && !options?.confirm) {
-    throw new PortalError(
-      "Releasing a page flagged as a rate confirmation requires an explicit confirmation.",
-      409,
+  if (row && row.review_status === "pending") {
+    if (action === "approve" && row.screen_result === "block") {
+      throw new PortalError("A rate confirmation cannot be released to EMIT.", 409);
+    }
+    const now = ctx.now().toISOString();
+    if (action === "delete") {
+      await deleteStoredBytes(String(row.storage_key));
+      await withTransaction(ctx.db, async () => {
+        await ctx.db.prepare(`DELETE FROM internal_documents WHERE id = ?`).run(id);
+        await refreshLoadReviewCount(ctx.db, String(row.load_id));
+      });
+      return { reviewedBy: reviewer, reviewedAt: now, reviewStatus: "deleted" };
+    }
+    const customerId = randomUUID();
+    const customerKey = await writeStoredBytes(
+      `customer-documents/${customerId}`,
+      await readStoredBytes(String(row.storage_key)),
+      String(row.media_type),
     );
-  }
-  const now = ctx.now().toISOString();
-  const customerId = randomUUID();
-  const customerKey =
-    action === "approve"
-      ? await writeStoredBytes(
-          `customer-documents/${customerId}`,
-          await readStoredBytes(String(row.storage_key)),
-          String(row.media_type),
-        )
-      : null;
-  await withTransaction(ctx.db, async () => {
-    if (action === "approve" && customerKey) {
+    await withTransaction(ctx.db, async () => {
       const customerKind = row.kind === "bol" ? "bol" : "attachment";
       await ctx.db
         .prepare(
@@ -334,21 +422,42 @@ export async function reviewDocument(
           now,
           row.uploaded_by == null ? null : String(row.uploaded_by),
         );
-    }
-    await ctx.db
-      .prepare(
-        `UPDATE internal_documents
-         SET review_status = ?, reviewed_at = ?, reviewed_by = ?
-         WHERE id = ?`,
-      )
-      .run(action === "approve" ? "approved" : "rejected", now, reviewer, id);
-    await refreshPending(ctx.db, String(row.load_id));
+      await ctx.db
+        .prepare(
+          `UPDATE internal_documents
+           SET review_status = 'approved', reviewed_at = ?, reviewed_by = ?
+           WHERE id = ?`,
+        )
+        .run(now, reviewer, id);
+      await refreshLoadReviewCount(ctx.db, String(row.load_id));
+    });
+    return { reviewedBy: reviewer, reviewedAt: now, reviewStatus: "approved" };
+  }
+
+  const photo = await ctx.db
+    .prepare(
+      `SELECT id, load_id, held, hold_reason, filename, media_type, storage_key
+       FROM carrier_photos WHERE id = ?`,
+    )
+    .get(id);
+  if (!photo || photo.held !== 1) throw new PortalError("That page is not waiting for review", 404);
+  if (action === "approve" && photoScreen(photo.hold_reason == null ? null : String(photo.hold_reason)) === "block") {
+    throw new PortalError("A rate confirmation cannot be released to EMIT.", 409);
+  }
+  const now = ctx.now().toISOString();
+  if (action === "delete") {
+    await deleteStoredBytes(String(photo.storage_key));
+    await withTransaction(ctx.db, async () => {
+      await ctx.db.prepare(`DELETE FROM carrier_photos WHERE id = ?`).run(id);
+      await refreshLoadReviewCount(ctx.db, String(photo.load_id));
+    });
+    return { reviewedBy: reviewer, reviewedAt: now, reviewStatus: "deleted" };
+  }
+  await withTransaction(ctx.db, async () => {
+    await ctx.db.prepare(`UPDATE carrier_photos SET held = 0, hold_reason = NULL WHERE id = ?`).run(id);
+    await refreshLoadReviewCount(ctx.db, String(photo.load_id));
   });
-  return {
-    reviewedBy: reviewer,
-    reviewedAt: now,
-    reviewStatus: action === "approve" ? "approved" : "rejected",
-  };
+  return { reviewedBy: reviewer, reviewedAt: now, reviewStatus: "approved" };
 }
 
 export async function readInternalDocumentFile(
@@ -358,10 +467,20 @@ export async function readInternalDocumentFile(
   const row = await ctx.db
     .prepare(`SELECT filename, media_type, storage_key FROM internal_documents WHERE id = ?`)
     .get(id);
-  if (!row) return null;
+  if (row) {
+    return {
+      filename: String(row.filename),
+      mediaType: allowedMedia(String(row.media_type)),
+      bytes: await readStoredBytes(String(row.storage_key)),
+    };
+  }
+  const photo = await ctx.db
+    .prepare(`SELECT filename, media_type, storage_key FROM carrier_photos WHERE id = ? AND held = 1`)
+    .get(id);
+  if (!photo) return null;
   return {
-    filename: String(row.filename),
-    mediaType: allowedMedia(String(row.media_type)),
-    bytes: await readStoredBytes(String(row.storage_key)),
+    filename: String(photo.filename),
+    mediaType: allowedMedia(String(photo.media_type)),
+    bytes: await readStoredBytes(String(photo.storage_key)),
   };
 }

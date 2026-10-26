@@ -2,7 +2,7 @@
 
 Customer portal for EMIT Technologies, a shipper of Select Transport Partners. It replaces the old Lovable app. Put it on a new domain. Do not reuse the old site's hostname unless that is the name you want.
 
-EMIT admins and regular EMIT users sign in with email and password. Select staff sign in with Google. Select adds each EMIT email on Users, marks them as an EMIT admin or a regular user, and gives them one permission: view only, add loads, see pricing, or full access. See pricing and full access show the price EMIT pays Select. They never show carrier pay. Carrier pay stays hidden from every EMIT user, in every role and permission, including when Select is viewing as that person. The portal is the order confirmation: it does not send email. There is no SAM API. Select can send a load to the Load Builder bot, or type the SAM load number. Until a number is stored, EMIT sees **Pending**. The portal does not invent a load number.
+EMIT admins and regular EMIT users sign in with email and password. Select staff sign in with Google. Select adds each EMIT email on Users, marks them as an EMIT admin or a regular user, and gives them one permission: view only, add loads, see pricing, or full access. A regular EMIT user never sees the price EMIT pays Select. An EMIT admin with see pricing or full access does, and so does Select. They never show carrier pay. Carrier pay stays hidden from every EMIT user, in every role and permission, including when Select is viewing as that person. The portal is the order confirmation: it does not send email. There is no SAM API. Select can send a load to the Load Builder bot, or type the SAM load number. Until a number is stored, EMIT sees **Pending**. The portal does not invent a load number.
 
 The public hostname is not hardcoded. Set `PORTAL_PUBLIC_URL` to the domain this portal should use. `emit-select.com` in this file is only an example of a previous plan. Google's redirect URI has to match whatever domain you attach. `goselect.com` is Select's Google Workspace, not the portal's address.
 
@@ -16,17 +16,17 @@ Orders, users, and the document review queue live in Turso. Document and photo b
 - Open a Track button when a Select admin has pasted the SAM or MacroPoint share link.
 - Status timeline, latest ETA, and the portal's own status page.
 - Carrier photo gallery. Rate-confirmation images stay with Select admins.
-- Ask about an SO. Answers come from the customer-safe shipment view. View only and add loads do not get pricing in that answer. See pricing and full access do. The answer never includes carrier pay.
+- Ask about an SO. Answers come from the customer-safe shipment view. A regular EMIT user does not get pricing in that answer. An EMIT admin with see pricing or full access does. The answer never includes carrier pay.
 
 Select staff also get the document review queue, ship-from sites, receiver companies, the EMIT user list, and **Build load in SAM**. On Users they choose EMIT admin or regular user, plus view only, add loads, see pricing, or full access. EMIT cannot open that page. A **View as** switch lets Select look at the portal as an EMIT admin or a regular EMIT user, at any of those permissions. The preview is read-only.
 
 ## Security boundary
 
-Customer responses are an allowlist. Carrier pay is not stored. The serializer drops a carrier-pay field if one is posted, and the assistant reads that same view. Questions about carrier pay, margins, or rate confirmations are refused before any shipment data is attached. View only and add loads also have `customerCost` and `rateReason` removed from that allowlist, including list, detail, and assistant responses. See pricing and full access receive EMIT's cost, and so does Select. Those responses still have no carrier pay. View only, add loads, and see pricing cannot change a stored cost by saving a load (see pricing cannot save a load at all). A Select view-as preview uses the same allowlist as the permission being previewed, and it cannot write. The SAM build status and SAM link are Select-only and are omitted from every EMIT response and from view-as.
+Customer responses are an allowlist. Carrier pay is not stored. The serializer drops a carrier-pay field if one is posted, and the assistant reads that same view. Questions about carrier pay, margins, or rate confirmations are refused before any shipment data is attached. A regular EMIT user has `customerCost` and `rateReason` removed from that allowlist, including list, detail, export, and assistant responses, whatever their permission is. An EMIT admin with see pricing or full access receives EMIT's cost, and so does Select. Those responses still have no carrier pay. A regular user cannot change a stored cost by saving a load. A Select view-as preview of a regular user uses that same allowlist, and view-as of an EMIT admin follows the admin rule. The preview cannot write. The SAM build status and SAM link are Select-only and are omitted from every EMIT response and from view-as.
 
-Every upload is split into pages and screened. A rate confirmation, or a page the screener cannot read, stays in an internal store. Releasing a flagged rate confirmation requires an explicit confirm and records the admin email and time.
+Every upload is split into pages and screened, including OCR of images and of PDF pages that have no text layer. A rate confirmation stays in a Select-only quarantine and cannot be released to EMIT. A file OCR could not read stays there until a Select admin approves it or deletes it.
 
-Unauthenticated routes are the portal status page (`/track/[token]`) and a receiver's private link (`/r/[token]`). The status page returns cities, status, timeline, and ETA. It does not return cost, comments, documents, street address, or carrier data. Receiver links do not show customer cost or documents. When a tracking link is set, both show a Track button to the public SAM or MacroPoint page.
+Unauthenticated routes are the portal status page (`/track/[token]`) and a receiver's private link (`/r/[token]`). The status page returns cities, status, timeline, and ETA. It does not return cost, comments, documents, street address, or carrier data. A receiver link shows load number, status, lane, dates, and the Track link. It does not show photos, BOLs, PODs, or any other file. When a tracking link is set, both show a Track button to the public SAM or MacroPoint page.
 
 ## Run locally
 
@@ -124,8 +124,10 @@ Leave these blank unless you are turning that feature on:
 | `LOAD_BUILDER_SECRET` | Shared bearer secret, at least 16 characters. Sent to the webhook and required on the callback. |
 | `SAM_LOAD_URL_TEMPLATE` | Link for a stored SAM number. Must contain `{loadNumber}`. Example: `https://sam.example.com/loads/{loadNumber}`. Unset: the number shows and is not a link. |
 | `SAM_API_BASE_URL`, `SAM_API_TOKEN`, `SAM_CUSTOMER_ID` | Leave blank. The portal does not call the SAM API. |
-| `SLACK_NEW_LOADS_WEBHOOK_URL` | Slack incoming webhook for a new-load note. Unset: no Slack message is sent. The note does not include carrier pay. |
-| `SLACK_USER_ID_DREW`, `SLACK_USER_ID_AINSLEY` | Optional Slack member ids so the owner line @mentions that person. Unset: the note uses the names Drew and Ainsley. |
+| `SLACK_NEW_LOADS_WEBHOOK_URL` | Slack incoming webhook for a new-load note. Unset: no Slack message is sent. The note names the owner and who entered the load. It does not include carrier pay. A missing equipment type or destination adds a line that the owner needs a human check. |
+| `SLACK_USER_ID_DREW`, `SLACK_USER_ID_AINSLEY` | Optional Slack member ids (like `U012ABCDEF`) so that note @mentions Drew or Ainsley. Unset: the note uses the plain name. Drew owns flatbed and hot shot loads into Texas. Ainsley owns every other load. |
+| `SLACK_MESSAGES_WEBHOOK_URL` | Slack incoming webhook when an EMIT user posts in Messages. Unset: no Slack message is sent. The note has the load number (when one is attached), a short preview, and a link. It does not include the full message or carrier pay. |
+| `MESSAGE_NOTIFY_EMAILS` | Optional comma-separated addresses for that same note. The portal has no email sender, so setting this does not send mail and does not block the message. |
 
 Do not set `DEMO_USER_PASSWORD` in production. Do not set a Gmail client. Order mail has been removed.
 
@@ -145,9 +147,9 @@ Do not set `DEMO_USER_PASSWORD` in production. Do not set a Gmail client. Order 
    - Put the client id and secret in `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
 7. Attach the new domain (steps below) and redeploy Production. Leave the old Lovable hostname where it is.
 8. Sign in as `mgray@goselect.com` or `dmartin@goselect.com` with Google. That first sign-in creates the admin. There is no password for that account in production.
-9. Open **Users**. Add each EMIT person (name and email). Set a temporary password or generate one, and send it to them yourself. The portal does not email it. Choose **EMIT admin** or **Regular EMIT user**, and one permission: **View only**, **Add loads**, **See pricing**, or **Full access**. See pricing and full access are the only EMIT permissions that see what Select charges EMIT. An email that is not on this list cannot sign in.
+9. Open **Users**. Add each EMIT person (name and email). Set a temporary password or generate one, and send it to them yourself. The portal does not email it. Choose **EMIT admin** or **Regular EMIT user**, and one permission: **View only**, **Add loads**, **See pricing**, or **Full access**. A regular user never sees what Select charges EMIT. An EMIT admin with see pricing or full access does. An email that is not on this list cannot sign in. **Chat enabled** stays off until you check it for that person. Select staff always have Messages.
 10. Ask one EMIT person to sign in and change the password under **Password**.
-11. Submit a test order. Confirm the Select load says Pending. Use **Build load in SAM** once the webhook is set, or enter the real SAM number (for example `458934-1`) and the public tracking link. Confirm EMIT sees that number and a Track button. Sign in as add loads and confirm the cost is gone. Sign in as full access and confirm the cost is there. Use **View as** and confirm the same split without signing out.
+11. Submit a test order. Confirm the Select load says Pending. Use **Build load in SAM** once the webhook is set, or enter the real SAM number (for example `458934-1`) and the public tracking link. Confirm EMIT sees that number and a Track button. Sign in as a regular user and confirm the cost line is gone. Sign in as an EMIT admin with full access and confirm the cost is there. Use **View as** a regular user and confirm the cost line is gone, then **View as** an EMIT admin and confirm it is there, without signing out.
 12. Add receiver companies under Settings only when a receiver should have a private link.
 
 Microsoft sign-in can stay unconfigured. The login page hides that button until the Azure variables are set.
@@ -199,16 +201,16 @@ Select staff (`admin`) sign in with Google and can open Review, Users, and Setti
 | --- | --- | --- |
 | View only | Hidden | No |
 | Add loads | Hidden | Yes |
-| See pricing | EMIT's cost only | No |
-| Full access | EMIT's cost only | Yes |
+| See pricing | EMIT admin only | No |
+| Full access | EMIT admin only | Yes |
 
 See pricing means the customer price EMIT pays. It is not carrier pay. Carrier pay is hidden from every access and every permission, including full access and including Select while viewing as EMIT. An email that is not on the list cannot sign in, including through Microsoft.
 
-EMIT's cost and the rate reason are included only for Select, see pricing, and full access. The other permissions do not receive those fields from the list, the load detail, a document upload, or the assistant, and a save from those users leaves the stored cost alone.
+EMIT's cost and the rate reason are included only for Select, and for an EMIT admin with see pricing or full access. A regular EMIT user does not receive those fields from the list, the load detail, a document upload, the CSV export, or the assistant, including when the permission is see pricing or full access. A save from a regular user leaves the stored cost alone.
 
 Pages held for Select review are hidden from every EMIT user, including full access, and from Select while **View as** is on. The list and the load page do not include the review count, and an upload just says it was uploaded.
 
-**View as** is a cookie on top of a Select session. It does not change the Select account. Select picks EMIT admin or regular user, and a permission. The server applies that combination, so a see-pricing preview receives EMIT's cost and a view-only preview does not. The preview is read-only: creating a load, editing, uploading, changing a password, and editing locations are rejected. EMIT cannot set that cookie. Leaving the preview, or signing out, clears it. Admin pages are closed during the preview. The switch is not rendered for an EMIT session.
+**View as** is a cookie on top of a Select session. It does not change the Select account. Select picks EMIT admin or regular user, and a permission. The server applies that combination. A regular-user preview never receives EMIT's cost. An EMIT-admin preview receives it only for see pricing or full access. The preview is read-only: creating a load, editing, uploading, changing a password, and editing locations are rejected. EMIT cannot set that cookie. Leaving the preview, or signing out, clears it. Admin pages are closed during the preview. The switch is not rendered for an EMIT session.
 
 ## Locations
 
@@ -228,7 +230,7 @@ Each load is a card: the lane in bold, pickup and delivery dates, a colored stat
 
 One search box looks through every list for a Select load number, an EMIT order number, a city, or a receiver. Date range, pickup site, receiver, and status narrow whichever list you are in. Loads are grouped by pickup date. The page loads 25 at a time.
 
-History can be exported as CSV. The file never includes carrier pay. View only and add loads do not get EMIT's cost or the rate reason in that file. Select, see pricing, and full access do. A Select preview uses the same rule.
+History can be exported as CSV. The file never includes carrier pay. A regular EMIT user does not get EMIT's cost or the rate reason in that file. Select, and an EMIT admin with see pricing or full access, do. A Select preview uses the same rule.
 
 ## Tracking links
 

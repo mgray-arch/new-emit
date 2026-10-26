@@ -22,6 +22,8 @@ export interface EmitUser {
   permission: EmitPermission;
   /** True when access is admin. Kept so older clients still read the flag. */
   emitAdmin: boolean;
+  /** Messages. Off until Select checks it. Select staff are not on this list. */
+  chatEnabled: boolean;
   hasPassword: boolean;
   createdAt: string;
 }
@@ -41,9 +43,18 @@ function toEmitUser(row: UserRow & { created_at?: string }, createdAt: string): 
     access,
     permission,
     emitAdmin: access === "admin",
+    chatEnabled: Number(row.chat_enabled) === 1,
     hasPassword: Boolean(row.password_hash),
     createdAt,
   };
+}
+
+/** Select staff always have Messages. An EMIT user needs the checkbox on their row. */
+export async function chatEnabledFor(ctx: PortalContext, session: { userId: string; role: string; actorRole?: string | null }): Promise<boolean> {
+  if ((session.actorRole ?? session.role) === "admin" || session.role === "admin") return true;
+  const user = await findUserById(ctx, session.userId);
+  if (!user || user.role === "admin") return user?.role === "admin";
+  return Number(user.chat_enabled) === 1;
 }
 
 function roleForAccess(access: EmitAccess): PortalRole {
@@ -53,7 +64,7 @@ function roleForAccess(access: EmitAccess): PortalRole {
 export async function listEmitUsers(ctx: PortalContext): Promise<EmitUser[]> {
   const rows = (await ctx.db
     .prepare(
-      `SELECT id, email, name, role, permission, password_hash, active, password_changed_at, password_epoch, created_at
+      `SELECT id, email, name, role, permission, password_hash, active, password_changed_at, password_epoch, chat_enabled, created_at
        FROM users WHERE role IN ('customer', 'emit_viewer', 'emit_admin') ORDER BY name COLLATE NOCASE, email`,
     )
     .all()) as unknown as Array<UserRow & { created_at: string }>;
@@ -63,7 +74,7 @@ export async function listEmitUsers(ctx: PortalContext): Promise<EmitUser[]> {
 async function requireEmitUser(ctx: PortalContext, id: string): Promise<UserRow & { created_at: string }> {
   const row = (await ctx.db
     .prepare(
-      `SELECT id, email, name, role, permission, password_hash, active, password_changed_at, password_epoch, created_at FROM users WHERE id = ?`,
+      `SELECT id, email, name, role, permission, password_hash, active, password_changed_at, password_epoch, chat_enabled, created_at FROM users WHERE id = ?`,
     )
     .get(id)) as (UserRow & { created_at: string }) | undefined;
   if (!row || !isEmitRole(row.role)) throw new PortalError("EMIT user not found", 404);
@@ -79,6 +90,7 @@ export async function createEmitUser(
     generatePassword?: boolean;
     access?: EmitAccess;
     permission?: EmitPermission;
+    chatEnabled?: boolean;
   },
 ): Promise<{ user: EmitUser; temporaryPassword?: string }> {
   const decision = canProvisionEmitUser(input.email);
@@ -99,12 +111,13 @@ export async function createEmitUser(
   const access = input.access ?? (permission === "full" ? "admin" : "regular");
   const id = randomUUID();
   const createdAt = ctx.now().toISOString();
+  const chatEnabled = input.chatEnabled === true ? 1 : 0;
   await ctx.db
     .prepare(
-      `INSERT INTO users (id, email, name, role, permission, password_hash, active, password_changed_at, password_epoch, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, 1, ?, 1, ?)`,
+      `INSERT INTO users (id, email, name, role, permission, password_hash, active, password_changed_at, password_epoch, chat_enabled, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?, 1, ?, ?)`,
     )
-    .run(id, decision.email, name, roleForAccess(access), permission, hashPassword(password), createdAt, createdAt);
+    .run(id, decision.email, name, roleForAccess(access), permission, hashPassword(password), createdAt, chatEnabled, createdAt);
   const created = await findUserById(ctx, id);
   if (!created) throw new PortalError("The user could not be saved", 500);
   return { user: toEmitUser(created, createdAt), temporaryPassword };
@@ -113,7 +126,14 @@ export async function createEmitUser(
 export async function updateEmitUser(
   ctx: PortalContext,
   id: string,
-  patch: { name?: string; active?: boolean; emitAdmin?: boolean; access?: EmitAccess; permission?: EmitPermission },
+  patch: {
+    name?: string;
+    active?: boolean;
+    emitAdmin?: boolean;
+    access?: EmitAccess;
+    permission?: EmitPermission;
+    chatEnabled?: boolean;
+  },
 ): Promise<EmitUser> {
   const existing = await requireEmitUser(ctx, id);
   const name = patch.name === undefined ? existing.name : patch.name.trim();
@@ -125,9 +145,10 @@ export async function updateEmitUser(
   if (patch.emitAdmin === false) access = "regular";
   const currentPermission = isEmitPermission(existing.permission) ? existing.permission : (permissionFromRole(existing.role) ?? "add");
   const permission = patch.permission ?? currentPermission;
+  const chatEnabled = patch.chatEnabled === undefined ? (Number(existing.chat_enabled) === 1 ? 1 : 0) : patch.chatEnabled ? 1 : 0;
   await ctx.db
-    .prepare(`UPDATE users SET name = ?, active = ?, role = ?, permission = ? WHERE id = ?`)
-    .run(name, active, roleForAccess(access), permission, id);
+    .prepare(`UPDATE users SET name = ?, active = ?, role = ?, permission = ?, chat_enabled = ? WHERE id = ?`)
+    .run(name, active, roleForAccess(access), permission, chatEnabled, id);
   const updated = await requireEmitUser(ctx, id);
   return toEmitUser(updated, updated.created_at);
 }

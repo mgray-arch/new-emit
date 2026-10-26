@@ -194,6 +194,6 @@ describe("demo sample documents and tracking links", () => {
       tracking_link: null,
     });
     const pending = await own.db.prepare(`SELECT pending_review_count FROM loads WHERE sales_order_number = ?`).get("SO2196");
-    expect(Number(pending?.pending_review_count)).toBe(0);
+    expect(Number(pending?.pending_review_count)).toBe(1);
   });
 });

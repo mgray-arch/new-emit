@@ -29,6 +29,7 @@ export interface UserRow {
   active: number;
   password_changed_at: string | null;
   password_epoch: number;
+  chat_enabled?: number | null;
 }
 
 export type LoginResult =
@@ -69,7 +70,7 @@ export function clientIp(req: Request): string {
 export async function findUser(ctx: PortalContext, email: string): Promise<UserRow | null> {
   const row = (await ctx.db
     .prepare(
-      `SELECT id, email, name, role, permission, password_hash, active, password_changed_at, password_epoch FROM users WHERE email = ?`,
+      `SELECT id, email, name, role, permission, password_hash, active, password_changed_at, password_epoch, chat_enabled FROM users WHERE email = ?`,
     )
     .get(email.trim().toLowerCase())) as UserRow | undefined;
   return row ?? null;
@@ -78,7 +79,7 @@ export async function findUser(ctx: PortalContext, email: string): Promise<UserR
 export async function findUserById(ctx: PortalContext, id: string): Promise<UserRow | null> {
   const row = (await ctx.db
     .prepare(
-      `SELECT id, email, name, role, permission, password_hash, active, password_changed_at, password_epoch FROM users WHERE id = ?`,
+      `SELECT id, email, name, role, permission, password_hash, active, password_changed_at, password_epoch, chat_enabled FROM users WHERE id = ?`,
     )
     .get(id)) as UserRow | undefined;
   return row ?? null;

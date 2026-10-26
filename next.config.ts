@@ -2,7 +2,16 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
-  serverExternalPackages: ["unpdf", "pdfjs-dist"],
+  serverExternalPackages: ["unpdf", "pdfjs-dist", "tesseract.js", "@napi-rs/canvas", "@tesseract.js-data/eng"],
+  outputFileTracingIncludes: {
+    "/*": [
+      "./node_modules/@tesseract.js-data/eng/4.0.0_best_int/**/*",
+      "./node_modules/tesseract.js/**/*",
+      "./node_modules/tesseract.js-core/**/*",
+      "./node_modules/@napi-rs/canvas/**/*",
+      "./node_modules/@napi-rs/canvas-linux-x64-gnu/**/*",
+    ],
+  },
   async headers() {
     return [
       {

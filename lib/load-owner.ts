@@ -1,13 +1,17 @@
-/** Who should own a new load. Change this function when the rule changes. */
-export type LoadOwner = "Drew" | "Ainsley" | "Unassigned";
+/** Who owns a portal load. This portal is EMIT only. */
+export type LoadOwner = "Drew" | "Ainsley";
 
 export interface LoadOwnerInput {
-  /** Customer name. Blank means the customer is unknown. */
-  customer?: string | null;
   /** Delivery state, such as TX. Blank means the destination is unknown. */
   destinationState?: string | null;
   /** Equipment label, such as 53' Flatbed. Blank means the equipment is unknown. */
   equipment?: string | null;
+}
+
+export interface LoadAssignment {
+  owner: LoadOwner;
+  /** True when equipment or destination was missing, so a person should confirm the owner. */
+  needsCheck: boolean;
 }
 
 type EquipmentKind = "flatbed" | "hotshot" | "box" | "other" | "unknown";
@@ -28,31 +32,18 @@ function deliversToTexas(state: string | null | undefined): boolean | null {
   return value === "tx" || value === "texas";
 }
 
-/** True for EMIT, false for a named other customer, null when the customer is blank. */
-function isEmitCustomer(customer: string | null | undefined): boolean | null {
-  const value = (customer ?? "").trim();
-  if (!value) return null;
-  return /^emit\b/i.test(value);
-}
-
 /**
- * Drew owns EMIT freight that delivers to Texas on a flatbed (any name containing
- * "flatbed") or a hot shot. Ainsley owns EMIT box trucks, EMIT freight that delivers
- * outside Texas, and every other customer. Missing equipment or destination stays
- * Unassigned when the rule would have to guess. A box truck does not need a
- * destination. Another customer does not need equipment or a destination.
+ * Drew owns flatbed (any name containing "flatbed") or hot shot freight that delivers
+ * to Texas. Ainsley owns every other load: box trucks, anything that delivers outside
+ * Texas, and other equipment. Missing equipment or destination still goes to Ainsley,
+ * with needsCheck so the Slack note asks a person to confirm.
  */
-export function assignLoadOwner(input: LoadOwnerInput): LoadOwner {
-  const emit = isEmitCustomer(input.customer);
-  if (emit === false) return "Ainsley";
-  if (emit === null) return "Unassigned";
-
+export function assignLoadOwner(input: LoadOwnerInput): LoadAssignment {
   const equipment = equipmentKind(input.equipment);
-  if (equipment === "box") return "Ainsley";
-
   const texas = deliversToTexas(input.destinationState);
-  if (texas === null) return "Unassigned";
-  if (!texas) return "Ainsley";
-  if (equipment === "flatbed" || equipment === "hotshot") return "Drew";
-  return "Unassigned";
+  const needsCheck = equipment === "unknown" || texas === null;
+  if (!needsCheck && texas && (equipment === "flatbed" || equipment === "hotshot")) {
+    return { owner: "Drew", needsCheck: false };
+  }
+  return { owner: "Ainsley", needsCheck };
 }

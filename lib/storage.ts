@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { PortalError } from "@/lib/http";
 
@@ -35,7 +35,7 @@ export async function writeStoredBytes(
   options?: { overwrite?: boolean },
 ): Promise<string> {
   if (memoryMode()) {
-    memoryStore().set(key, bytes);
+    memoryStore().set(key, new Uint8Array(bytes));
     return `memory:${key}`;
   }
   if (process.env.VERCEL && !blobConfigured()) {
@@ -59,6 +59,19 @@ export async function writeStoredBytes(
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, bytes);
   return `file:${key}`;
+}
+
+export async function deleteStoredBytes(locator: string): Promise<void> {
+  if (locator.startsWith("memory:")) {
+    memoryStore().delete(locator.slice("memory:".length));
+    return;
+  }
+  if (locator.startsWith("file:")) {
+    rmSync(path.join(fileRoot(), locator.slice("file:".length)), { force: true });
+    return;
+  }
+  const { del } = await import("@vercel/blob");
+  await del(locator, { token: process.env.BLOB_READ_WRITE_TOKEN });
 }
 
 export async function readStoredBytes(locator: string): Promise<Uint8Array> {

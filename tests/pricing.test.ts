@@ -4,6 +4,7 @@ import { PATCH as patchUser } from "@/app/api/admin/users/[id]/route";
 import { GET as listUsers } from "@/app/api/admin/users/route";
 import { POST as ask } from "@/app/api/ask/route";
 import { GET as getOrderRoute, PATCH as patchOrder } from "@/app/api/orders/[id]/route";
+import { GET as exportOrders } from "@/app/api/orders/export/route";
 import { GET as listOrdersRoute, POST as createOrderRoute } from "@/app/api/orders/route";
 import { answerQuestion, buildModelRequest } from "@/lib/assistant";
 import { presentCustomerOrder, serializeCustomerOrder } from "@/lib/customer-view";
@@ -214,7 +215,84 @@ describe("pricing follows the EMIT admin role", () => {
     expect((await demoted.json()).user).toMatchObject({ emitAdmin: false, access: "regular", permission: "pricing" });
     const stillPriced = await listOrdersRoute(new Request("http://portal.test/api/orders?q=SO2196", { headers: { cookie: asStaff } }));
     const kept = (await stillPriced.json()).orders[0];
-    expect(kept.customerCost).toBe(1500);
-    expect(JSON.stringify(kept)).not.toMatch(/carrierPay|carrier_pay|8765/);
+    expect("customerCost" in kept).toBe(false);
+    expect("rateReason" in kept).toBe(false);
+    expect(JSON.stringify(kept)).not.toMatch(/carrierPay|carrier_pay|8765|customerCost|rateReason|1,?500/);
+  });
+
+  it("returns no cost fields on a regular EMIT user's load list or detail", async () => {
+    const customer = await sessionCookie(customerSession());
+    const admin = await sessionCookie(adminSession());
+    const emitAdmin = await sessionCookie(emitAdminSession());
+    const pricingRow = (await ctx.db.prepare(`SELECT id, email, name FROM users WHERE email = ?`).get("pricing@emit.example")) as {
+      id: string;
+      email: string;
+      name: string;
+    };
+    const seePricing = await sessionCookie({
+      userId: pricingRow.id,
+      email: pricingRow.email,
+      name: pricingRow.name,
+      role: "customer",
+      permission: "pricing",
+    });
+    const hero = (await listAllOrders(ctx)).find((order) => order.salesOrderNumber === "SO2196")!;
+    expect(hero.customerCost).toBe(1500);
+
+    const hiddenCookies = [
+      customer,
+      seePricing,
+      `${admin}; portal_view_as=regular:add`,
+      `${admin}; portal_view_as=regular:pricing`,
+      `${admin}; portal_view_as=regular:full`,
+    ];
+    for (const cookie of hiddenCookies) {
+      const listed = await listOrdersRoute(new Request("http://portal.test/api/orders?q=SO2196", { headers: { cookie } }));
+      const row = (await listed.json()).orders[0];
+      expect(row.salesOrderNumber).toBe("SO2196");
+      expect(row).not.toHaveProperty("customerCost");
+      expect(row).not.toHaveProperty("rateReason");
+      expect(JSON.stringify(row)).not.toMatch(/customerCost|rateReason|\$|1,?500/);
+      expectNoSecrets(row);
+
+      const detail = await getOrderRoute(new Request(`http://portal.test/api/orders/${hero.id}`, { headers: { cookie } }), {
+        params: Promise.resolve({ id: hero.id }),
+      });
+      const detailBody = await detail.json();
+      expect(detailBody.order).not.toHaveProperty("customerCost");
+      expect(detailBody.order).not.toHaveProperty("rateReason");
+      expect(JSON.stringify(detailBody)).not.toMatch(/customerCost|rateReason|\$|1,?500/);
+      expectNoSecrets(detailBody);
+
+      const csvFile = await exportOrders(
+        new Request("http://portal.test/api/orders/export?tab=active&q=SO2196", { headers: headers(cookie) }),
+      );
+      const csv = await csvFile.text();
+      expect(csv).toContain("SO2196");
+      expect(csv).not.toMatch(/Cost|Rate reason|1500|\$/);
+
+      const asked = await ask(
+        new Request("http://portal.test/api/ask", {
+          method: "POST",
+          headers: headers(cookie),
+          body: JSON.stringify({ question: "where is SO2196?" }),
+        }),
+      );
+      const answer = await asked.json();
+      expect(answer.text).toContain("900196-1");
+      expect(JSON.stringify(answer)).not.toMatch(/customerCost|rateReason|\$|1,?500/);
+      expectNoSecrets(answer);
+    }
+
+    for (const cookie of [emitAdmin, admin, `${admin}; portal_view_as=admin:full`]) {
+      const listed = await listOrdersRoute(new Request("http://portal.test/api/orders?q=SO2196", { headers: { cookie } }));
+      const row = (await listed.json()).orders[0];
+      expect(row.customerCost).toBe(1500);
+      expect(JSON.stringify(row)).not.toMatch(/carrierPay|carrier_pay|8765/);
+      const detail = await getOrderRoute(new Request(`http://portal.test/api/orders/${hero.id}`, { headers: { cookie } }), {
+        params: Promise.resolve({ id: hero.id }),
+      });
+      expect((await detail.json()).order.customerCost).toBe(1500);
+    }
   });
 });

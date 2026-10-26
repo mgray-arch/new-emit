@@ -12,13 +12,13 @@ export interface NewLoadNotice {
   destinationState: string;
   equipment: string | null;
   owner: LoadOwner;
+  needsCheck?: boolean;
   enteredByName: string | null;
   enteredByEmail: string | null;
 }
 
 /** Slack user id for an owner, or null when the env var is missing or not a user id. */
 export function slackUserIdForOwner(owner: LoadOwner, env: Record<string, string | undefined> = process.env): string | null {
-  if (owner === "Unassigned") return null;
   const raw = owner === "Drew" ? env.SLACK_USER_ID_DREW : env.SLACK_USER_ID_AINSLEY;
   const id = raw?.trim() ?? "";
   return SLACK_USER_ID.test(id) ? id : null;
@@ -37,19 +37,31 @@ export function ownerLine(owner: LoadOwner, env: Record<string, string | undefin
 export function newLoadSlackText(notice: NewLoadNotice, env: Record<string, string | undefined> = process.env): string {
   const equipment = notice.equipment?.trim() || "not set";
   const lane = `${notice.originCity}, ${notice.originState} → ${notice.destinationCity}, ${notice.destinationState}`;
-  return [
+  const lines = [
     `New load ${notice.salesOrderNumber}`,
     lane,
     `Equipment: ${equipment}`,
     ownerLine(notice.owner, env),
     `Entered by: ${formatEnteredBy(notice.enteredByName, notice.enteredByEmail)}`,
-  ].join("\n");
+  ];
+  if (notice.needsCheck) lines.push("Needs a human check. Equipment or destination was missing.");
+  return lines.join("\n");
 }
 
 export function newLoadWebhookUrl(env: Record<string, string | undefined> = process.env): string | null {
   const url = env.SLACK_NEW_LOADS_WEBHOOK_URL?.trim() ?? "";
   if (!url.startsWith("https://") && !url.startsWith("http://")) return null;
   return url;
+}
+
+function ownerNotice(order: CustomerOrder): { owner: LoadOwner; needsCheck: boolean } {
+  if (order.owner === "Drew" || order.owner === "Ainsley") {
+    return { owner: order.owner, needsCheck: order.ownerNeedsCheck === true };
+  }
+  return assignLoadOwner({
+    destinationState: order.destination.state,
+    equipment: order.truckType,
+  });
 }
 
 /** Post a new-load note when the webhook is set. A missing URL or a failed post does not fail the load. */
@@ -67,11 +79,7 @@ export async function notifyNewLoad(
     destinationCity: order.destination.city,
     destinationState: order.destination.state,
     equipment: order.truckType,
-    owner: assignLoadOwner({
-      customer: "EMIT",
-      destinationState: order.destination.state,
-      equipment: order.truckType,
-    }),
+    ...ownerNotice(order),
     enteredByName: enteredBy.name,
     enteredByEmail: enteredBy.email,
   };

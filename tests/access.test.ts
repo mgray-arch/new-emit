@@ -66,7 +66,7 @@ describe("sign-in providers", () => {
 });
 
 describe("receiver private links", () => {
-  it("shows only that company's loads, tracking, and photos", async () => {
+  it("shows only that company's loads, status, lane, and tracking link", async () => {
     const token = await enchantedToken();
     const response = await receiverPortal(new Request(`http://portal.test/api/r/${token}`), {
       params: Promise.resolve({ token }),
@@ -77,15 +77,19 @@ describe("receiver private links", () => {
     expect(body.loads.length).toBeGreaterThan(0);
     expect(body.loads.length).toBeLessThan(24);
     expect(
-      body.loads.every((load: { stops: Array<{ kind: string; company: string }> }) =>
-        load.stops.some((stop) => stop.kind === "drop" && stop.company === "Enchanted Rock LLC"),
+      body.loads.every((load: { stops: Array<{ kind: string; city: string; state: string }> }) =>
+        load.stops.some((stop) => stop.kind === "drop" && stop.city && stop.state),
       ),
     ).toBe(true);
-    expect(body.loads.some((load: { salesOrderNumber: string }) => load.salesOrderNumber === "SO2196")).toBe(false);
+    expect(body.loads.some((load: { loadNumber: string | null }) => load.loadNumber === "900196-1")).toBe(false);
     expect(body.loads[0].customerCost).toBeUndefined();
     expect(body.loads[0].documents).toBeUndefined();
+    expect(body.loads[0].photos).toBeUndefined();
+    expect(body.loads[0].salesOrderNumber).toBeUndefined();
+    expect(body.loads[0].trackingUrl).toBeUndefined();
+    expect(body.loads[0].stops[0].company).toBeUndefined();
+    expect(body.loads[0].stops[0].city).toEqual(expect.any(String));
     expect(body.loads[0].comments).toBeUndefined();
-    expect(body.loads[0].trackingUrl).toContain("/track/");
     expectNoSecrets(body);
 
     const missing = await receiverPortal(new Request("http://portal.test/api/r/not-a-real-receiver-token-value"), {
@@ -124,7 +128,8 @@ describe("receiver private links", () => {
       params: Promise.resolve({ token: receiver.token }),
     });
     const firstBody = await firstUrl.json();
-    expect(firstBody.loads.some((load: { salesOrderNumber: string }) => load.salesOrderNumber === "SO2196")).toBe(true);
+    expect(firstBody.loads.some((load: { loadNumber: string }) => load.loadNumber === "900196-1")).toBe(true);
+    expect(firstBody.loads[0].photos).toBeUndefined();
     expectNoSecrets(firstBody);
 
     const edited = await patchReceiver(

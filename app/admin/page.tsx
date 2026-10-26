@@ -8,8 +8,6 @@ export default function ReviewPage() {
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [confirming, setConfirming] = useState<string | null>(null);
-
   async function load() {
     const response = await fetch("/api/admin/review");
     if (response.status === 403) {
@@ -28,23 +26,22 @@ export default function ReviewPage() {
     void load();
   }, []);
 
-  async function decide(id: string, action: "approve" | "reject", confirm = false) {
+  async function decide(id: string, action: "approve" | "delete") {
     const response = await fetch(`/api/admin/review/${id}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action, confirm }),
+      body: JSON.stringify({ action }),
     });
     const body = await response.json();
     if (!response.ok) {
-      setError(body.error || "Could not update that page");
+      setError(body.error || "Could not update that file");
       return;
     }
     setError("");
-    setConfirming(null);
     if (action === "approve") {
-      setNotice(`Released by ${body.reviewedBy} at ${body.reviewedAt}.`);
+      setNotice(`Released to EMIT by ${body.reviewedBy} at ${body.reviewedAt}.`);
     } else {
-      setNotice("Kept internal.");
+      setNotice("Deleted.");
     }
     await load();
   }
@@ -52,10 +49,10 @@ export default function ReviewPage() {
   return (
     <Shell>
       <main className="page">
-        <h1>DOCUMENT REVIEW</h1>
+        <h1>QUARANTINE</h1>
         <p className="lede">
-          Pages that look like rate confirmations, or that could not be read, stay here until a Select admin releases or keeps them.
-          EMIT cannot see them. Releasing a rate confirmation asks you to confirm, then records your email and the time.
+          Uploads that look like rate confirmations, or that OCR could not read, stay here. EMIT cannot see them.
+          A rate confirmation cannot be released. An unclear file can be approved after you look at it, or deleted.
         </p>
         {notice && <p className="mini">{notice}</p>}
         {error && <p className="error">{error}</p>}
@@ -69,44 +66,29 @@ export default function ReviewPage() {
                   {item.salesOrderNumber || "Order"} · {item.loadNumber ?? "Pending"}
                 </strong>
                 <span className="mini">
-                  {item.filename} · page {item.pageIndex} of {item.pageCount}
+                  {item.source === "photo" ? "Photo" : `Page ${item.pageIndex} of ${item.pageCount}`} · {item.filename}
                 </span>
               </div>
               <p>{item.screenReason}</p>
-              {item.screenResult === "block" && (
-                <p className="warn">Releasing this page makes it visible to EMIT. Keep it internal unless you are sure it is not a rate confirmation.</p>
+              {item.screenResult === "block" ? (
+                <p className="warn">This matches a rate confirmation. It cannot be released to EMIT.</p>
+              ) : (
+                <p className="mini">OCR could not confirm this is safe. Approving it shows it to EMIT.</p>
               )}
               {item.textExcerpt && <pre className="excerpt">{item.textExcerpt}</pre>}
               <div className="actions">
                 <a className="btn secondary" href={`/api/admin/review/${item.id}`}>
-                  Download page
+                  Download
                 </a>
-                <button className="btn danger" type="button" onClick={() => decide(item.id, "reject")}>
-                  Keep internal
-                </button>
-                {item.screenResult === "block" ? (
-                  <button className="btn" type="button" onClick={() => setConfirming(item.id)}>
-                    Release to EMIT
-                  </button>
-                ) : (
+                {item.screenResult === "uncertain" && (
                   <button className="btn" type="button" onClick={() => decide(item.id, "approve")}>
-                    Release to EMIT
+                    Approve for EMIT
                   </button>
                 )}
+                <button className="btn danger" type="button" onClick={() => decide(item.id, "delete")}>
+                  Delete
+                </button>
               </div>
-              {item.screenResult === "block" && confirming === item.id && (
-                <div className="confirm-box">
-                  <p>Release this rate confirmation to EMIT? Your email and the time are saved on the page.</p>
-                  <div className="actions">
-                    <button className="btn" type="button" onClick={() => decide(item.id, "approve", true)}>
-                      Yes, release it
-                    </button>
-                    <button className="btn secondary" type="button" onClick={() => setConfirming(null)}>
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
             </article>
           ))}
         </div>

@@ -19,17 +19,25 @@ const STRONG: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /pay(?:able)?\s+to\s+(the\s+)?carrier/i, reason: "Page says pay to the carrier." },
   { pattern: /paid\s+to\s+(the\s+)?(motor\s+)?carrier/i, reason: "Page says paid to the carrier." },
   { pattern: /compensation\s+to\s+(the\s+)?(motor\s+)?carrier/i, reason: "Page states carrier compensation." },
+  { pattern: /total\s+carrier\s+pay/i, reason: "Page mentions total carrier pay." },
+  { pattern: /broker\s*carrier\s*agreements?/i, reason: "Page is a broker-carrier agreement." },
 ];
 
 const DOLLAR = /\$\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?/;
 const CARRIER_MONEY_CONTEXT =
   /\b(carriers?|motor\s+carrier|mc\s*#?\s*\d{3,}|line\s*-?\s*haul|rate\s+per\s+mile|all[-\s]?in\s+rate)\b/i;
 
+/** Hyphens and underscores count as spaces, so rate-confirmation and carrier-pay still match. */
+function loosen(text: string): string {
+  return text.replace(/[_-]+/g, " ");
+}
+
 export function sensitiveReason(text: string): string | null {
+  const loose = loosen(text);
   for (const rule of STRONG) {
-    if (rule.pattern.test(text)) return rule.reason;
+    if (rule.pattern.test(loose)) return rule.reason;
   }
-  if (DOLLAR.test(text) && CARRIER_MONEY_CONTEXT.test(text)) {
+  if (DOLLAR.test(text) && CARRIER_MONEY_CONTEXT.test(loose)) {
     return "A dollar amount is tied to carrier or line-haul language.";
   }
   return null;

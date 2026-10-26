@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS users (
   active INTEGER NOT NULL DEFAULT 1,
   password_changed_at TEXT,
   password_epoch INTEGER NOT NULL DEFAULT 0,
+  chat_enabled INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
 
@@ -76,6 +77,8 @@ CREATE TABLE IF NOT EXISTS loads (
   created_by TEXT NOT NULL,
   entered_by_name TEXT,
   entered_by_email TEXT,
+  owner TEXT,
+  owner_needs_check INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   pending_review_count INTEGER NOT NULL DEFAULT 0,
@@ -196,6 +199,27 @@ CREATE TABLE IF NOT EXISTS locations (
 );
 
 CREATE INDEX IF NOT EXISTS locations_kind ON locations(kind, active, use_count);
+
+CREATE TABLE IF NOT EXISTS messages (
+  id TEXT PRIMARY KEY,
+  seq INTEGER NOT NULL UNIQUE,
+  body TEXT NOT NULL,
+  author_id TEXT NOT NULL,
+  author_name TEXT NOT NULL,
+  author_email TEXT NOT NULL,
+  author_side TEXT NOT NULL CHECK(author_side IN ('emit', 'select')),
+  load_id TEXT,
+  load_number TEXT,
+  sales_order_number TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS messages_seq ON messages(seq);
+
+CREATE TABLE IF NOT EXISTS message_reads (
+  user_id TEXT PRIMARY KEY,
+  read_seq INTEGER NOT NULL
+);
 `;
 
 /**
@@ -205,7 +229,7 @@ export const CUSTOMER_LOAD_COLUMNS = `
   id, sales_order_number, load_number, portal_status, tracking_stage, timeline_json,
   origin_json, destination_json, stops_json, truck_type, transit, ship_date, ship_time,
   must_deliver_date, truck_eta, latest_eta, tracking_token, tracking_link, customer_cost_cents,
-  rate_reason, comments, created_by, entered_by_name, entered_by_email, created_at, updated_at, pending_review_count,
+  rate_reason, comments, created_by, entered_by_name, entered_by_email, owner, owner_needs_check, created_at, updated_at, pending_review_count,
   sam_build_status, sam_build_error, sam_build_at
 `;
 
@@ -364,8 +388,10 @@ export async function openDatabase(file?: string): Promise<SqlDatabase> {
   await migrateEmitPermissions(db);
   await migrateSamBuild(db);
   await migrateEnteredBy(db);
+  await migrateLoadOwner(db);
   await migrateDocumentUploaders(db);
   await migrateLoadSource(db);
+  await migrateChatEnabled(db);
   await db.exec(`DROP TABLE IF EXISTS outbox`);
   return db;
 }
@@ -630,6 +656,12 @@ async function migrateEnteredBy(db: SqlDatabase): Promise<void> {
   await ensureColumn(db, "loads", "entered_by_email", "TEXT");
 }
 
+/** Select owner. Null on rows saved before this column existed. EMIT never receives it. */
+async function migrateLoadOwner(db: SqlDatabase): Promise<void> {
+  await ensureColumn(db, "loads", "owner", "TEXT");
+  await ensureColumn(db, "loads", "owner_needs_check", "INTEGER NOT NULL DEFAULT 0");
+}
+
 /** Older databases only allowed customer and Select admin. EMIT admin is a third role. */
 async function migrateEmitAdminRole(db: SqlDatabase): Promise<void> {
   await rebuildUsersForRole(db, {
@@ -706,6 +738,11 @@ async function rebuildUsersForRoleOnce(db: SqlDatabase, spec: UserRebuild): Prom
  */
 async function migrateLoadSource(db: SqlDatabase): Promise<void> {
   await ensureColumn(db, "loads", "source", "TEXT");
+}
+
+/** EMIT chat is off until Select turns it on. Select staff are not gated by this column. */
+async function migrateChatEnabled(db: SqlDatabase): Promise<void> {
+  await ensureColumn(db, "users", "chat_enabled", "INTEGER NOT NULL DEFAULT 0");
 }
 
 /** Older document tables have no uploader. The bot upload log is created with the schema. */
