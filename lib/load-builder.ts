@@ -3,6 +3,8 @@ import type { PortalContext } from "@/lib/db";
 import { PortalError } from "@/lib/http";
 import { getOrder } from "@/lib/orders";
 import { assignSelectLoadNumber, parseSelectLoadNumber } from "@/lib/select-load";
+import { assignLoadOwner, type LoadOwner } from "@/lib/load-owner";
+import { slackUserIdForOwner } from "@/lib/slack-new-load";
 import type { CustomerOrder } from "@/lib/types";
 
 const MIN_KEY_LENGTH = 16;
@@ -42,6 +44,30 @@ export function loadBuilderConfigured(): boolean {
   return url.startsWith("https://") || url.startsWith("http://");
 }
 
+/** Drew's Slack member id, used when SLACK_USER_ID_DREW is not set. */
+export const DREW_SLACK_USER_ID = "U0AGS6MDBL1";
+
+export interface LoadBuilderOwner {
+  name: LoadOwner;
+  /** Slack member id to tag, or null when unknown (tag by name in plain text). */
+  slackUserId: string | null;
+}
+
+/**
+ * The same owner the portal assigns and shows: the stored owner, or the
+ * load-owner rule from equipment and final delivery state for older loads.
+ */
+export function loadBuilderOwner(
+  order: CustomerOrder,
+  env: Record<string, string | undefined> = process.env,
+): LoadBuilderOwner {
+  const lastStop = order.stops[order.stops.length - 1];
+  const name: LoadOwner =
+    order.owner ?? assignLoadOwner({ destinationState: lastStop?.place.state, equipment: order.truckType }).owner;
+  const fromEnv = slackUserIdForOwner(name, env);
+  return { name, slackUserId: fromEnv ?? (name === "Drew" ? DREW_SLACK_USER_ID : null) };
+}
+
 /**
  * What the Load Builder bot receives. An allowlist, so carrier pay cannot ride along
  * even if it is later added to the stored order.
@@ -71,6 +97,7 @@ export function loadBuilderPayload(order: CustomerOrder): Record<string, unknown
     rateReason: order.rateReason ?? null,
     comments: order.comments,
     createdBy: order.createdBy,
+    owner: loadBuilderOwner(order),
   };
 }
 

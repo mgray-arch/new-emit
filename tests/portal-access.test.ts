@@ -410,7 +410,7 @@ describe("build load in SAM", () => {
     );
     expect(started.status).toBe(200);
     expect((await started.json()).order.samBuildStatus).toBe("building");
-    expect(payload).toMatchObject({ salesOrderNumber: "SO-NO-HOOK", customerCost: 1750 });
+    expect(payload).toMatchObject({ salesOrderNumber: "SO-NO-HOOK", customerCost: 1750, owner: { name: pending.order.owner } });
     expect(JSON.stringify(payload)).not.toMatch(/carrierPay|carrierCost|carrier_name|staffNotes/);
     expect(JSON.stringify(loadBuilderPayload({ ...pending.order, carrierPay: 8765.43 } as CustomerOrder))).not.toMatch(/carrierPay|8765/);
 
