@@ -252,8 +252,9 @@ describe("entered by on a new load", () => {
       ...selectOrder,
       carrierPay: 8765.43,
     } as CustomerOrder);
-    expect(JSON.stringify(payload)).not.toMatch(/enteredBy|m\.gray@emit\.example|carrierPay|8765|owner/);
+    expect(JSON.stringify(payload)).not.toMatch(/enteredBy|m\.gray@emit\.example|carrierPay|8765|ownerNeedsCheck/);
     expect(payload.createdBy).toBe("M. Gray");
+    expect(payload.owner).toEqual({ name: selectOrder.owner, slackUserId: expect.any(String) });
 
     const older = await ctx.db.prepare(`SELECT id FROM loads WHERE entered_by_email IS NULL LIMIT 1`).get();
     const oldId = String(older?.id);
