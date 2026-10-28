@@ -1,3 +1,4 @@
+import { joinSalesOrders, parseLegacySalesOrders, resolveSalesOrders, salesOrdersForStop } from "@/lib/sales-orders";
 import { serializeCustomerOrder, trackingUrlFor } from "@/lib/customer-view";
 import { parseSelectLoadNumber } from "@/lib/select-load";
 import { legacyStops, resolvedRoute } from "@/lib/stops";
@@ -177,6 +178,7 @@ export function toSamStops(input: OrderInput): Array<Record<string, unknown>> {
           ? legacyStops(input.origin, input.destination)
           : [],
   });
+  const salesOrders = samSalesOrders({ ...input, stops: route.stops });
   let seenPickup = false;
   let dropsRemaining = route.stops.filter((stop) => stop.kind === "drop").length;
   return route.stops.map((stop, index) => {
@@ -195,14 +197,26 @@ export function toSamStops(input: OrderInput): Array<Record<string, unknown>> {
       country: stop.place.country || "US",
       date: firstPickup ? (input.shipDate ?? null) : lastDrop ? (input.mustDeliverDate ?? null) : null,
       time: firstPickup ? (input.shipTime ?? null) : null,
+      referenceNumbers:
+        stop.kind === "drop" ? salesOrdersForStop(salesOrders, stop.id).map((value) => ({ key: "SO", value })) : [],
     };
   });
 }
 
+/** One SO per entry, in ALL CAPS. Falls back to splitting the older single string. */
+function samSalesOrders(input: OrderInput): Array<{ number: string; stopId: string | null }> {
+  const lines = input.salesOrders?.length
+    ? input.salesOrders
+    : parseLegacySalesOrders(input.salesOrderNumber).map((number) => ({ number, stopId: null }));
+  const stops = (input.stops ?? []).map((stop, index) => ({ id: stop.id ?? `stop-${index + 1}`, kind: stop.kind }));
+  return stops.length ? resolveSalesOrders(lines, stops) : resolveSalesOrders(lines, [{ id: "stop-2", kind: "drop" }]);
+}
+
 export function toSamCreatePayload(input: OrderInput, actor: Session): Record<string, unknown> {
+  const salesOrders = samSalesOrders(input);
   return {
-    customerReference: input.salesOrderNumber,
-    referenceNumbers: [{ key: "SO", value: input.salesOrderNumber }],
+    customerReference: joinSalesOrders(salesOrders),
+    referenceNumbers: salesOrders.map((line) => ({ key: "SO", value: line.number })),
     equipment: input.truckType ?? null,
     teamRequired: input.transit === "Team",
     customerRate: input.customerCost ?? 0,

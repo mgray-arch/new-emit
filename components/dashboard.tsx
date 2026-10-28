@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import DocumentLinks from "@/components/document-links";
-import LoadForm, { draftFromOrder, emptyDraft, payloadFromDraft, useSites, type Draft } from "@/components/load-form";
+import LoadForm, { draftFromOrder, draftSalesOrderErrors, emptyDraft, payloadFromDraft, useSites, type Draft } from "@/components/load-form";
 import SamBuildButton from "@/components/sam-build-button";
 import PhotoGallery from "@/components/photo-gallery";
 import SelectLoadField from "@/components/select-load-field";
@@ -237,6 +237,11 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     }
     if (draft.stops.some((stop) => stop.duplicateOf && !stop.saveAsNew)) {
       setFormError("This looks like a duplicate. Use the existing location, or save it as new.");
+      return;
+    }
+    const soErrors = draftSalesOrderErrors(draft);
+    if (soErrors.length) {
+      setFormError(soErrors[0]);
       return;
     }
     setSaving(true);

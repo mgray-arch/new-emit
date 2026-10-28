@@ -5,6 +5,8 @@ import { StopPlace, type DraftStop } from "@/components/stop-place";
 import Timeline from "@/components/timeline";
 import TrackLink from "@/components/track-link";
 import { formatWhen } from "@/lib/dates";
+import { applyStopOrder, type RoutePlan } from "@/lib/route-optimize";
+import { normalizeSalesOrder, parseLegacySalesOrders, salesOrderError, salesOrderLineErrors } from "@/lib/sales-orders";
 import { timeSelectOptions } from "@/lib/ship-time";
 import {
   RATE_REASONS,
@@ -20,8 +22,14 @@ import {
   type StopKind,
 } from "@/lib/types";
 
+export interface DraftSalesOrder {
+  number: string;
+  /** Drop stop id. Ignored when the load has one drop. */
+  stopId: string | null;
+}
+
 export interface Draft {
-  salesOrderNumber: string;
+  salesOrders: DraftSalesOrder[];
   origin: Place;
   destination: Place;
   stops: DraftStop[];
@@ -66,7 +74,7 @@ export function emptyDraft(): Draft {
     { id: newStopId(), kind: "drop", place: emptyPlace() },
   ];
   return {
-    salesOrderNumber: "",
+    salesOrders: [{ number: "", stopId: null }],
     stops,
     ...endsFrom(stops),
     portalStatus: "being_prepared",
@@ -90,7 +98,9 @@ export function draftFromOrder(order: CustomerOrder): Draft {
         { id: "stop-2", kind: "drop" as const, place: order.destination },
       ];
   return {
-    salesOrderNumber: order.salesOrderNumber,
+    salesOrders: order.salesOrders?.length
+      ? order.salesOrders.map((line) => ({ number: line.number, stopId: line.stopId }))
+      : parseLegacySalesOrders(order.salesOrderNumber).map((number) => ({ number, stopId: null as string | null })),
     stops,
     ...endsFrom(stops),
     portalStatus: order.portalStatus,
@@ -108,8 +118,14 @@ export function draftFromOrder(order: CustomerOrder): Draft {
 
 export function payloadFromDraft(draft: Draft, options?: { includePricing?: boolean }) {
   const includePricing = options?.includePricing !== false;
+  const drops = draft.stops.filter((stop) => stop.kind === "drop");
   return {
-    salesOrderNumber: draft.salesOrderNumber,
+    salesOrders: draft.salesOrders
+      .filter((line) => line.number.trim())
+      .map((line) => ({
+        number: normalizeSalesOrder(line.number),
+        stopId: drops.length === 1 ? drops[0].id : line.stopId,
+      })),
     origin: draft.origin,
     destination: draft.destination,
     stops: draft.stops.map((stop) => ({
@@ -283,6 +299,7 @@ function StopsEditor({
               <option value="drop">Drop</option>
             </select>
           </div>
+          {stop.kind === "drop" && soLabel(draft, stop.id) ? <p className="mini">{soLabel(draft, stop.id)}</p> : null}
           <StopPlace
             stop={stop}
             sites={stop.kind === "pickup" ? sites : []}
@@ -299,6 +316,225 @@ function StopsEditor({
           <button className="btn secondary" type="button" onClick={() => add("drop")}>
             Add drop
           </button>
+        </div>
+      )}
+      {!readOnly && <RouteOptimizer stops={draft.stops} onApply={commit} />}
+    </div>
+  );
+}
+
+/** Sales orders tied to one drop, for the stop card. */
+export function soLabel(draft: Draft, stopId: string): string {
+  const drops = draft.stops.filter((stop) => stop.kind === "drop");
+  const numbers = draft.salesOrders
+    .filter((line) => line.number.trim() && (drops.length === 1 ? drops[0].id === stopId : line.stopId === stopId))
+    .map((line) => normalizeSalesOrder(line.number));
+  return numbers.length ? `SO: ${numbers.join(", ")}` : "";
+}
+
+function stopName(stop: Stop, index: number): string {
+  const where = [stop.place.city, stop.place.state].filter(Boolean).join(", ");
+  return `${index + 1}. ${stop.kind === "pickup" ? "Pickup" : "Drop"}: ${stop.place.company || "Unnamed"}${where ? ` (${where})` : ""}`;
+}
+
+/** Errors that block saving the SO list, for the form to show before it calls the API. */
+export function draftSalesOrderErrors(draft: Draft): string[] {
+  return salesOrderLineErrors(draft.salesOrders, draft.stops, { required: true });
+}
+
+function SalesOrdersEditor({ draft, setDraft, readOnly }: { draft: Draft; setDraft: (draft: Draft) => void; readOnly: boolean }) {
+  const drops = draft.stops.filter((stop) => stop.kind === "drop");
+  const multiDrop = drops.length > 1;
+  const rows: DraftSalesOrder[] = draft.salesOrders.length ? draft.salesOrders : [{ number: "", stopId: null }];
+  const last = rows[rows.length - 1];
+  const canAdd = !readOnly && last.number.trim() !== "" && salesOrderError(last.number) === null;
+
+  function update(index: number, patch: Partial<DraftSalesOrder>) {
+    setDraft({ ...draft, salesOrders: rows.map((row, i) => (i === index ? { ...row, ...patch } : row)) });
+  }
+
+  if (readOnly) {
+    return (
+      <div className="field">
+        <label>Sales Orders</label>
+        <ul className="mini">
+          {rows.filter((row) => row.number).map((row) => {
+            const dropIndex = draft.stops.findIndex((stop) => stop.id === row.stopId);
+            return (
+              <li key={row.number}>
+                {row.number}
+                {multiDrop ? ` · ${dropIndex >= 0 ? stopName(draft.stops[dropIndex], dropIndex) : "Drop not set"}` : ""}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    );
+  }
+
+  return (
+    <div className="field">
+      <label>Sales Orders</label>
+      <p className="mini">One sales order per field. Use + to add another.{multiDrop ? " Choose the drop each SO goes to." : ""}</p>
+      {rows.map((row, index) => {
+        const problem = row.number.trim() ? salesOrderError(row.number) : null;
+        const duplicate =
+          row.number.trim() &&
+          rows.findIndex((other) => normalizeSalesOrder(other.number) === normalizeSalesOrder(row.number)) !== index;
+        const dropMissing = multiDrop && row.number.trim() && !drops.some((stop) => stop.id === row.stopId);
+        return (
+          <div key={index} className="so-row" style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6, flexWrap: "wrap" }}>
+            <input
+              aria-label={`Sales order ${index + 1}`}
+              placeholder="e.g., SO12345"
+              value={row.number}
+              onChange={(event) => update(index, { number: event.target.value.toUpperCase() })}
+              aria-invalid={Boolean(problem || duplicate)}
+              style={{ flex: "1 1 160px" }}
+            />
+            {multiDrop && (
+              <select
+                aria-label={`Drop for sales order ${index + 1}`}
+                value={drops.some((stop) => stop.id === row.stopId) ? (row.stopId ?? "") : ""}
+                onChange={(event) => update(index, { stopId: event.target.value || null })}
+                aria-invalid={Boolean(dropMissing)}
+                style={{ flex: "1 1 220px" }}
+              >
+                <option value="">Which drop?</option>
+                {drops.map((stop) => {
+                  const stopIndex = draft.stops.indexOf(stop);
+                  return (
+                    <option key={stop.id} value={stop.id}>
+                      {stopName(stop, stopIndex)}
+                    </option>
+                  );
+                })}
+              </select>
+            )}
+            {rows.length > 1 && (
+              <button
+                className="btn danger"
+                type="button"
+                aria-label={`Remove sales order ${index + 1}`}
+                onClick={() => setDraft({ ...draft, salesOrders: rows.filter((_, i) => i !== index) })}
+              >
+                Remove
+              </button>
+            )}
+            {index === rows.length - 1 && canAdd && (
+              <button
+                className="btn secondary"
+                type="button"
+                aria-label="Add another sales order"
+                onClick={() => setDraft({ ...draft, salesOrders: [...rows, { number: "", stopId: null }] })}
+              >
+                +
+              </button>
+            )}
+            {problem && <p className="error" style={{ flexBasis: "100%", margin: 0 }}>{problem}</p>}
+            {!problem && duplicate && <p className="error" style={{ flexBasis: "100%", margin: 0 }}>This sales order is already listed.</p>}
+            {!problem && !duplicate && dropMissing && (
+              <p className="error" style={{ flexBasis: "100%", margin: 0 }}>Choose which drop this SO goes to.</p>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function RouteOptimizer({ stops, onApply }: { stops: Stop[]; onApply: (stops: Stop[]) => void }) {
+  const [plan, setPlan] = useState<RoutePlan | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const drops = stops.filter((stop) => stop.kind === "drop").length;
+  if (drops < 2) return null;
+  const byId = new Map(stops.map((stop) => [stop.id, stop]));
+
+  async function optimize() {
+    setBusy(true);
+    setMessage("");
+    setPlan(null);
+    try {
+      const response = await fetch("/api/route-optimize", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ stops: stops.map((stop) => ({ id: stop.id, kind: stop.kind, place: stop.place })) }),
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        const missing = Array.isArray(body.missing)
+          ? (body.missing as string[]).map((id) => {
+              const index = stops.findIndex((stop) => stop.id === id);
+              return index >= 0 ? stopName(stops[index], index) : id;
+            })
+          : [];
+        setMessage([body.error || "Could not optimize the route.", ...missing].join(" "));
+        return;
+      }
+      const next = body.plan as RoutePlan;
+      if (next.unchanged) {
+        setMessage(`The current route is already the shortest (about ${next.currentMiles} miles).`);
+        return;
+      }
+      setPlan(next);
+    } catch {
+      setMessage("Could not optimize the route. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function apply() {
+    if (!plan) return;
+    try {
+      onApply(applyStopOrder(stops, plan.optimizedOrder));
+      setMessage("Route updated. Save the load to keep it.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Optimize again.");
+    }
+    setPlan(null);
+  }
+
+  const list = (order: string[]) => (
+    <ol className="mini" style={{ paddingLeft: 18 }}>
+      {order.map((id, index) => {
+        const stop = byId.get(id);
+        return <li key={id}>{stop ? stopName(stop, index).replace(/^\d+\. /, "") : id}</li>;
+      })}
+    </ol>
+  );
+
+  return (
+    <div className="route-optimizer" style={{ marginTop: 8 }}>
+      <button className="btn secondary" type="button" onClick={optimize} disabled={busy}>
+        {busy ? "Optimizing..." : "Optimize route"}
+      </button>
+      <p className="mini">Keeps pickups first and reorders the drops for the fewest miles. Miles are estimates.</p>
+      {message && <p className="mini">{message}</p>}
+      {plan && (
+        <div className="route-preview" role="dialog" aria-label="Optimized route preview">
+          <div className="grid-2">
+            <div>
+              <strong>Current route · about {plan.currentMiles} mi</strong>
+              {list(plan.currentOrder)}
+            </div>
+            <div>
+              <strong>Optimized route · about {plan.optimizedMiles} mi</strong>
+              {list(plan.optimizedOrder)}
+            </div>
+          </div>
+          <p>
+            <strong>Update the route?</strong> Saves about {Math.max(0, plan.currentMiles - plan.optimizedMiles)} miles. Sales orders stay with their drops.
+          </p>
+          <div className="actions" style={{ justifyContent: "flex-start" }}>
+            <button className="btn" type="button" onClick={apply}>
+              Yes
+            </button>
+            <button className="btn secondary" type="button" onClick={() => setPlan(null)}>
+              No
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -363,10 +599,7 @@ export default function LoadForm({
           ))}
         </select>
       </div>
-      <div className="field">
-        <label>Sales Order Number</label>
-        <input value={draft.salesOrderNumber} onChange={(event) => setDraft({ ...draft, salesOrderNumber: event.target.value })} />
-      </div>
+      <SalesOrdersEditor draft={draft} setDraft={setDraft} readOnly={readOnly} />
       <div className="grid-2">
         <div className="field">
           <label>Truck Type (optional)</label>

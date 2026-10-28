@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS loads (
   origin_json TEXT NOT NULL,
   destination_json TEXT NOT NULL,
   stops_json TEXT,
+  sales_orders_json TEXT,
   truck_type TEXT,
   transit TEXT,
   ship_date TEXT,
@@ -227,7 +228,7 @@ CREATE TABLE IF NOT EXISTS message_reads (
  */
 export const CUSTOMER_LOAD_COLUMNS = `
   id, sales_order_number, load_number, portal_status, tracking_stage, timeline_json,
-  origin_json, destination_json, stops_json, truck_type, transit, ship_date, ship_time,
+  origin_json, destination_json, stops_json, sales_orders_json, truck_type, transit, ship_date, ship_time,
   must_deliver_date, truck_eta, latest_eta, tracking_token, tracking_link, customer_cost_cents,
   rate_reason, comments, created_by, entered_by_name, entered_by_email, owner, owner_needs_check, created_at, updated_at, pending_review_count,
   sam_build_status, sam_build_error, sam_build_at
@@ -377,6 +378,7 @@ export async function openDatabase(file?: string): Promise<SqlDatabase> {
   await db.exec(SCHEMA);
   await migrateUserRoles(db);
   await migrateStops(db);
+  await ensureColumn(db, "loads", "sales_orders_json", "TEXT");
   await migrateDropCarrierColumns(db);
   await migrateReceivers(db);
   await migrateStoredBytes(db);

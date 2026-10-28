@@ -1,3 +1,4 @@
+import { joinSalesOrders, parseLegacySalesOrders, resolveSalesOrders } from "@/lib/sales-orders";
 import type {
   CustomerDocument,
   CustomerOrder,
@@ -141,9 +142,18 @@ export function serializeCustomerOrder(value: unknown, options?: CustomerViewOpt
   const stops = serializeStops(raw.stops, serializePlace(raw.origin), serializePlace(raw.destination));
   const pickup = stops.find((stop) => stop.kind === "pickup") ?? stops[0];
   const drop = [...stops].reverse().find((stop) => stop.kind === "drop") ?? stops[stops.length - 1];
+  const salesOrders = resolveSalesOrders(
+    Array.isArray(raw.salesOrders)
+      ? raw.salesOrders
+          .filter((line): line is { number: string; stopId?: unknown } => Boolean(line) && typeof (line as { number?: unknown }).number === "string")
+          .map((line) => ({ number: line.number, stopId: typeof line.stopId === "string" ? line.stopId : null }))
+      : parseLegacySalesOrders(str(raw.salesOrderNumber)).map((number) => ({ number, stopId: null })),
+    stops,
+  );
   const order: CustomerOrder = {
     id: str(raw.id),
-    salesOrderNumber: str(raw.salesOrderNumber),
+    salesOrderNumber: salesOrders.length ? joinSalesOrders(salesOrders) : str(raw.salesOrderNumber),
+    salesOrders,
     loadNumber: strOrNull(raw.loadNumber),
     portalStatus,
     trackingStage,

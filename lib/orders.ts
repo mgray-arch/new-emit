@@ -1,3 +1,11 @@
+import {
+  joinSalesOrders,
+  parseLegacySalesOrders,
+  resolveSalesOrders,
+  salesOrderLineErrors,
+  storedSalesOrders,
+  type SalesOrderLine,
+} from "@/lib/sales-orders";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { SqlArg } from "@/lib/db";
 import type { PortalContext } from "@/lib/db";
@@ -64,6 +72,7 @@ interface LoadRow {
   origin_json: string;
   destination_json: string;
   stops_json: string | null;
+  sales_orders_json?: string | null;
   truck_type: string | null;
   transit: string | null;
   ship_date: string | null;
@@ -103,16 +112,19 @@ export function likeContains(query: string): string {
 }
 
 async function rowToOrder(ctx: PortalContext, row: LoadRow, withDocuments: boolean): Promise<CustomerOrder> {
+  const stops = parseStops(row);
+  const salesOrders = storedSalesOrders(row.sales_orders_json, row.sales_order_number, stops);
   const order = serializeCustomerOrder({
     id: row.id,
-    salesOrderNumber: row.sales_order_number,
+    salesOrderNumber: salesOrders.length ? joinSalesOrders(salesOrders) : row.sales_order_number,
+    salesOrders,
     loadNumber: row.load_number,
     portalStatus: row.portal_status,
     trackingStage: row.tracking_stage,
     timeline: JSON.parse(row.timeline_json),
     origin: JSON.parse(row.origin_json),
     destination: JSON.parse(row.destination_json),
-    stops: parseStops(row),
+    stops,
     truckType: row.truck_type,
     transit: row.transit,
     shipDate: row.ship_date,
@@ -493,6 +505,17 @@ function routeFrom(input: { origin?: OrderInput["origin"]; destination?: OrderIn
   }
 }
 
+/** SO lines from the new list, or from the older single string, tied to the saved drops. */
+function salesOrdersFor(
+  input: { salesOrders?: Array<{ number: string; stopId?: string | null }>; salesOrderNumber?: string },
+  stops: Stop[],
+): SalesOrderLine[] {
+  const lines = input.salesOrders ?? parseLegacySalesOrders(input.salesOrderNumber).map((number) => ({ number, stopId: null }));
+  const resolved = resolveSalesOrders(lines, stops);
+  if (resolved.length === 0) throw new PortalError("Sales order number is required.");
+  return resolved;
+}
+
 export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: Session): Promise<{
   order: CustomerOrder;
 }> {
@@ -509,9 +532,11 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
   const customerCost = seePricing ? input.customerCost : undefined;
   const rateReason = seePricing ? input.rateReason : undefined;
   let route = drafted;
+  let salesOrders: SalesOrderLine[] = [];
   await withTransaction(ctx.db, async () => {
     const syncedStops = await syncStopLocations(ctx, drafted.stops, actor.name, input.stops ?? []);
     route = resolvedRoute({ stops: syncedStops });
+    salesOrders = salesOrdersFor(input, route.stops);
     const assignment = assignLoadOwner({
       destinationState: route.destination.state,
       equipment: input.truckType,
@@ -520,16 +545,16 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
       .prepare(
         `INSERT INTO loads (
            id, sales_order_number, load_number, portal_status, tracking_stage, timeline_json,
-           origin_json, destination_json, stops_json, truck_type, transit, ship_date, ship_time,
+           origin_json, destination_json, stops_json, sales_orders_json, truck_type, transit, ship_date, ship_time,
            must_deliver_date, truck_eta, latest_eta, tracking_token, customer_cost_cents,
            rate_reason, comments, created_by, entered_by_name, entered_by_email, owner, owner_needs_check, created_at, updated_at, pending_review_count
          ) VALUES (
-           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0
+           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0
          )`,
       )
       .run(
         id,
-        input.salesOrderNumber,
+        joinSalesOrders(salesOrders),
         null,
         portalStatus,
         trackingStage,
@@ -537,6 +562,7 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
         JSON.stringify(route.origin),
         JSON.stringify(route.destination),
         JSON.stringify(route.stops),
+        JSON.stringify(salesOrders),
         input.truckType ?? null,
         input.transit ?? null,
         input.shipDate ?? null,
@@ -592,17 +618,25 @@ export async function updateOrder(ctx: PortalContext, id: string, patch: OrderPa
   await withTransaction(ctx.db, async () => {
     const syncedStops = await syncStopLocations(ctx, drafted.stops, actor.name, patch.stops ?? drafted.stops, current.stops);
     route = resolvedRoute({ stops: syncedStops });
+    const touched = patch.salesOrders !== undefined || patch.salesOrderNumber !== undefined;
+    const salesOrders = touched ? salesOrdersFor(patch, route.stops) : resolveSalesOrders(current.salesOrders, route.stops);
+    if (salesOrders.length === 0) throw new PortalError("Sales order number is required.");
+    if (patch.salesOrders) {
+      const problems = salesOrderLineErrors(patch.salesOrders, route.stops, { required: true });
+      if (problems.length) throw new PortalError(problems[0]);
+    }
     await ctx.db
     .prepare(
       `UPDATE loads SET
-         sales_order_number = ?, portal_status = ?, tracking_stage = ?, timeline_json = ?,
+         sales_order_number = ?, sales_orders_json = ?, portal_status = ?, tracking_stage = ?, timeline_json = ?,
          origin_json = ?, destination_json = ?, stops_json = ?, truck_type = ?, transit = ?, ship_date = ?,
          ship_time = ?, must_deliver_date = ?, truck_eta = ?, customer_cost_cents = ?,
          rate_reason = ?, comments = ?, updated_at = ?
        WHERE id = ?`,
     )
     .run(
-      patch.salesOrderNumber ?? current.salesOrderNumber,
+      joinSalesOrders(salesOrders),
+      JSON.stringify(salesOrders),
       portalStatus,
       trackingStage,
       JSON.stringify(timeline),

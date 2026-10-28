@@ -1,3 +1,4 @@
+import type { SalesOrderLine } from "@/lib/sales-orders";
 export const PORTAL_STATUSES = ["being_prepared", "ready_to_ship", "shipped", "cancelled"] as const;
 export type PortalStatus = (typeof PORTAL_STATUSES)[number];
 
@@ -107,7 +108,10 @@ export interface CustomerDocument {
 /** Customer-facing shipment. Carrier pay, carrier identity, and margin are not fields on this type. */
 export interface CustomerOrder {
   id: string;
+  /** Every SO on the load joined with ", ". Kept for search, lists, and older callers. */
   salesOrderNumber: string;
+  /** One SO per line, each tied to the drop it delivers to. */
+  salesOrders: SalesOrderLine[];
   /** Real Select (SAM) load number, or null until a Select admin or a future SAM sync enters it. */
   loadNumber: string | null;
   portalStatus: PortalStatus;

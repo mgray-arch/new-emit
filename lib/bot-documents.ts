@@ -1,3 +1,4 @@
+import { SALES_ORDER_MATCH_SQL, salesOrderMatchArgs } from "@/lib/sales-orders";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { PortalContext } from "@/lib/db";
 import { ingestDocument, MAX_UPLOAD_BYTES, safeFilename, sniffUpload } from "@/lib/documents";
@@ -105,8 +106,8 @@ export async function findBotLoad(
   const byOrder = salesOrderNumber
     ? (
         await ctx.db
-          .prepare(`SELECT id, load_number, sales_order_number FROM loads WHERE sales_order_number = ?`)
-          .all(salesOrderNumber)
+          .prepare(`SELECT id, load_number, sales_order_number FROM loads WHERE ${SALES_ORDER_MATCH_SQL}`)
+          .all(...salesOrderMatchArgs(salesOrderNumber))
       ).map((row) => asLoadMatch(row))
     : null;
   if (byNumber && byOrder) {
