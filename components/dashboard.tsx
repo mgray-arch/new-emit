@@ -11,6 +11,7 @@ import StatusPill from "@/components/status-pill";
 import TrackLink from "@/components/track-link";
 import TrackingLinkField from "@/components/tracking-link-field";
 import { formatDay } from "@/lib/dates";
+import { deleteConfirmText } from "@/lib/delete-confirm";
 import { formatEnteredBy } from "@/lib/entered-by";
 import {
   LOAD_TAB_LABEL,
@@ -109,6 +110,8 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   const [submitted, setSubmitted] = useState<CustomerOrder | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     const handle = setTimeout(() => setQuery(q), 250);
@@ -198,6 +201,29 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     setSubmitted(null);
     setFormError("");
     setCreating(false);
+  }
+
+  async function removeOrder(id: string) {
+    setDeletingId(id);
+    setError("");
+    try {
+      const response = await fetch(`/api/admin/orders/${id}`, { method: "DELETE" });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setError(typeof body.error === "string" ? body.error : "Could not delete that order");
+        return;
+      }
+      setConfirmDeleteId(null);
+      setRows((current) => current.filter((order) => order.id !== id));
+      setEditing((current) => (current?.id === id ? null : current));
+      setPage(1);
+      setReload((value) => value + 1);
+      toast("Deleted.");
+    } catch {
+      setError("Could not delete that order");
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   async function save() {
@@ -528,7 +554,35 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                         {order.customerCost == null ? "Cost not set" : order.customerCost.toLocaleString("en-US", { style: "currency", currency: "USD" })}
                       </span>
                     )}
+                    {selectView && confirmDeleteId !== order.id ? (
+                      <button className="btn danger" type="button" onClick={() => setConfirmDeleteId(order.id)}>
+                        Delete
+                      </button>
+                    ) : null}
                   </div>
+                  {selectView && confirmDeleteId === order.id ? (
+                    <div className="confirm-box" onClick={(event) => event.stopPropagation()}>
+                      <p>{deleteConfirmText(order.loadNumber)}</p>
+                      <div className="actions">
+                        <button
+                          className="btn danger"
+                          type="button"
+                          disabled={deletingId === order.id}
+                          onClick={() => void removeOrder(order.id)}
+                        >
+                          {deletingId === order.id ? "Deleting…" : "Delete"}
+                        </button>
+                        <button
+                          className="btn secondary"
+                          type="button"
+                          disabled={deletingId === order.id}
+                          onClick={() => setConfirmDeleteId(null)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                 </article>
               );
             })}

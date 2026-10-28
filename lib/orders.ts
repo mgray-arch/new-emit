@@ -7,6 +7,7 @@ import { addDaysISO, denverDate, weekRange } from "@/lib/dates";
 import type { LoadTab, LoadTabCounts } from "@/lib/load-list";
 import { listCustomerDocuments } from "@/lib/documents";
 import { PortalError } from "@/lib/http";
+import { deleteStoredBytes } from "@/lib/storage";
 import type { CustomerOrder, PortalStatus, Session, TimelineEvent, TrackingStage } from "@/lib/types";
 import { STAGE_LABEL, TRACKING_STAGES, canAddLoads, canSeePricing } from "@/lib/types";
 import { syncStopLocations } from "@/lib/locations";
@@ -629,6 +630,39 @@ export async function updateOrder(ctx: PortalContext, id: string, patch: OrderPa
   const updated = await getOrder(ctx, id);
   if (!updated) throw new PortalError("Order not found", 404);
   return updated;
+}
+
+/**
+ * Removes one portal order and the rows that belong to it: stops (stored on the
+ * order), documents, photos, and their stored bytes. It does not call SAM or Load Builder.
+ */
+export async function deleteOrder(ctx: PortalContext, id: string): Promise<void> {
+  const existing = await ctx.db.prepare(`SELECT id FROM loads WHERE id = ?`).get(id);
+  if (!existing) throw new PortalError("Order not found", 404);
+
+  const locators = (
+    await Promise.all([
+      ctx.db.prepare(`SELECT storage_key FROM customer_documents WHERE load_id = ?`).all(id),
+      ctx.db.prepare(`SELECT storage_key FROM internal_documents WHERE load_id = ?`).all(id),
+      ctx.db.prepare(`SELECT storage_key FROM carrier_photos WHERE load_id = ?`).all(id),
+    ])
+  )
+    .flat()
+    .map((row) => String(row.storage_key ?? ""))
+    .filter((locator) => locator.length > 0);
+
+  for (const locator of locators) {
+    await deleteStoredBytes(locator);
+  }
+
+  await withTransaction(ctx.db, async () => {
+    await ctx.db.prepare(`DELETE FROM customer_documents WHERE load_id = ?`).run(id);
+    await ctx.db.prepare(`DELETE FROM internal_documents WHERE load_id = ?`).run(id);
+    await ctx.db.prepare(`DELETE FROM document_uploads WHERE load_id = ?`).run(id);
+    await ctx.db.prepare(`DELETE FROM carrier_photos WHERE load_id = ?`).run(id);
+    const removed = await ctx.db.prepare(`DELETE FROM loads WHERE id = ?`).run(id);
+    if (!removed.changes) throw new PortalError("Order not found", 404);
+  });
 }
 
 /** Select staff change the owner. This does not post to Slack. */
