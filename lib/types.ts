@@ -105,7 +105,7 @@ export interface CustomerDocument {
   createdAt: string;
 }
 
-/** Customer-facing shipment. Carrier pay, carrier identity, and margin are not fields on this type. */
+/** Customer-facing shipment. Carrier pay and margin are never fields on this type. */
 export interface CustomerOrder {
   id: string;
   /** Every SO on the load joined with ", ". Kept for search, lists, and older callers. */
@@ -160,6 +160,33 @@ export interface CustomerOrder {
   samBuildAt?: string | null;
   /** Select only. Present when SAM_LOAD_URL_TEMPLATE can build a link. */
   samUrl?: string | null;
+  /**
+   * Who is hauling the load. Identity only: never pay. Omitted for receivers,
+   * public tracking, and the assistant. Present for Select and EMIT users.
+   */
+  carrierName?: string | null;
+  carrierMc?: string | null;
+  driverName?: string | null;
+  /** Last BOL print, plus whether a reprint is needed. Omitted outside the signed-in portal. */
+  bolPrint?: BolPrintSummary | null;
+  /** Older prints, newest first. Present on the load detail, omitted from the list. */
+  bolPrints?: BolPrintRecord[];
+}
+
+export interface BolPrintRecord {
+  version: number;
+  printedAt: string;
+  printedByName: string;
+  carrierName: string | null;
+  carrierMc: string | null;
+  driverName: string | null;
+  documentId: string;
+}
+
+export interface BolPrintSummary extends BolPrintRecord {
+  reprint: boolean;
+  reasons: Array<"carrier_changed" | "bol_updated">;
+  bolRemoved: boolean;
 }
 
 export interface PublicTracking {
@@ -200,10 +227,15 @@ export const PERMISSION_LABEL: Record<EmitPermission, string> = {
   full: "Full access",
 };
 
+/** Sales and Loader are EMIT profiles. Null is a standard EMIT user. */
+export type EmitProfile = "sales" | "loader";
+
 /** Select is previewing one EMIT access plus one permission. The preview cannot write. */
 export interface ViewAsPreview {
   access: EmitAccess;
   permission: EmitPermission;
+  /** Set when Select is previewing Sales or Loader. */
+  profile?: EmitProfile | null;
 }
 
 export type Viewer =
@@ -212,6 +244,7 @@ export type Viewer =
       role?: string | null;
       permission?: EmitPermission | null;
       viewAs?: ViewAsPreview | null;
+      profile?: EmitProfile | null;
     }
   | null
   | undefined;
@@ -222,6 +255,17 @@ export interface ResolvedAccess {
   /** Real Select session, not a view-as preview. */
   select: boolean;
   viewAs: ViewAsPreview | null;
+  profile: EmitProfile | null;
+}
+
+export function isEmitProfile(value: string | null | undefined): value is EmitProfile {
+  return value === "sales" || value === "loader";
+}
+
+function profileFrom(viewer: Viewer): EmitProfile | null {
+  if (!viewer || typeof viewer !== "object") return null;
+  if (viewer.viewAs) return isEmitProfile(viewer.viewAs.profile) ? viewer.viewAs.profile : null;
+  return isEmitProfile(viewer.profile) ? viewer.profile : null;
 }
 
 export function isEmitPermission(value: string | null | undefined): value is EmitPermission {
@@ -236,14 +280,15 @@ export function resolveAccess(viewer: Viewer): ResolvedAccess {
       permission: viewer.viewAs.permission,
       select: false,
       viewAs: viewer.viewAs,
+      profile: profileFrom(viewer),
     };
   }
   const role = typeof viewer === "string" ? viewer : (viewer?.role ?? "");
-  if (role === "admin") return { role: "admin", permission: null, select: true, viewAs: null };
-  if (!role) return { role: "", permission: null, select: false, viewAs: null };
+  if (role === "admin") return { role: "admin", permission: null, select: true, viewAs: null, profile: null };
+  if (!role) return { role: "", permission: null, select: false, viewAs: null, profile: null };
   const explicit = viewer && typeof viewer === "object" ? viewer.permission : undefined;
   const permission = isEmitPermission(explicit) ? explicit : permissionFromRole(role);
-  return { role, permission, select: false, viewAs: null };
+  return { role, permission, select: false, viewAs: null, profile: profileFrom(viewer) };
 }
 
 /**
@@ -255,6 +300,7 @@ export function resolveAccess(viewer: Viewer): ResolvedAccess {
 export function canSeePricing(viewer: Viewer): boolean {
   const access = resolveAccess(viewer);
   if (access.select) return true;
+  if (access.profile === "sales" || access.profile === "loader") return false;
   if (access.role !== "emit_admin") return false;
   return access.permission === "pricing" || access.permission === "full";
 }
@@ -263,7 +309,46 @@ export function canSeePricing(viewer: Viewer): boolean {
 export function canAddLoads(viewer: Viewer): boolean {
   const access = resolveAccess(viewer);
   if (access.select) return true;
+  if (access.profile === "loader") return false;
+  if (access.profile === "sales") return access.permission !== "view";
   return access.permission === "add" || access.permission === "full";
+}
+
+/** Same people who can add a load can edit its fields. Loader cannot. */
+export function canEditLoad(viewer: Viewer): boolean {
+  return canAddLoads(viewer);
+}
+
+/** BOL, POD, and other files. Loader can upload. View only cannot. */
+export function canUploadDocs(viewer: Viewer): boolean {
+  const access = resolveAccess(viewer);
+  if (access.select) return true;
+  if (access.profile === "loader") return true;
+  return canAddLoads(viewer);
+}
+
+/** Freight photos. Select and Loader. Not a pricing permission. */
+export function canUploadPhotos(viewer: Viewer): boolean {
+  const access = resolveAccess(viewer);
+  if (access.select) return true;
+  return access.profile === "loader";
+}
+
+/**
+ * Print records an uploaded BOL. Every signed-in Select or EMIT user who can
+ * see the load may print, including Sales and Loader. The route still rejects view-as.
+ */
+export function canPrintBol(viewer: Viewer): boolean {
+  const access = resolveAccess(viewer);
+  return access.select || access.role === "customer" || access.role === "emit_viewer" || access.role === "emit_admin";
+}
+
+/**
+ * Driver, carrier company, and MC. Select and every EMIT user, including Sales
+ * and Loader. Never a receiver, the public tracking page, or the assistant.
+ */
+export function canSeeCarrierIdentity(viewer: Viewer): boolean {
+  return canPrintBol(viewer);
 }
 
 /**
@@ -273,6 +358,7 @@ export function canAddLoads(viewer: Viewer): boolean {
  */
 export function canManageLocations(viewer: Viewer): boolean {
   const access = resolveAccess(viewer);
+  if (access.profile === "sales" || access.profile === "loader") return false;
   if (access.select) return true;
   return access.role === "emit_admin" && access.permission !== "view";
 }
@@ -303,6 +389,8 @@ export interface Session {
   passwordEpoch?: number;
   /** EMIT permission from the user row. Null for Select. Ignored while viewAs is set. */
   permission?: EmitPermission | null;
+  /** Sales or Loader. Null for a standard user and for Select. Re-read from the user row on each request. */
+  profile?: EmitProfile | null;
   /** The signed-in role. Equals role unless Select is previewing an EMIT role. */
   actorRole?: PortalRole;
   /** Set only for a Select admin who is previewing an EMIT role. The preview is read-only. */

@@ -62,6 +62,21 @@ export function formatDay(iso: string | null): string {
   return name;
 }
 
+/** Print history is shown in America/Boise (Mountain Time). Stored timestamps stay UTC. */
+export function formatWhenBoise(iso: string | null): string {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Boise",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(date);
+}
+
 export function formatWhen(iso: string | null): string {
   if (!iso) return "—";
   const date = new Date(iso);

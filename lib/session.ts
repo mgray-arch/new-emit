@@ -1,7 +1,7 @@
 import { jwtVerify, SignJWT } from "jose";
 import { safeNextPath } from "@/lib/paths";
 import { requestOrigin } from "@/lib/public-url";
-import { isEmitPermission, type EmitAccess, type EmitPermission, type Session, type ViewAsPreview } from "@/lib/types";
+import { isEmitPermission, isEmitProfile, type EmitAccess, type EmitPermission, type Session, type ViewAsPreview } from "@/lib/types";
 
 export { safeNextPath };
 
@@ -89,7 +89,8 @@ const LEGACY_VIEW_AS: Record<string, ViewAsPreview> = {
 };
 
 export function encodeViewAs(preview: ViewAsPreview): string {
-  return `${preview.access}:${preview.permission}`;
+  const base = `${preview.access}:${preview.permission}`;
+  return preview.profile ? `${base}:${preview.profile}` : base;
 }
 
 /** Cookie values from this build, plus the three older role names. */
@@ -97,9 +98,12 @@ export function parseViewAs(value: string | null | undefined): ViewAsPreview | n
   if (!value) return null;
   const legacy = LEGACY_VIEW_AS[value];
   if (legacy) return legacy;
-  const [access, permission] = value.split(":");
+  const [access, permission, profile] = value.split(":");
   if ((access === "admin" || access === "regular") && isEmitPermission(permission)) {
-    return { access: access as EmitAccess, permission: permission as EmitPermission };
+    if (profile && !isEmitProfile(profile)) return null;
+    const preview: ViewAsPreview = { access, permission };
+    if (isEmitProfile(profile)) preview.profile = profile;
+    return preview;
   }
   return null;
 }

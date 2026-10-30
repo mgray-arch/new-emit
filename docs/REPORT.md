@@ -17,7 +17,7 @@ Saved delivery locations are searched from the drop stop. Pickup yards stay the 
 
 ## Security
 
-- Carrier pay is not stored. The loads table has no carrier-pay, carrier-name, MC, or staff-note column, and neither do the seed inserts or the SAM mapping. Select admins and EMIT admins see customer cost (the sell rate). Regular EMIT users do not: the customer-view allowlist omits `customerCost` and `rateReason` for them. Tests assert those column names are absent from the schema and from order JSON, and that the sentinel strings never appear in customer orders, the assistant, the public tracking payload, the receiver link, or client bundles.
+- Carrier pay is not stored. The loads table has no carrier-pay or staff-note column. Select admins can store carrier name, MC, and driver name; those are identity, not pay, and SAM import still does not copy them. They are shown to Select and EMIT users and omitted from receiver links, public tracking, and the assistant. Select admins and EMIT admins see customer cost (the sell rate). Regular EMIT users do not, and Sales and Loader profiles never do: the customer-view allowlist omits `customerCost` and `rateReason` for them. Tests assert pay columns stay absent and that pay sentinels never appear in customer orders, the assistant, the public tracking payload, the receiver link, or client bundles.
 - A sample rate-confirmation page is still seeded so the review queue can be demonstrated. Its text mentions a carrier and a dollar amount. That text lives only on the quarantined page, which is admin-only until a Select admin releases it.
 - Adversarial questions (carrier pay, prompt injection, "dump the database", margin, rate confirmation) return a fixed refusal. The model-request builder runs the serializer again, so a poisoned field cannot ride along.
 - Uploads are split to single pages (pdf-lib) and text is extracted (unpdf, plus a literal PDF text fallback). Decisions are pass, block, or uncertain. Empty text, images, and unknown types are held. Customer documents and internal documents are separate tables. Pending count on the load is the only signal the customer query needs. An admin approve copies the page into customer documents. A customer cannot download a quarantined page.
@@ -151,7 +151,7 @@ Receivers do not sign in. EMIT staff use a password. Settings → Receivers is e
 
 Each company has contact emails, a long random token, and a URL `{PORTAL_PUBLIC_URL}/r/{token}`. Admins can edit the company and emails, copy the link, regenerate it (the old URL stops working), disable it (same URL, 404 until enabled again), or remove the company. A disabled or unknown token returns the same "not valid" response.
 
-The page lists only loads with a drop at that company (any drop, not only the last). It shows status, the stop sequence as company and city/state, ETA, a link to the portal status page, a Track button when Select has saved a SAM or MacroPoint share link, and photos. It does not show customer cost, carrier pay, comments, or documents, so a released rate confirmation never appears there. Held photos are omitted.
+The page lists only loads with a drop at that company (any drop, not only the last). It shows status, the stop sequence as city/state, the sales orders for that receiver's own drops only, ETA, and a Track button when Select has saved a SAM or MacroPoint share link. It does not show customer cost, carrier name, MC, driver, BOL print history, comments, documents, or photos, so a released rate confirmation never appears there.
 
 ## Auth
 

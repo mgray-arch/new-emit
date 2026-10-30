@@ -36,6 +36,7 @@ export default async function ReceiverLinkPage({ params }: { params: Promise<{ t
             {load.stops.map((stop, stopIndex) => (
               <li key={`${stop.kind}-${stopIndex}`}>
                 {stop.kind === "pickup" ? "Pickup" : "Drop"} · {stop.city}, {stop.state}
+                {stop.salesOrders?.length ? ` · SO: ${stop.salesOrders.join(", ")}` : ""}
               </li>
             ))}
           </ol>

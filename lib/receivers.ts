@@ -3,6 +3,7 @@ import { assertNoCarrierFields } from "@/lib/customer-view";
 import type { PortalContext } from "@/lib/db";
 import { PortalError } from "@/lib/http";
 import { listOrders } from "@/lib/orders";
+import { salesOrdersForStop } from "@/lib/sales-orders";
 import { portalPublicUrl } from "@/lib/public-url";
 import type { PortalStatus, StopKind, TimelineEvent, TrackingStage } from "@/lib/types";
 
@@ -22,7 +23,7 @@ export interface ReceiverShipment {
   portalStatus: PortalStatus;
   trackingStage: TrackingStage;
   timeline: TimelineEvent[];
-  stops: Array<{ kind: StopKind; city: string; state: string }>;
+  stops: Array<{ kind: StopKind; city: string; state: string; salesOrders?: string[] }>;
   shipDate: string | null;
   mustDeliverDate: string | null;
   latestEta: string | null;
@@ -165,7 +166,7 @@ const LOAD_KEYS = new Set([
   "latestEta",
   "trackingLink",
 ]);
-const STOP_KEYS = new Set(["kind", "city", "state"]);
+const STOP_KEYS = new Set(["kind", "city", "state", "salesOrders"]);
 const TIMELINE_KEYS = new Set(["stage", "at", "label"]);
 
 function assertKeys(value: object, allowed: Set<string>): void {
@@ -191,6 +192,10 @@ export function assertReceiverPayload(value: unknown): void {
     for (const event of shipment.timeline) assertKeys(event, TIMELINE_KEYS);
   }
   assertNoCarrierFields(value);
+  const json = JSON.stringify(value);
+  for (const key of ["carrierName", "carrierMc", "driverName", "bolPrint", "bolPrints", "documents", "carrierPay", "customerCost"]) {
+    if (json.includes(`"${key}"`)) throw new Error(`Receiver payload contained ${key}`);
+  }
 }
 
 /** Load number, status, lane, dates, and the public tracking link. No files, streets, or pay. */
@@ -211,11 +216,12 @@ export async function shipmentsForReceiver(ctx: PortalContext, company: string):
       portalStatus: order.portalStatus,
       trackingStage: order.trackingStage,
       timeline: order.timeline,
-      stops: order.stops.map((stop) => ({
-        kind: stop.kind,
-        city: stop.place.city,
-        state: stop.place.state,
-      })),
+      stops: order.stops.map((stop) => {
+        const base = { kind: stop.kind, city: stop.place.city, state: stop.place.state };
+        const ownDrop = stop.kind === "drop" && stop.place.company.trim().toLowerCase() === target;
+        if (!ownDrop) return base;
+        return { ...base, salesOrders: salesOrdersForStop(order.salesOrders, stop.id) };
+      }),
       shipDate: order.shipDate,
       mustDeliverDate: order.mustDeliverDate,
       latestEta: order.latestEta,

@@ -30,7 +30,7 @@ export async function requireSession(req: Request): Promise<Session | Response> 
   const viewAs = actor.role === "admin" ? viewAsPreview(req) : null;
   if (!viewAs) return { ...actor, actorRole: actor.role, viewAs: null };
   const role: PortalRole = viewAs.access === "admin" ? "emit_admin" : "customer";
-  return { ...actor, role, permission: viewAs.permission, actorRole: "admin", viewAs };
+  return { ...actor, role, permission: viewAs.permission, profile: viewAs.profile ?? null, actorRole: "admin", viewAs };
 }
 
 /** Select view-as can look. It cannot create, edit, upload, or change a password. */

@@ -395,7 +395,11 @@ describe("POST /api/integrations/loads/import", () => {
     expect(JSON.stringify(stored)).not.toMatch(/carrierPay|carrierName|mcNumber|rateConfirmation|rate_con|998877|BLACKHAWK|RATECON|8765/);
     const tables = await ctx.db.prepare(`SELECT name, sql FROM sqlite_master WHERE type = 'table'`).all();
     for (const table of tables) {
-      expect(String(table.sql ?? "").toLowerCase()).not.toMatch(/carrier_pay|carrier_name|carrier_mc|carrier_cost|carrier_rate/);
+      const sql = String(table.sql ?? "").toLowerCase();
+      expect(sql).not.toMatch(/carrier_pay|carrier_cost|carrier_rate|staff_notes/);
+      if (table.name !== "loads" && table.name !== "bol_prints") {
+        expect(sql).not.toMatch(/carrier_name|carrier_mc|driver_name/);
+      }
     }
     expect(Number((await ctx.db.prepare(`SELECT COUNT(*) AS n FROM customer_documents`).get())?.n ?? 0)).toBe(docsBefore);
   });

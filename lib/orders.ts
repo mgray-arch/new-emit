@@ -1,11 +1,16 @@
+import { bolPrintState } from "@/lib/bol-prints";
+import { normalizeCarrierMc, normalizeCarrierName, normalizeDriverName } from "@/lib/carrier";
 import {
   joinSalesOrders,
   parseLegacySalesOrders,
   resolveSalesOrders,
+  SALES_ORDER_MATCH_SQL,
   salesOrderLineErrors,
+  salesOrderMatchArgs,
   storedSalesOrders,
   type SalesOrderLine,
 } from "@/lib/sales-orders";
+import { nextSuffix } from "@/lib/so-suffix";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { SqlArg } from "@/lib/db";
 import type { PortalContext } from "@/lib/db";
@@ -14,16 +19,15 @@ import { serializeCustomerOrder, trackingUrlFor } from "@/lib/customer-view";
 import { addDaysISO, denverDate, weekRange } from "@/lib/dates";
 import type { LoadTab, LoadTabCounts } from "@/lib/load-list";
 import { listCustomerDocuments } from "@/lib/documents";
-import { PortalError } from "@/lib/http";
+import { PortalError, SalesOrderConflictError } from "@/lib/http";
 import { deleteStoredBytes } from "@/lib/storage";
 import type { CustomerOrder, PortalStatus, Session, TimelineEvent, TrackingStage } from "@/lib/types";
-import { STAGE_LABEL, TRACKING_STAGES, canAddLoads, canSeePricing } from "@/lib/types";
+import { STAGE_LABEL, TRACKING_STAGES, canAddLoads, canEditLoad, canSeePricing, type Stop } from "@/lib/types";
 import { syncStopLocations } from "@/lib/locations";
 import { assignLoadOwner, type LoadOwner } from "@/lib/load-owner";
 import { notifyNewLoad } from "@/lib/slack-new-load";
 import { legacyStops, resolvedRoute } from "@/lib/stops";
 import type { OrderInput, OrderPatch } from "@/lib/validate";
-import type { Stop } from "@/lib/types";
 
 export interface OrderFilter {
   q?: string;
@@ -98,6 +102,9 @@ interface LoadRow {
   sam_build_status: string | null;
   sam_build_error: string | null;
   sam_build_at: string | null;
+  carrier_name: string | null;
+  carrier_mc: string | null;
+  driver_name: string | null;
 }
 
 const LIST_SQL_HEAD = `
@@ -146,9 +153,18 @@ async function rowToOrder(ctx: PortalContext, row: LoadRow, withDocuments: boole
     bolCount: row.bol_count ?? 0,
     pendingReviewCount: row.pending_review_count ?? 0,
     documents: withDocuments ? await listCustomerDocuments(ctx, row.id) : [],
-  }, { includeEnteredBy: true });
+    carrierName: row.carrier_name ?? null,
+    carrierMc: row.carrier_mc ?? null,
+    driverName: row.driver_name ?? null,
+  }, { includeEnteredBy: true, includeCarrier: true });
   const status = row.sam_build_status === "building" || row.sam_build_status === "failed" ? row.sam_build_status : null;
   const owner = row.owner === "Drew" || row.owner === "Ainsley" ? row.owner : null;
+  const prints = await bolPrintState(
+    ctx,
+    row.id,
+    { carrierName: row.carrier_name ?? null, carrierMc: row.carrier_mc ?? null, driverName: row.driver_name ?? null },
+    { history: withDocuments },
+  );
   return {
     ...order,
     owner,
@@ -156,6 +172,8 @@ async function rowToOrder(ctx: PortalContext, row: LoadRow, withDocuments: boole
     samBuildStatus: status,
     samBuildError: row.sam_build_error || null,
     samBuildAt: row.sam_build_at || null,
+    bolPrint: prints.summary,
+    ...(withDocuments ? { bolPrints: prints.history } : {}),
   };
 }
 
@@ -293,9 +311,9 @@ function buildWhere(filter: OrderFilter, today: string): { sql: string; params: 
   if (filter.q && filter.q.trim()) {
     const like = likeContains(filter.q.trim());
     clauses.push(
-      `(sales_order_number LIKE ? ESCAPE '\\' OR load_number LIKE ? ESCAPE '\\' OR origin_json LIKE ? ESCAPE '\\' OR destination_json LIKE ? ESCAPE '\\' OR IFNULL(stops_json, '') LIKE ? ESCAPE '\\')`,
+      `(sales_order_number LIKE ? ESCAPE '\\' OR load_number LIKE ? ESCAPE '\\' OR origin_json LIKE ? ESCAPE '\\' OR destination_json LIKE ? ESCAPE '\\' OR IFNULL(stops_json, '') LIKE ? ESCAPE '\\' OR IFNULL(carrier_name, '') LIKE ? ESCAPE '\\' OR IFNULL(carrier_mc, '') LIKE ? ESCAPE '\\' OR IFNULL(driver_name, '') LIKE ? ESCAPE '\\')`,
     );
-    params.push(like, like, like, like, like);
+    params.push(like, like, like, like, like, like, like, like);
   }
   return { sql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
 }
@@ -505,6 +523,127 @@ function routeFrom(input: { origin?: OrderInput["origin"]; destination?: OrderIn
   }
 }
 
+function collectStoredNumbers(salesOrderNumber: string | null, salesOrdersJson: string | null): string[] {
+  const numbers: string[] = [];
+  if (salesOrdersJson) {
+    try {
+      const parsed = JSON.parse(salesOrdersJson);
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (item && typeof item.number === "string") numbers.push(item.number);
+        }
+      }
+    } catch {
+      /* the string column still counts */
+    }
+  }
+  numbers.push(...parseLegacySalesOrders(salesOrderNumber));
+  return numbers;
+}
+
+/** Every SO already on a load that shares this base, including cancelled loads. */
+export async function salesOrdersSharingBase(ctx: PortalContext, raw: string): Promise<string[]> {
+  const base = nextSuffix(raw, []).base;
+  if (!base) return [];
+  const escaped = base.replace(/[\\%_]/g, (char) => `\\${char}`);
+  const like = `%${escaped}%`;
+  const rows = await ctx.db
+    .prepare(
+      `SELECT sales_order_number, sales_orders_json FROM loads
+       WHERE UPPER(sales_order_number) LIKE ? ESCAPE '\\'
+          OR UPPER(IFNULL(sales_orders_json, '')) LIKE ? ESCAPE '\\'`,
+    )
+    .all(like, like);
+  const numbers: string[] = [];
+  for (const row of rows) {
+    numbers.push(...collectStoredNumbers(String(row.sales_order_number ?? ""), row.sales_orders_json == null ? null : String(row.sales_orders_json)));
+  }
+  return numbers;
+}
+
+export async function nextSalesOrderSuffix(ctx: PortalContext, raw: string) {
+  return nextSuffix(raw, await salesOrdersSharingBase(ctx, raw));
+}
+
+/** Blocks a second load from saving an SO that is already stored, including on a cancelled load. */
+export async function assertSalesOrdersAvailable(ctx: PortalContext, lines: SalesOrderLine[], exceptLoadId?: string): Promise<void> {
+  const conflicts: Array<{ number: string; suggestion: string | null }> = [];
+  for (const line of lines) {
+    const params = salesOrderMatchArgs(line.number);
+    const row = await ctx.db
+      .prepare(`SELECT id FROM loads WHERE ${SALES_ORDER_MATCH_SQL}${exceptLoadId ? " AND id <> ?" : ""} LIMIT 1`)
+      .get(...params, ...(exceptLoadId ? [exceptLoadId] : []));
+    if (!row) continue;
+    const next = await nextSalesOrderSuffix(ctx, line.number);
+    conflicts.push({ number: line.number, suggestion: next.suggestion });
+  }
+  if (!conflicts.length) return;
+  const first = conflicts[0];
+  const message = first.suggestion
+    ? `${first.number} was just used; use ${first.suggestion}?`
+    : `${first.number} is already on another load. Enter a different sales order.`;
+  throw new SalesOrderConflictError(message, conflicts);
+}
+
+export interface CopyDraftLine {
+  number: string;
+  stopId: string | null;
+  suggestion: string | null;
+  highestInUse: string | null;
+  tooLong: boolean;
+}
+
+export interface CopyDraft {
+  copiedFromId: string;
+  portalStatus: "being_prepared";
+  stops: Stop[];
+  truckType: string | null;
+  transit: string | null;
+  shipDate: string | null;
+  shipTime: string | null;
+  mustDeliverDate: string | null;
+  truckEta: string | null;
+  comments: string;
+  salesOrders: CopyDraftLine[];
+}
+
+/** Prefill for a new load. New stop ids, suggested SOs, no documents, cost, load number, or tracking link. */
+export async function copyDraft(ctx: PortalContext, id: string): Promise<CopyDraft> {
+  const order = await getOrder(ctx, id);
+  if (!order) throw new PortalError("Order not found", 404);
+  const idMap = new Map<string, string>();
+  const stops = order.stops.map((stop) => {
+    const nextId = randomUUID();
+    idMap.set(stop.id, nextId);
+    return { ...stop, id: nextId };
+  });
+  const salesOrders: CopyDraftLine[] = [];
+  for (const line of order.salesOrders) {
+    const next = await nextSalesOrderSuffix(ctx, line.number);
+    const stopId = line.stopId ? (idMap.get(line.stopId) ?? null) : null;
+    salesOrders.push({
+      number: next.suggestion ?? "",
+      stopId,
+      suggestion: next.suggestion,
+      highestInUse: next.highestInUse,
+      tooLong: next.tooLong,
+    });
+  }
+  return {
+    copiedFromId: order.id,
+    portalStatus: "being_prepared",
+    stops,
+    truckType: order.truckType,
+    transit: order.transit,
+    shipDate: order.shipDate,
+    shipTime: order.shipTime,
+    mustDeliverDate: order.mustDeliverDate,
+    truckEta: order.truckEta,
+    comments: order.comments,
+    salesOrders,
+  };
+}
+
 /** SO lines from the new list, or from the older single string, tied to the saved drops. */
 function salesOrdersFor(
   input: { salesOrders?: Array<{ number: string; stopId?: string | null }>; salesOrderNumber?: string },
@@ -531,12 +670,18 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
   const seePricing = canSeePricing(actor);
   const customerCost = seePricing ? input.customerCost : undefined;
   const rateReason = seePricing ? input.rateReason : undefined;
+  let copiedFromId: string | null = null;
+  if (input.copiedFromId) {
+    const source = await ctx.db.prepare(`SELECT id FROM loads WHERE id = ?`).get(input.copiedFromId);
+    copiedFromId = source ? input.copiedFromId : null;
+  }
   let route = drafted;
   let salesOrders: SalesOrderLine[] = [];
   await withTransaction(ctx.db, async () => {
     const syncedStops = await syncStopLocations(ctx, drafted.stops, actor.name, input.stops ?? []);
     route = resolvedRoute({ stops: syncedStops });
     salesOrders = salesOrdersFor(input, route.stops);
+    await assertSalesOrdersAvailable(ctx, salesOrders);
     const assignment = assignLoadOwner({
       destinationState: route.destination.state,
       equipment: input.truckType,
@@ -547,9 +692,9 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
            id, sales_order_number, load_number, portal_status, tracking_stage, timeline_json,
            origin_json, destination_json, stops_json, sales_orders_json, truck_type, transit, ship_date, ship_time,
            must_deliver_date, truck_eta, latest_eta, tracking_token, customer_cost_cents,
-           rate_reason, comments, created_by, entered_by_name, entered_by_email, owner, owner_needs_check, created_at, updated_at, pending_review_count
+           rate_reason, comments, created_by, entered_by_name, entered_by_email, owner, owner_needs_check, created_at, updated_at, copied_from_id, pending_review_count
          ) VALUES (
-           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0
+           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0
          )`,
       )
       .run(
@@ -580,6 +725,7 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
         assignment.needsCheck ? 1 : 0,
         now,
         now,
+        copiedFromId,
       );
   });
   const order = await getOrder(ctx, id);
@@ -590,7 +736,7 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
 
 export async function updateOrder(ctx: PortalContext, id: string, patch: OrderPatch, actor: Session): Promise<CustomerOrder> {
   if (actor.viewAs) throw new PortalError("View-as is read-only. Switch back to Select view to change anything.", 403);
-  if (!canAddLoads(actor)) throw new PortalError("This account can view loads but cannot change them.", 403);
+  if (!canEditLoad(actor)) throw new PortalError("This account can view loads but cannot change them.", 403);
   const existing = (await ctx.db.prepare(`${LIST_SQL_HEAD} WHERE id = ?`).get(id)) as LoadRow | undefined;
   if (!existing) throw new PortalError("Order not found", 404);
   const current = await rowToOrder(ctx, existing, false);
@@ -625,6 +771,7 @@ export async function updateOrder(ctx: PortalContext, id: string, patch: OrderPa
       const problems = salesOrderLineErrors(patch.salesOrders, route.stops, { required: true });
       if (problems.length) throw new PortalError(problems[0]);
     }
+    if (touched) await assertSalesOrdersAvailable(ctx, salesOrders, id);
     await ctx.db
     .prepare(
       `UPDATE loads SET
@@ -690,6 +837,7 @@ export async function deleteOrder(ctx: PortalContext, id: string): Promise<void>
   }
 
   await withTransaction(ctx.db, async () => {
+    await ctx.db.prepare(`DELETE FROM bol_prints WHERE load_id = ?`).run(id);
     await ctx.db.prepare(`DELETE FROM customer_documents WHERE load_id = ?`).run(id);
     await ctx.db.prepare(`DELETE FROM internal_documents WHERE load_id = ?`).run(id);
     await ctx.db.prepare(`DELETE FROM document_uploads WHERE load_id = ?`).run(id);
@@ -697,6 +845,36 @@ export async function deleteOrder(ctx: PortalContext, id: string): Promise<void>
     const removed = await ctx.db.prepare(`DELETE FROM loads WHERE id = ?`).run(id);
     if (!removed.changes) throw new PortalError("Order not found", 404);
   });
+}
+
+/** Select staff set who is hauling the load. Pay is not a field. Blank clears a value and counts as a change. */
+export async function setLoadCarrier(
+  ctx: PortalContext,
+  id: string,
+  input: { carrierName?: string | null; carrierMc?: string | null; driverName?: string | null },
+): Promise<CustomerOrder> {
+  const existing = await ctx.db
+    .prepare(`SELECT id, carrier_name, carrier_mc, driver_name FROM loads WHERE id = ?`)
+    .get(id);
+  if (!existing) throw new PortalError("Order not found", 404);
+  const carrierName = input.carrierName === undefined ? ((existing.carrier_name as string | null) ?? null) : normalizeCarrierName(input.carrierName);
+  const carrierMc = input.carrierMc === undefined ? ((existing.carrier_mc as string | null) ?? null) : normalizeCarrierMc(input.carrierMc);
+  const driverName = input.driverName === undefined ? ((existing.driver_name as string | null) ?? null) : normalizeDriverName(input.driverName);
+  const changed =
+    (existing.carrier_name ?? null) !== carrierName ||
+    (existing.carrier_mc ?? null) !== carrierMc ||
+    (existing.driver_name ?? null) !== driverName;
+  if (changed) {
+    const now = ctx.now().toISOString();
+    await ctx.db
+      .prepare(
+        `UPDATE loads SET carrier_name = ?, carrier_mc = ?, driver_name = ?, carrier_updated_at = ?, bol_changed_at = ?, updated_at = ? WHERE id = ?`,
+      )
+      .run(carrierName, carrierMc, driverName, now, now, now, id);
+  }
+  const order = await getOrder(ctx, id);
+  if (!order) throw new PortalError("Order not found", 404);
+  return order;
 }
 
 /** Select staff change the owner. This does not post to Slack. */

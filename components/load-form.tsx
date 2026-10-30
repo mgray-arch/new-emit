@@ -28,8 +28,17 @@ export interface DraftSalesOrder {
   stopId: string | null;
 }
 
+export interface SoHint {
+  suggestion: string | null;
+  highestInUse: string | null;
+  tooLong: boolean;
+}
+
 export interface Draft {
   salesOrders: DraftSalesOrder[];
+  /** Shown under each SO while copying a load. Index matches salesOrders. */
+  soHints?: Array<SoHint | null>;
+  copiedFromId?: string | null;
   origin: Place;
   destination: Place;
   stops: DraftStop[];
@@ -116,6 +125,44 @@ export function draftFromOrder(order: CustomerOrder): Draft {
   };
 }
 
+/** The copy-draft API response, mapped into the form. Cost, documents, and load number are not included. */
+export function draftFromCopy(draft: {
+  copiedFromId: string;
+  portalStatus: Draft["portalStatus"];
+  stops: Draft["stops"];
+  truckType: string | null;
+  transit: string | null;
+  shipDate: string | null;
+  shipTime: string | null;
+  mustDeliverDate: string | null;
+  truckEta: string | null;
+  comments: string;
+  salesOrders: Array<DraftSalesOrder & SoHint>;
+}): Draft {
+  const stops = draft.stops.length ? draft.stops : emptyDraft().stops;
+  return {
+    salesOrders: draft.salesOrders.map((line) => ({ number: line.number, stopId: line.stopId })),
+    soHints: draft.salesOrders.map((line) => ({
+      suggestion: line.suggestion,
+      highestInUse: line.highestInUse,
+      tooLong: line.tooLong,
+    })),
+    copiedFromId: draft.copiedFromId,
+    stops,
+    ...endsFrom(stops),
+    portalStatus: "being_prepared",
+    truckType: draft.truckType ?? "",
+    transit: draft.transit ?? "",
+    shipDate: draft.shipDate ?? "",
+    shipTime: draft.shipTime ?? "",
+    mustDeliverDate: draft.mustDeliverDate ?? "",
+    truckEta: draft.truckEta ?? "",
+    customerCost: "",
+    rateReason: "",
+    comments: draft.comments ?? "",
+  };
+}
+
 export function payloadFromDraft(draft: Draft, options?: { includePricing?: boolean }) {
   const includePricing = options?.includePricing !== false;
   const drops = draft.stops.filter((stop) => stop.kind === "drop");
@@ -160,6 +207,7 @@ export function payloadFromDraft(draft: Draft, options?: { includePricing?: bool
         }
       : {}),
     comments: draft.comments,
+    ...(draft.copiedFromId ? { copiedFromId: draft.copiedFromId } : {}),
   };
 }
 
@@ -434,7 +482,28 @@ function SalesOrdersEditor({ draft, setDraft, readOnly }: { draft: Draft; setDra
             {problem && <p className="error" style={{ flexBasis: "100%", margin: 0 }}>{problem}</p>}
             {!problem && duplicate && <p className="error" style={{ flexBasis: "100%", margin: 0 }}>This sales order is already listed.</p>}
             {!problem && !duplicate && dropMissing && (
-              <p className="error" style={{ flexBasis: "100%", margin: 0 }}>Choose which drop this SO goes to.</p>
+              <p className="error" style={{ flexBasis: "100%", margin: 0 }}>Unassigned. Choose which drop this SO goes to.</p>
+            )}
+            {!problem && !duplicate && !dropMissing && draft.soHints?.[index] && (
+              <p className="mini" style={{ flexBasis: "100%", margin: 0 }}>
+                {draft.soHints[index]?.tooLong
+                  ? "The next SO is longer than 40 characters. Enter one manually."
+                  : draft.soHints[index]?.suggestion
+                    ? `Suggested ${draft.soHints[index]?.suggestion}${draft.soHints[index]?.highestInUse ? ` (highest in use: ${draft.soHints[index]?.highestInUse})` : ""}.`
+                    : "Enter a sales order."}
+                {draft.soHints[index]?.suggestion && row.number !== draft.soHints[index]?.suggestion && (
+                  <>
+                    {" "}
+                    <button
+                      className="text-link"
+                      type="button"
+                      onClick={() => update(index, { number: draft.soHints?.[index]?.suggestion ?? row.number })}
+                    >
+                      Use suggestion
+                    </button>
+                  </>
+                )}
+              </p>
             )}
           </div>
         );

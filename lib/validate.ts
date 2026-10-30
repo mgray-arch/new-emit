@@ -54,6 +54,8 @@ const orderFields = {
   customerCost: z.number().min(0).max(1_000_000).nullable().optional(),
   rateReason: z.enum(RATE_REASONS).nullable().optional(),
   comments: z.string().max(2000).optional(),
+  /** Set by the copy form. Stored for audit. Ignored when it does not match a load. */
+  copiedFromId: z.string().trim().max(80).nullable().optional(),
 };
 
 function requireRoute(value: { origin?: unknown; destination?: unknown; stops?: Array<{ kind: string }> }, ctx: z.RefinementCtx, mode: "create" | "patch") {

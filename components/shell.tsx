@@ -11,6 +11,7 @@ interface Me {
   email: string;
   role: "customer" | "emit_viewer" | "emit_admin" | "admin";
   actorRole?: "customer" | "emit_viewer" | "emit_admin" | "admin";
+  profile?: "sales" | "loader" | null;
   viewAs?: ViewAsPreview | null;
   readOnly?: boolean;
   chatEnabled?: boolean;
@@ -102,12 +103,15 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     router.refresh();
   }
 
-  async function setView(access: "select" | "admin" | "regular", permission?: EmitPermission) {
+  async function setView(access: "select" | "admin" | "regular", permission?: EmitPermission, profile?: "sales" | "loader" | null) {
     const nextPermission = permission ?? me?.viewAs?.permission ?? (access === "admin" ? "full" : "add");
+    const nextProfile = profile === undefined ? (me?.viewAs?.profile ?? null) : profile;
     const response = await fetch("/api/view-as", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(access === "select" ? { access: null } : { access, permission: nextPermission }),
+      body: JSON.stringify(
+        access === "select" ? { access: null } : { access, permission: nextPermission, profile: nextProfile },
+      ),
     });
     if (!response.ok) return;
     window.location.href = "/";
@@ -133,7 +137,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         ]
       : []),
     { href: "/ask", label: "Ask", on: pathname === "/ask", title: "Ask about an order" },
-    ...(me?.role === "admin" || me?.role === "emit_admin"
+    ...((me?.role === "admin" || me?.role === "emit_admin") && (me.viewAs?.profile ?? me.profile) !== "sales" && (me.viewAs?.profile ?? me.profile) !== "loader"
       ? [{ href: "/locations", label: "Locations", on: pathname === "/locations" }]
       : []),
     ...(me?.role === "admin"
@@ -190,11 +194,38 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                     value={me.viewAs.permission}
                     onChange={(event) => void setView(me.viewAs?.access ?? "regular", event.target.value as EmitPermission)}
                   >
-                    {(Object.keys(PERMISSION_LABEL) as EmitPermission[]).map((permission) => (
+                    {(Object.keys(PERMISSION_LABEL) as EmitPermission[])
+                      .filter((permission) => {
+                        if (me.viewAs?.profile === "loader") return permission === "view";
+                        if (me.viewAs?.profile === "sales") return permission === "view" || permission === "add";
+                        return true;
+                      })
+                      .map((permission) => (
                       <option key={permission} value={permission}>
                         {PERMISSION_LABEL[permission]}
                       </option>
                     ))}
+                  </select>
+                </label>
+              ) : null}
+              {me.viewAs ? (
+                <label>
+                  <span>Profile</span>
+                  <select
+                    aria-label="Profile to preview"
+                    value={me.viewAs.profile ?? "standard"}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      const profile = value === "sales" || value === "loader" ? value : null;
+                      let permission = me.viewAs?.permission;
+                      if (profile === "loader") permission = "view";
+                      if (profile === "sales" && (permission === "pricing" || permission === "full")) permission = "add";
+                      void setView(me.viewAs?.access ?? "regular", permission, profile);
+                    }}
+                  >
+                    <option value="standard">Standard</option>
+                    <option value="sales">Sales</option>
+                    <option value="loader">Loader</option>
                   </select>
                 </label>
               ) : null}
@@ -243,7 +274,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         {me?.viewAs ? (
           <div className="view-as-bar" role="status">
             <span>
-              Read-only. Viewing as {me.viewAs.access === "admin" ? "an EMIT admin" : "a regular EMIT user"} with{" "}
+              Read-only. Viewing as {me.viewAs.access === "admin" ? "an EMIT admin" : "a regular EMIT user"}
+              {me.viewAs.profile === "sales" ? " (Sales)" : me.viewAs.profile === "loader" ? " (Loader)" : ""} with{" "}
               {PERMISSION_LABEL[me.viewAs.permission]}. You see what that account sees. Nothing is saved. Carrier pay stays hidden.
             </span>
             <button className="btn secondary" type="button" onClick={() => void setView("select")}>
