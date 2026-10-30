@@ -14,6 +14,7 @@ const patchSchema = z.object({
   access: z.enum(["admin", "regular"]).optional(),
   permission: z.enum(["view", "add", "pricing", "full"]).optional(),
   chatEnabled: z.boolean().optional(),
+  profile: z.enum(["sales", "loader"]).nullable().optional(),
 });
 
 export async function PATCH(req: Request, context: { params: Promise<{ id: string }> }) {

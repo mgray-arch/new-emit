@@ -1,3 +1,10 @@
+import {
+  SALES_ORDER_MATCH_SQL,
+  parseLegacySalesOrders,
+  resolveSalesOrders,
+  salesOrderMatchArgs,
+  salesOrdersForStop,
+} from "@/lib/sales-orders";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { PortalContext } from "@/lib/db";
 import { PortalError } from "@/lib/http";
@@ -73,12 +80,21 @@ export function loadBuilderOwner(
  * even if it is later added to the stored order.
  */
 export function loadBuilderPayload(order: CustomerOrder): Record<string, unknown> {
+  const salesOrderLines = order.salesOrders?.length
+    ? order.salesOrders
+    : resolveSalesOrders(parseLegacySalesOrders(order.salesOrderNumber).map((number) => ({ number, stopId: null })), order.stops);
   return {
     orderId: order.id,
     salesOrderNumber: order.salesOrderNumber,
+    salesOrders: salesOrderLines.map((line) => ({
+      number: line.number,
+      stopSequence: line.stopId ? order.stops.findIndex((stop) => stop.id === line.stopId) + 1 || null : null,
+    })),
     portalStatus: order.portalStatus,
-    stops: order.stops.map((stop) => ({
+    stops: order.stops.map((stop, index) => ({
+      sequence: index + 1,
       kind: stop.kind,
+      salesOrders: stop.kind === "drop" ? salesOrdersForStop(salesOrderLines, stop.id) : [],
       company: stop.place.company,
       address1: stop.place.address1,
       address2: stop.place.address2 ?? "",
@@ -192,7 +208,9 @@ async function orderIdForCallback(ctx: PortalContext, orderId: string, salesOrde
     if (!row) throw new PortalError("No portal load with that id.", 404);
     return String(row.id);
   }
-  const matches = await ctx.db.prepare(`SELECT id FROM loads WHERE sales_order_number = ?`).all(salesOrderNumber);
+  const matches = await ctx.db
+    .prepare(`SELECT id FROM loads WHERE ${SALES_ORDER_MATCH_SQL}`)
+    .all(...salesOrderMatchArgs(salesOrderNumber));
   if (matches.length === 0) throw new PortalError(`No load with sales order ${salesOrderNumber}.`, 404);
   if (matches.length > 1) throw new PortalError(`Sales order ${salesOrderNumber} matches more than one load.`, 409);
   return String(matches[0].id);

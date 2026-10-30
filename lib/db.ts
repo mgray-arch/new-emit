@@ -15,6 +15,7 @@ export interface SqlStatement {
 export interface SqlDatabase {
   exec(sql: string): Promise<void>;
   prepare(sql: string): SqlStatement;
+  close?(): void;
 }
 
 export interface PortalContext {
@@ -34,6 +35,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_changed_at TEXT,
   password_epoch INTEGER NOT NULL DEFAULT 0,
   chat_enabled INTEGER NOT NULL DEFAULT 0,
+  profile TEXT,
   created_at TEXT NOT NULL
 );
 
@@ -61,6 +63,7 @@ CREATE TABLE IF NOT EXISTS loads (
   origin_json TEXT NOT NULL,
   destination_json TEXT NOT NULL,
   stops_json TEXT,
+  sales_orders_json TEXT,
   truck_type TEXT,
   transit TEXT,
   ship_date TEXT,
@@ -84,8 +87,31 @@ CREATE TABLE IF NOT EXISTS loads (
   pending_review_count INTEGER NOT NULL DEFAULT 0,
   sam_build_status TEXT,
   sam_build_error TEXT,
-  sam_build_at TEXT
+  sam_build_at TEXT,
+  carrier_name TEXT,
+  carrier_mc TEXT,
+  driver_name TEXT,
+  carrier_updated_at TEXT,
+  bol_changed_at TEXT,
+  copied_from_id TEXT
 );
+
+CREATE TABLE IF NOT EXISTS bol_prints (
+  id TEXT PRIMARY KEY,
+  load_id TEXT NOT NULL,
+  document_id TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  printed_at TEXT NOT NULL,
+  printed_by_id TEXT NOT NULL,
+  printed_by_name TEXT NOT NULL,
+  carrier_name TEXT,
+  carrier_mc TEXT,
+  driver_name TEXT,
+  bol_fingerprint TEXT NOT NULL,
+  UNIQUE (load_id, version)
+);
+
+CREATE INDEX IF NOT EXISTS bol_prints_load ON bol_prints(load_id, version);
 
 CREATE TABLE IF NOT EXISTS customer_documents (
   id TEXT PRIMARY KEY,
@@ -223,14 +249,16 @@ CREATE TABLE IF NOT EXISTS message_reads (
 `;
 
 /**
- * Every column stored on a load. Carrier pay is not a column.
+ * Every column stored on a load that the portal reads back.
+ * Carrier pay is not a column. Carrier name, MC, and driver are identity only.
  */
 export const CUSTOMER_LOAD_COLUMNS = `
   id, sales_order_number, load_number, portal_status, tracking_stage, timeline_json,
-  origin_json, destination_json, stops_json, truck_type, transit, ship_date, ship_time,
+  origin_json, destination_json, stops_json, sales_orders_json, truck_type, transit, ship_date, ship_time,
   must_deliver_date, truck_eta, latest_eta, tracking_token, tracking_link, customer_cost_cents,
   rate_reason, comments, created_by, entered_by_name, entered_by_email, owner, owner_needs_check, created_at, updated_at, pending_review_count,
-  sam_build_status, sam_build_error, sam_build_at
+  sam_build_status, sam_build_error, sam_build_at,
+  carrier_name, carrier_mc, driver_name, carrier_updated_at, bol_changed_at, copied_from_id
 `;
 
 function coerce(value: unknown): unknown {
@@ -270,6 +298,10 @@ class NodeSqliteDatabase implements SqlDatabase {
         return { changes: Number(result.changes) };
       },
     };
+  }
+
+  close(): void {
+    this.db.close();
   }
 }
 
@@ -377,7 +409,14 @@ export async function openDatabase(file?: string): Promise<SqlDatabase> {
   await db.exec(SCHEMA);
   await migrateUserRoles(db);
   await migrateStops(db);
+  await ensureColumn(db, "loads", "sales_orders_json", "TEXT");
   await migrateDropCarrierColumns(db);
+  await ensureColumn(db, "loads", "carrier_name", "TEXT");
+  await ensureColumn(db, "loads", "carrier_mc", "TEXT");
+  await ensureColumn(db, "loads", "driver_name", "TEXT");
+  await ensureColumn(db, "loads", "carrier_updated_at", "TEXT");
+  await ensureColumn(db, "loads", "bol_changed_at", "TEXT");
+  await ensureColumn(db, "loads", "copied_from_id", "TEXT");
   await migrateReceivers(db);
   await migrateStoredBytes(db);
   await migrateLoadNumbers(db);
@@ -392,6 +431,7 @@ export async function openDatabase(file?: string): Promise<SqlDatabase> {
   await migrateDocumentUploaders(db);
   await migrateLoadSource(db);
   await migrateChatEnabled(db);
+  await ensureColumn(db, "users", "profile", "TEXT");
   await db.exec(`DROP TABLE IF EXISTS outbox`);
   return db;
 }
@@ -466,9 +506,12 @@ async function migrateStops(db: SqlDatabase): Promise<void> {
   `);
 }
 
-const CARRIER_COLUMNS = ["carrier_pay_cents", "carrier_name", "carrier_mc", "staff_notes"];
+const CARRIER_COLUMNS = ["carrier_pay_cents", "staff_notes"];
 
-/** Carrier pay is not stored. Drop the columns from databases created before that decision. */
+/**
+ * Carrier pay and staff notes are not stored. Carrier name, MC, and driver
+ * stay: they identify who is hauling the load and are not pay.
+ */
 async function migrateDropCarrierColumns(db: SqlDatabase): Promise<void> {
   const columns = await columnNames(db, "loads");
   for (const name of CARRIER_COLUMNS) {

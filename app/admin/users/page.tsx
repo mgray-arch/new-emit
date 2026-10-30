@@ -12,6 +12,7 @@ interface EmitUser {
   permission: "view" | "add" | "pricing" | "full";
   emitAdmin: boolean;
   chatEnabled: boolean;
+  profile: "sales" | "loader" | null;
   hasPassword: boolean;
   createdAt: string;
 }
@@ -34,6 +35,7 @@ export default function UsersPage() {
   const [permission, setPermission] = useState<EmitUser["permission"]>("add");
   const [access, setAccess] = useState<EmitUser["access"]>("regular");
   const [chatEnabled, setChatEnabled] = useState(false);
+  const [profile, setProfile] = useState<"" | "sales" | "loader">("");
   const [resetFor, setResetFor] = useState<string | null>(null);
   const [resetPassword, setResetPassword] = useState("");
 
@@ -71,8 +73,9 @@ export default function UsersPage() {
         password: generate ? undefined : password,
         generatePassword: generate,
         access,
-        permission,
+        permission: profile === "loader" || profile === "sales" ? "view" : permission,
         chatEnabled,
+        profile: profile || null,
       }),
     });
     const body = await response.json();
@@ -84,6 +87,7 @@ export default function UsersPage() {
     setEmail("");
     setPassword("");
     setChatEnabled(false);
+    setProfile("");
     showResult(body, `Created ${body.user.email}.`);
     await load();
   }
@@ -104,7 +108,7 @@ export default function UsersPage() {
     await load();
   }
 
-  async function saveUser(user: EmitUser, patch: { access?: EmitUser["access"]; permission?: EmitUser["permission"]; chatEnabled?: boolean }) {
+  async function saveUser(user: EmitUser, patch: { access?: EmitUser["access"]; permission?: EmitUser["permission"]; chatEnabled?: boolean; profile?: EmitUser["profile"] }) {
     setError("");
     const response = await fetch(`/api/admin/users/${user.id}`, {
       method: "PATCH",
@@ -116,7 +120,7 @@ export default function UsersPage() {
       setError(body.error || "Could not update that user");
       return;
     }
-    if (patch.chatEnabled !== undefined && patch.access === undefined && patch.permission === undefined) {
+    if (patch.chatEnabled !== undefined && patch.access === undefined && patch.permission === undefined && patch.profile === undefined) {
       setMessage(patch.chatEnabled ? `${user.email} can use Messages.` : `${user.email} cannot use Messages.`);
       await load();
       return;
@@ -187,10 +191,30 @@ export default function UsersPage() {
             </select>
           </div>
           <div className="field">
+            <label htmlFor="new-profile">Profile</label>
+            <select
+              id="new-profile"
+              value={profile}
+              onChange={(event) => {
+                const next = event.target.value as "" | "sales" | "loader";
+                setProfile(next);
+                if (next === "loader" || next === "sales") setPermission("view");
+              }}
+            >
+              <option value="">Standard</option>
+              <option value="sales">Sales — view, upload, and print. No cost. Cannot add loads.</option>
+              <option value="loader">Loader — view, upload, and print. No cost. Cannot add loads.</option>
+            </select>
+          </div>
+          <div className="field">
             <label htmlFor="new-permission">Permission</label>
             <select id="new-permission" value={permission} onChange={(event) => setPermission(event.target.value as EmitUser["permission"])}>
               {PERMISSIONS.map((item) => (
-                <option key={item.value} value={item.value}>
+                <option
+                  key={item.value}
+                  value={item.value}
+                  disabled={(profile === "sales" || profile === "loader") && item.value !== "view"}
+                >
                   {item.label} — {item.detail}
                 </option>
               ))}
@@ -244,6 +268,22 @@ export default function UsersPage() {
               </select>
             </label>
             <label className="field">
+              <span>Profile for {user.email}</span>
+              <select
+                aria-label={`Profile for ${user.email}`}
+                value={user.profile ?? ""}
+                onChange={(event) => {
+                  const next = event.target.value === "sales" || event.target.value === "loader" ? event.target.value : null;
+                  const permission = next === "loader" || next === "sales" ? "view" : user.permission;
+                  void saveUser(user, { profile: next, permission });
+                }}
+              >
+                <option value="">Standard</option>
+                <option value="sales">Sales</option>
+                <option value="loader">Loader</option>
+              </select>
+            </label>
+            <label className="field">
               <span>Permission for {user.email}</span>
               <select
                 aria-label={`Permission for ${user.email}`}
@@ -251,7 +291,11 @@ export default function UsersPage() {
                 onChange={(event) => saveUser(user, { permission: event.target.value as EmitUser["permission"] })}
               >
                 {PERMISSIONS.map((item) => (
-                  <option key={item.value} value={item.value}>
+                  <option
+                    key={item.value}
+                    value={item.value}
+                    disabled={(user.profile === "sales" || user.profile === "loader") && item.value !== "view"}
+                  >
                     {item.label}
                   </option>
                 ))}

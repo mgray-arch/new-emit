@@ -257,6 +257,9 @@ export async function ingestDocument(
       heldIds.push(item.id);
     }
     await refreshLoadReviewCount(ctx.db, input.loadId);
+    if (slot === "bol" && releasedIds.length > 0) {
+      await ctx.db.prepare(`UPDATE loads SET bol_changed_at = ? WHERE id = ?`).run(createdAt, input.loadId);
+    }
   });
   return { releasedIds, heldIds };
 }
@@ -271,7 +274,7 @@ export async function listCustomerDocuments(ctx: PortalContext, loadId: string):
   const rows = await ctx.db
     .prepare(
       `SELECT id, kind, filename, media_type, created_at
-       FROM customer_documents WHERE load_id = ? ORDER BY created_at ASC`,
+       FROM customer_documents WHERE load_id = ? ORDER BY created_at ASC, rowid ASC`,
     )
     .all(loadId);
   return rows.map((row) => ({

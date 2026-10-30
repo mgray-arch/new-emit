@@ -1,4 +1,7 @@
+import { joinSalesOrders, parseLegacySalesOrders, resolveSalesOrders } from "@/lib/sales-orders";
 import type {
+  BolPrintRecord,
+  BolPrintSummary,
   CustomerDocument,
   CustomerOrder,
   Place,
@@ -22,7 +25,7 @@ import { portalPublicUrl } from "@/lib/public-url";
 import { redactSensitiveText } from "@/lib/sensitive";
 import { samLoadUrl } from "@/lib/sam-link";
 import { sanitizeSchedule } from "@/lib/stop-schedule";
-import { canSeePricing, resolveAccess, type Viewer } from "@/lib/types";
+import { canSeeCarrierIdentity, canSeePricing, resolveAccess, type Viewer } from "@/lib/types";
 import { parseTrackingLink } from "@/lib/tracking-link";
 
 /**
@@ -126,6 +129,10 @@ export interface CustomerViewOptions {
   includeReview?: boolean;
   /** False omits who submitted the load. Portal responses include it. The assistant leaves it off. */
   includeEnteredBy?: boolean;
+  /** False omits driver, carrier company, and MC. Default false. Never set for the assistant, receivers, or public tracking. */
+  includeCarrier?: boolean;
+  /** False omits BOL print history. Default false. Print history includes the carrier that was on the BOL. */
+  includeBolPrint?: boolean;
 }
 
 export function serializeCustomerOrder(value: unknown, options?: CustomerViewOptions): CustomerOrder {
@@ -133,6 +140,8 @@ export function serializeCustomerOrder(value: unknown, options?: CustomerViewOpt
   const includePricing = options?.includePricing !== false;
   const includeReview = options?.includeReview !== false;
   const includeEnteredBy = options?.includeEnteredBy === true;
+  const includeCarrier = options?.includeCarrier === true;
+  const includeBolPrint = options?.includeBolPrint === true;
   const portalStatus = oneOf(raw.portalStatus, PORTAL_STATUSES) ?? "being_prepared";
   const trackingStage = oneOf(raw.trackingStage, TRACKING_STAGES) ?? "submitted";
   const documents = Array.isArray(raw.documents)
@@ -141,9 +150,18 @@ export function serializeCustomerOrder(value: unknown, options?: CustomerViewOpt
   const stops = serializeStops(raw.stops, serializePlace(raw.origin), serializePlace(raw.destination));
   const pickup = stops.find((stop) => stop.kind === "pickup") ?? stops[0];
   const drop = [...stops].reverse().find((stop) => stop.kind === "drop") ?? stops[stops.length - 1];
+  const salesOrders = resolveSalesOrders(
+    Array.isArray(raw.salesOrders)
+      ? raw.salesOrders
+          .filter((line): line is { number: string; stopId?: unknown } => Boolean(line) && typeof (line as { number?: unknown }).number === "string")
+          .map((line) => ({ number: line.number, stopId: typeof line.stopId === "string" ? line.stopId : null }))
+      : parseLegacySalesOrders(str(raw.salesOrderNumber)).map((number) => ({ number, stopId: null })),
+    stops,
+  );
   const order: CustomerOrder = {
     id: str(raw.id),
-    salesOrderNumber: str(raw.salesOrderNumber),
+    salesOrderNumber: salesOrders.length ? joinSalesOrders(salesOrders) : str(raw.salesOrderNumber),
+    salesOrders,
     loadNumber: strOrNull(raw.loadNumber),
     portalStatus,
     trackingStage,
@@ -177,16 +195,53 @@ export function serializeCustomerOrder(value: unknown, options?: CustomerViewOpt
     order.customerCost = money(raw.customerCost);
     order.rateReason = oneOf(raw.rateReason, RATE_REASONS);
   }
+  if (includeCarrier) {
+    order.carrierName = strOrNull(raw.carrierName);
+    order.carrierMc = strOrNull(raw.carrierMc);
+    order.driverName = strOrNull(raw.driverName);
+  }
+  if (includeBolPrint) {
+    order.bolPrint = serializeBolPrint(raw.bolPrint);
+    if (Array.isArray(raw.bolPrints)) order.bolPrints = raw.bolPrints.map(serializeBolRecord).filter((row): row is BolPrintRecord => row !== null);
+  }
   return order;
+}
+
+function serializeBolRecord(value: unknown): BolPrintRecord | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (typeof row.version !== "number" || !Number.isFinite(row.version)) return null;
+  return {
+    version: row.version,
+    printedAt: str(row.printedAt),
+    printedByName: str(row.printedByName),
+    carrierName: strOrNull(row.carrierName),
+    carrierMc: strOrNull(row.carrierMc),
+    driverName: strOrNull(row.driverName),
+    documentId: str(row.documentId),
+  };
+}
+
+function serializeBolPrint(value: unknown): BolPrintSummary | null {
+  const record = serializeBolRecord(value);
+  if (!record || !value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const reasons = Array.isArray(row.reasons)
+    ? row.reasons.filter((reason): reason is "carrier_changed" | "bol_updated" => reason === "carrier_changed" || reason === "bol_updated")
+    : [];
+  return { ...record, reprint: row.reprint === true, reasons, bolRemoved: row.bolRemoved === true };
 }
 
 /** The order shape that may be sent to this viewer. EMIT admins with see pricing or full access, and Select, get EMIT's cost. Regular EMIT users never do, and neither does a view-as regular preview. Every signed-in user gets who entered the load. Nobody at EMIT gets carrier pay, the review count, or the SAM build controls. */
 export function presentCustomerOrder(order: CustomerOrder, viewer: Viewer): CustomerOrder {
   const access = resolveAccess(viewer);
+  const seeCarrier = canSeeCarrierIdentity(access);
   const view = serializeCustomerOrder(order, {
     includePricing: canSeePricing(access),
     includeReview: access.select,
     includeEnteredBy: true,
+    includeCarrier: seeCarrier,
+    includeBolPrint: seeCarrier,
   });
   if (access.select) {
     view.owner = order.owner === "Drew" || order.owner === "Ainsley" ? order.owner : null;
@@ -241,7 +296,18 @@ export function trackingUrlFor(token: string): string {
 
 export function assertNoCarrierFields(value: unknown): void {
   const json = JSON.stringify(value);
-  const forbidden = ["carrierPay", "carrierRate", "carrierCost", "carrier_pay", "carrier_name", "staffNotes", "staff_notes"];
+  const forbidden = [
+    "carrierPay",
+    "carrierRate",
+    "carrierCost",
+    "carrier_pay",
+    "carrier_cost",
+    "carrier_rate",
+    "staffNotes",
+    "staff_notes",
+    "rateConfirmation",
+    "rate_confirmation",
+  ];
   for (const key of forbidden) {
     if (json.includes(`"${key}"`)) {
       throw new Error(`Customer payload contained forbidden field ${key}`);

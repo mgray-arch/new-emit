@@ -600,6 +600,7 @@ async function updateImport(ctx: PortalContext, existing: ExistingImport, load: 
   await ctx.db
     .prepare(
       `UPDATE loads SET
+         sales_orders_json = CASE WHEN sales_order_number = ? THEN sales_orders_json ELSE NULL END,
          sales_order_number = ?, portal_status = ?, tracking_stage = ?, timeline_json = ?,
          origin_json = ?, destination_json = ?, stops_json = ?, truck_type = ?,
          ship_date = ?, ship_time = ?, must_deliver_date = ?,
@@ -608,6 +609,7 @@ async function updateImport(ctx: PortalContext, existing: ExistingImport, load: 
        WHERE id = ? AND source = ?`,
     )
     .run(
+      load.salesOrderNumber || existing.salesOrderNumber,
       load.salesOrderNumber || existing.salesOrderNumber,
       load.portalStatus,
       load.trackingStage,

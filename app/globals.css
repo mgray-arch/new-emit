@@ -198,6 +198,18 @@ td select {
 .notes { max-width: 180px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .mini { color: var(--muted); font-size: 15px; }
 .hold { color: var(--warn); font-size: 15px; }
+.reprint-banner {
+  background: #7a3b12;
+  color: #fff8ef;
+  border: 1px solid #e0a15a;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-weight: 700;
+  margin: 8px 0;
+}
+.bol-reprint { color: #e0703a; font-weight: 700; }
+html[data-theme="light"] .reprint-banner { background: #fbf3df; color: #6a3a08; border-color: #c47b2b; }
+html[data-theme="light"] .bol-reprint { color: #8a3b12; }
 .pager { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 14px; color: var(--muted); font-size: 13px; }
 .pager div { display: flex; gap: 8px; }
 .load-cards { display: none; }

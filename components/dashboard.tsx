@@ -3,14 +3,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import DocumentLinks from "@/components/document-links";
-import LoadForm, { draftFromOrder, emptyDraft, payloadFromDraft, useSites, type Draft } from "@/components/load-form";
+import LoadForm, { draftFromCopy, draftFromOrder, draftSalesOrderErrors, emptyDraft, payloadFromDraft, useSites, type Draft } from "@/components/load-form";
 import SamBuildButton from "@/components/sam-build-button";
 import PhotoGallery from "@/components/photo-gallery";
 import SelectLoadField from "@/components/select-load-field";
 import StatusPill from "@/components/status-pill";
 import TrackLink from "@/components/track-link";
 import TrackingLinkField from "@/components/tracking-link-field";
-import { formatDay } from "@/lib/dates";
+import { carrierIdentityLabel } from "@/lib/carrier";
+import { formatDay, formatWhenBoise } from "@/lib/dates";
+import { reprintMessage } from "@/lib/reprint";
 import { deleteConfirmText } from "@/lib/delete-confirm";
 import { formatEnteredBy } from "@/lib/entered-by";
 import {
@@ -30,6 +32,8 @@ import { toast } from "@/lib/toast";
 import {
   STATUS_LABEL,
   canAddLoads,
+  canPrintBol,
+  canSeeCarrierIdentity,
   canSeePricing,
   formatLoadNumber,
   type CustomerDocument,
@@ -41,6 +45,7 @@ import {
 interface Me {
   role: PortalRole;
   permission?: "view" | "add" | "pricing" | "full" | null;
+  profile?: "sales" | "loader" | null;
   viewAs?: ViewAsPreview | null;
   readOnly?: boolean;
 }
@@ -110,6 +115,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   const [submitted, setSubmitted] = useState<CustomerOrder | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
+  const [soWarning, setSoWarning] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -126,8 +132,11 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
         const select = Boolean(body && body.role === "admin" && !body.readOnly);
         setTab((current) => (select ? "attention" : current === "attention" ? "active" : current));
         setListReady(true);
-        const edit = new URLSearchParams(window.location.search).get("edit");
+        const params = new URLSearchParams(window.location.search);
+        const edit = params.get("edit");
+        const copy = params.get("copy");
         if (edit && body && !body.readOnly && canAddLoads(body)) void openEdit(edit);
+        else if (copy && body && !body.readOnly && canAddLoads(body)) void openCopy(copy);
       })
       .catch(() => {
         setMe(null);
@@ -140,6 +149,8 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   const readOnly = Boolean(me?.readOnly);
   const showPricing = canSeePricing(me);
   const allowLoads = canAddLoads(me);
+  const showCarrier = canSeeCarrierIdentity(me);
+  const allowPrint = canPrintBol(me);
   const selectView = role === "admin" && !readOnly;
 
   useEffect(() => {
@@ -192,6 +203,21 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       .catch(() => setError("We couldn't load your loads. Refresh the page and try again."));
   }, [listReady, tab, status, query, shipFrom, shipTo, pickup, receiver, page, reload]);
 
+  async function openCopy(id: string) {
+    const response = await fetch(`/api/orders/${id}/copy-draft`);
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setError(typeof body.error === "string" ? body.error : "Could not copy that load");
+      return;
+    }
+    setDraft(draftFromCopy(body.draft));
+    setEditing(null);
+    setSubmitted(null);
+    setFormError("");
+    setSoWarning("");
+    setCreating(true);
+  }
+
   async function openEdit(id: string) {
     const response = await fetch(`/api/orders/${id}`);
     if (!response.ok) return;
@@ -200,6 +226,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     setDraft(draftFromOrder(body.order));
     setSubmitted(null);
     setFormError("");
+    setSoWarning("");
     setCreating(false);
   }
 
@@ -237,6 +264,11 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     }
     if (draft.stops.some((stop) => stop.duplicateOf && !stop.saveAsNew)) {
       setFormError("This looks like a duplicate. Use the existing location, or save it as new.");
+      return;
+    }
+    const soErrors = draftSalesOrderErrors(draft);
+    if (soErrors.length) {
+      setFormError(soErrors[0]);
       return;
     }
     setSaving(true);
@@ -291,6 +323,13 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
         return;
       }
       if (!response.ok) throw new Error(body.error || "Could not save");
+      const warningText = Array.isArray(body.warnings)
+        ? body.warnings
+            .map((item: { message?: string }) => (typeof item.message === "string" ? item.message : ""))
+            .filter(Boolean)
+            .join(" ")
+        : "";
+      setSoWarning(warningText);
       if (!editing) {
         setSubmitted(body.order);
         setEditing(body.order);
@@ -302,7 +341,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       }
       setPage(1);
       setReload((value) => value + 1);
-      toast(editing ? "Load saved." : "Load submitted. Select will add the load number.");
+      toast(warningText || (editing ? "Load saved." : "Load submitted. Select will add the load number."));
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "We couldn't save this load. Check the fields and try again.");
     } finally {
@@ -535,6 +574,20 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                     {order.stops.length > 2 ? ` · ${order.stops.length} stops` : ""} · {fileSummary({ ...order, pendingReviewCount: 0 })}
                   </div>
                   <div className="load-meta">Entered by: {formatEnteredBy(order.enteredByName, order.enteredByEmail)}</div>
+                  {showCarrier ? <div className="load-meta">{carrierIdentityLabel(order)}</div> : null}
+                  {order.bolPrint?.reprint ? (
+                    <div className="reprint-banner" role="status">
+                      {reprintMessage({
+                        version: order.bolPrint.version,
+                        reasons: order.bolPrint.reasons,
+                        bolRemoved: order.bolPrint.bolRemoved,
+                        printedCarrierName: order.bolPrint.carrierName,
+                        printedCarrierMc: order.bolPrint.carrierMc,
+                        currentCarrierName: order.carrierName ?? null,
+                        currentCarrierMc: order.carrierMc ?? null,
+                      })}
+                    </div>
+                  ) : null}
                   {selectView ? (
                     <div className="load-meta">
                       Owner: {order.owner ?? "Not set"}
@@ -554,6 +607,11 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                         {order.customerCost == null ? "Cost not set" : order.customerCost.toLocaleString("en-US", { style: "currency", currency: "USD" })}
                       </span>
                     )}
+                    {allowLoads && !readOnly ? (
+                      <button className="btn secondary" type="button" onClick={() => void openCopy(order.id)}>
+                        Copy load
+                      </button>
+                    ) : null}
                     {selectView && confirmDeleteId !== order.id ? (
                       <button className="btn danger" type="button" onClick={() => setConfirmDeleteId(order.id)}>
                         Delete
@@ -613,8 +671,14 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
           >
             <div className="dialog-head">
               <div>
-                <h2 id="load-title">{editing ? "Edit load" : "New load"}</h2>
-                <p className="sub">{editing ? "Update this load, then save." : "Tell Select what you need moved."}</p>
+                <h2 id="load-title">{editing ? "Edit load" : draft.copiedFromId ? "Copy load" : "New load"}</h2>
+                <p className="sub">
+                  {editing
+                    ? "Update this load, then save."
+                    : draft.copiedFromId
+                      ? "Review the suggested sales orders, then save. Documents and cost are not copied."
+                      : "Tell Select what you need moved."}
+                </p>
               </div>
               <button className="icon-btn" type="button" aria-label="Close" title="Close" onClick={() => { setCreating(false); setEditing(null); }}>
                 ✕
@@ -655,6 +719,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
               </>
             )}
             {formError && <p className="error">{formError}</p>}
+            {soWarning && <p className="warn">{soWarning}</p>}
             <LoadForm draft={draft} setDraft={setDraft} order={editing} sites={sites} hideCommercial={!showPricing} />
             {editing && (
               <div className="grid-2">
@@ -666,7 +731,12 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                 <div className="field">
                   <label>BOL</label>
                   <input aria-label="Upload BOL" type="file" onChange={(event) => event.target.files?.[0] && upload("bol", event.target.files[0])} />
-                  <FileList docs={editing.documents.filter((doc) => doc.kind === "bol")} />
+                  <FileList
+                    docs={editing.documents.filter((doc) => doc.kind === "bol")}
+                    order={editing}
+                    canPrint={allowPrint && !readOnly}
+                    onPrinted={replaceOrder}
+                  />
                 </div>
               </div>
             )}
@@ -689,13 +759,69 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   );
 }
 
-function FileList({ docs }: { docs: CustomerDocument[] }) {
+function FileList({
+  docs,
+  order,
+  canPrint,
+  onPrinted,
+}: {
+  docs: CustomerDocument[];
+  order?: CustomerOrder;
+  canPrint?: boolean;
+  onPrinted?: (order: CustomerOrder) => void;
+}) {
+  const [printing, setPrinting] = useState<string | null>(null);
+  const [printError, setPrintError] = useState("");
   if (!docs.length) return <div className="mini">None yet</div>;
+
+  async function printBol(documentId: string) {
+    if (!order) return;
+    setPrinting(documentId);
+    setPrintError("");
+    try {
+      const response = await fetch(`/api/orders/${order.id}/bol/print`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ documentId }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Could not record that print");
+      window.open(body.documentUrl || `/api/documents/${documentId}`, "_blank", "noopener");
+      const refreshed = await fetch(`/api/orders/${order.id}`);
+      if (refreshed.ok) {
+        const next = await refreshed.json();
+        onPrinted?.(next.order);
+      }
+    } catch (err) {
+      setPrintError(err instanceof Error ? err.message : "Could not record that print");
+    } finally {
+      setPrinting(null);
+    }
+  }
+
   return (
     <div className="refs">
+      {order?.bolPrint && docs.some((doc) => doc.kind === "bol") ? (
+        <p className="mini">
+          Printed v{order.bolPrint.version} · {formatWhenBoise(order.bolPrint.printedAt)} · {order.bolPrint.printedByName}
+          {order.bolPrint.carrierName ? ` · Carrier ${order.bolPrint.carrierName}` : ""}
+          {order.bolPrint.carrierMc ? ` (MC ${order.bolPrint.carrierMc})` : ""}
+        </p>
+      ) : null}
+      {printError ? <p className="error">{printError}</p> : null}
       {docs.map((doc) => (
-        <DocumentLinks key={doc.id} doc={doc} />
+        <div key={doc.id} className={doc.kind === "bol" && order?.bolPrint?.reprint ? "bol-reprint" : undefined}>
+          <DocumentLinks doc={doc} />
+          {canPrint && doc.kind === "bol" ? (
+            <button className="btn secondary" type="button" disabled={printing === doc.id} onClick={() => void printBol(doc.id)}>
+              {printing === doc.id ? "Printing…" : "Print BOL"}
+            </button>
+          ) : null}
+        </div>
       ))}
+      {docs.some((doc) => doc.kind === "bol") ? (
+        <p className="mini">Print BOL records the version. View, Download, and the browser print dialog are not recorded.</p>
+      ) : null}
     </div>
   );
 }

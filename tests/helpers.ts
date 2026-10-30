@@ -14,9 +14,12 @@ export const SECRET_MARKERS = [
   "carrier_pay",
   "carrierRate",
   "carrierCost",
-  "carrier_name",
+  "carrier_cost",
+  "carrier_rate",
   "staff_notes",
   "staffNotes",
+  "rateConfirmation",
+  "rate_confirmation",
 ];
 
 export function expectNoSecrets(value: unknown) {

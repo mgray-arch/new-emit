@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { salesOrderLineErrors, SALES_ORDERS_MAX } from "@/lib/sales-orders";
 import { HH_MM } from "@/lib/ship-time";
 import { PORTAL_STATUSES, RATE_REASONS, TRANSIT_OPTIONS } from "@/lib/types";
 
@@ -30,8 +31,16 @@ export const stopSchema = z.object({
   notes: z.string().trim().max(500).optional(),
 });
 
+export const salesOrderLineSchema = z.object({
+  number: z.string().trim().max(80).transform((value) => value.toUpperCase()),
+  stopId: z.string().trim().max(80).nullable().optional(),
+});
+
 const orderFields = {
-  salesOrderNumber: z.string().trim().min(1, "Sales order number is required").max(80),
+  /** Older single-string form. Comma or space separated values are split into SOs. */
+  salesOrderNumber: z.string().trim().max(400).optional(),
+  /** One SO per line, each tied to a drop. Takes precedence over salesOrderNumber. */
+  salesOrders: z.array(salesOrderLineSchema).max(SALES_ORDERS_MAX).optional(),
   origin: placeSchema.optional(),
   destination: placeSchema.optional(),
   stops: z.array(stopSchema).max(25).optional(),
@@ -45,6 +54,8 @@ const orderFields = {
   customerCost: z.number().min(0).max(1_000_000).nullable().optional(),
   rateReason: z.enum(RATE_REASONS).nullable().optional(),
   comments: z.string().max(2000).optional(),
+  /** Set by the copy form. Stored for audit. Ignored when it does not match a load. */
+  copiedFromId: z.string().trim().max(80).nullable().optional(),
 };
 
 function requireRoute(value: { origin?: unknown; destination?: unknown; stops?: Array<{ kind: string }> }, ctx: z.RefinementCtx, mode: "create" | "patch") {
@@ -62,12 +73,35 @@ function requireRoute(value: { origin?: unknown; destination?: unknown; stops?: 
   if (!value.destination) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Destination is required.", path: ["destination"] });
 }
 
-export const orderInputSchema = z.object(orderFields).superRefine((value, ctx) => requireRoute(value, ctx, "create"));
+function checkSalesOrders(
+  value: { salesOrderNumber?: string; salesOrders?: Array<{ number: string; stopId?: string | null }>; stops?: Array<{ id?: string; kind: string }> },
+  ctx: z.RefinementCtx,
+  mode: "create" | "patch",
+) {
+  if (value.salesOrders) {
+    // Drop checks need the stops; a patch without stops is checked against the saved stops later.
+    const stops = (value.stops ?? []).map((stop, index) => ({ id: stop.id ?? `new-${index}`, kind: stop.kind }));
+    const errors = salesOrderLineErrors(value.salesOrders, value.stops ? stops : [], { required: true });
+    for (const message of errors) ctx.addIssue({ code: z.ZodIssueCode.custom, message, path: ["salesOrders"] });
+    return;
+  }
+  if (mode === "create" && !value.salesOrderNumber) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Sales order number is required", path: ["salesOrderNumber"] });
+  }
+}
+
+export const orderInputSchema = z.object(orderFields).superRefine((value, ctx) => {
+  requireRoute(value, ctx, "create");
+  checkSalesOrders(value, ctx, "create");
+});
 
 export const orderPatchSchema = z
-  .object({ ...orderFields, salesOrderNumber: orderFields.salesOrderNumber.optional() })
+  .object(orderFields)
   .partial()
-  .superRefine((value, ctx) => requireRoute(value, ctx, "patch"));
+  .superRefine((value, ctx) => {
+    requireRoute(value, ctx, "patch");
+    checkSalesOrders(value, ctx, "patch");
+  });
 
 export const siteSchema = z.object({
   id: z.string().min(1).max(80).optional(),

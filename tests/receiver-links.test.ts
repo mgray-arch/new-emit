@@ -147,9 +147,10 @@ describe("receiver links", () => {
     expect(own.comments).toBeUndefined();
     expect(own.salesOrderNumber).toBeUndefined();
     expect(own.stops[0]).toEqual({ kind: "pickup", city: "Sheridan", state: "WY" });
-    expect(own.stops.at(-1)).toEqual({ kind: "drop", city: "Cypress", state: "TX" });
+    expect(own.stops.at(-1)).toEqual({ kind: "drop", city: "Cypress", state: "TX", salesOrders: ["SO-RCV-CYPRESS"] });
     const textBody = JSON.stringify(body);
-    expect(textBody).not.toMatch(/customerCost|rateReason|carrierPay|carrierRate|documents|comments|photos|salesOrder/i);
+    expect(textBody).not.toMatch(/customerCost|rateReason|carrierPay|carrierName|carrierMc|driverName|bolPrint|documents|comments|photos/i);
+    expect(textBody).not.toContain("SO-RCV-PICKUP-ONLY");
     expect(textBody).not.toMatch(/PAY-SENTINEL|4242\.42|424242|BLACKHAWK|8,765\.43|8765\.43|rate confirmation|rate-confirmation|dock-ok/i);
     expectNoSecrets(body);
 

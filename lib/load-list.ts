@@ -139,9 +139,10 @@ function cell(value: string | number | null | undefined): string {
 
 /**
  * History export. Pricing columns are included only when this viewer may see EMIT's cost.
- * Carrier pay is not a column.
+ * Carrier pay is not a column. Driver, carrier company, and MC are included only for
+ * viewers who can see carrier identity.
  */
-export function loadsToCsv(orders: CustomerOrder[], includePricing: boolean): string {
+export function loadsToCsv(orders: CustomerOrder[], includePricing: boolean, includeCarrier = false): string {
   const headers = [
     "Sales order",
     "Select load",
@@ -159,6 +160,7 @@ export function loadsToCsv(orders: CustomerOrder[], includePricing: boolean): st
     "Tracking link",
     "Comments",
   ];
+  if (includeCarrier) headers.push("Driver", "Carrier company", "MC");
   if (includePricing) headers.push("Cost", "Rate reason");
   const lines = [headers.join(",")];
   for (const order of orders) {
@@ -179,6 +181,9 @@ export function loadsToCsv(orders: CustomerOrder[], includePricing: boolean): st
       order.trackingLink ?? "",
       order.comments ?? "",
     ];
+    if (includeCarrier) {
+      row.push(order.driverName ?? "", order.carrierName ?? "", order.carrierMc ?? "");
+    }
     if (includePricing) {
       row.push(order.customerCost == null ? "" : order.customerCost.toFixed(2), order.rateReason ?? "");
     }
