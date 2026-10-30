@@ -196,8 +196,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                   >
                     {(Object.keys(PERMISSION_LABEL) as EmitPermission[])
                       .filter((permission) => {
-                        if (me.viewAs?.profile === "loader") return permission === "view";
-                        if (me.viewAs?.profile === "sales") return permission === "view" || permission === "add";
+                        if (me.viewAs?.profile === "loader" || me.viewAs?.profile === "sales") return permission === "view";
                         return true;
                       })
                       .map((permission) => (
@@ -218,8 +217,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                       const value = event.target.value;
                       const profile = value === "sales" || value === "loader" ? value : null;
                       let permission = me.viewAs?.permission;
-                      if (profile === "loader") permission = "view";
-                      if (profile === "sales" && (permission === "pricing" || permission === "full")) permission = "add";
+                      if (profile === "loader" || profile === "sales") permission = "view";
                       void setView(me.viewAs?.access ?? "regular", permission, profile);
                     }}
                   >

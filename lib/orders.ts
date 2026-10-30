@@ -19,7 +19,7 @@ import { serializeCustomerOrder, trackingUrlFor } from "@/lib/customer-view";
 import { addDaysISO, denverDate, weekRange } from "@/lib/dates";
 import type { LoadTab, LoadTabCounts } from "@/lib/load-list";
 import { listCustomerDocuments } from "@/lib/documents";
-import { PortalError, SalesOrderConflictError } from "@/lib/http";
+import { PortalError } from "@/lib/http";
 import { deleteStoredBytes } from "@/lib/storage";
 import type { CustomerOrder, PortalStatus, Session, TimelineEvent, TrackingStage } from "@/lib/types";
 import { STAGE_LABEL, TRACKING_STAGES, canAddLoads, canEditLoad, canSeePricing, type Stop } from "@/lib/types";
@@ -565,24 +565,30 @@ export async function nextSalesOrderSuffix(ctx: PortalContext, raw: string) {
   return nextSuffix(raw, await salesOrdersSharingBase(ctx, raw));
 }
 
-/** Blocks a second load from saving an SO that is already stored, including on a cancelled load. */
-export async function assertSalesOrdersAvailable(ctx: PortalContext, lines: SalesOrderLine[], exceptLoadId?: string): Promise<void> {
-  const conflicts: Array<{ number: string; suggestion: string | null }> = [];
+export interface SalesOrderWarning {
+  number: string;
+  message: string;
+}
+
+/**
+ * Other loads, including cancelled ones, may already use an SO. That does not block the save.
+ * The caller can show the warning and still keep the new row.
+ */
+export async function salesOrderDuplicateWarnings(
+  ctx: PortalContext,
+  lines: SalesOrderLine[],
+  exceptLoadId?: string,
+): Promise<SalesOrderWarning[]> {
+  const warnings: SalesOrderWarning[] = [];
   for (const line of lines) {
     const params = salesOrderMatchArgs(line.number);
     const row = await ctx.db
       .prepare(`SELECT id FROM loads WHERE ${SALES_ORDER_MATCH_SQL}${exceptLoadId ? " AND id <> ?" : ""} LIMIT 1`)
       .get(...params, ...(exceptLoadId ? [exceptLoadId] : []));
     if (!row) continue;
-    const next = await nextSalesOrderSuffix(ctx, line.number);
-    conflicts.push({ number: line.number, suggestion: next.suggestion });
+    warnings.push({ number: line.number, message: `${line.number} is already on another load.` });
   }
-  if (!conflicts.length) return;
-  const first = conflicts[0];
-  const message = first.suggestion
-    ? `${first.number} was just used; use ${first.suggestion}?`
-    : `${first.number} is already on another load. Enter a different sales order.`;
-  throw new SalesOrderConflictError(message, conflicts);
+  return warnings;
 }
 
 export interface CopyDraftLine {
@@ -657,6 +663,7 @@ function salesOrdersFor(
 
 export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: Session): Promise<{
   order: CustomerOrder;
+  warnings: SalesOrderWarning[];
 }> {
   if (actor.viewAs) throw new PortalError("View-as is read-only. Switch back to Select view to change anything.", 403);
   if (!canAddLoads(actor)) throw new PortalError("This account can view loads but cannot add them.", 403);
@@ -677,11 +684,12 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
   }
   let route = drafted;
   let salesOrders: SalesOrderLine[] = [];
+  let warnings: SalesOrderWarning[] = [];
   await withTransaction(ctx.db, async () => {
     const syncedStops = await syncStopLocations(ctx, drafted.stops, actor.name, input.stops ?? []);
     route = resolvedRoute({ stops: syncedStops });
     salesOrders = salesOrdersFor(input, route.stops);
-    await assertSalesOrdersAvailable(ctx, salesOrders);
+    warnings = await salesOrderDuplicateWarnings(ctx, salesOrders);
     const assignment = assignLoadOwner({
       destinationState: route.destination.state,
       equipment: input.truckType,
@@ -731,10 +739,15 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
   const order = await getOrder(ctx, id);
   if (!order) throw new PortalError("The order could not be saved", 500);
   await notifyNewLoad(order, { name: actor.name, email: actor.email });
-  return { order };
+  return { order, warnings };
 }
 
-export async function updateOrder(ctx: PortalContext, id: string, patch: OrderPatch, actor: Session): Promise<CustomerOrder> {
+export async function updateOrder(
+  ctx: PortalContext,
+  id: string,
+  patch: OrderPatch,
+  actor: Session,
+): Promise<{ order: CustomerOrder; warnings: SalesOrderWarning[] }> {
   if (actor.viewAs) throw new PortalError("View-as is read-only. Switch back to Select view to change anything.", 403);
   if (!canEditLoad(actor)) throw new PortalError("This account can view loads but cannot change them.", 403);
   const existing = (await ctx.db.prepare(`${LIST_SQL_HEAD} WHERE id = ?`).get(id)) as LoadRow | undefined;
@@ -761,6 +774,7 @@ export async function updateOrder(ctx: PortalContext, id: string, patch: OrderPa
   const now = ctx.now().toISOString();
   const seePricing = canSeePricing(actor);
   let route = drafted;
+  let warnings: SalesOrderWarning[] = [];
   await withTransaction(ctx.db, async () => {
     const syncedStops = await syncStopLocations(ctx, drafted.stops, actor.name, patch.stops ?? drafted.stops, current.stops);
     route = resolvedRoute({ stops: syncedStops });
@@ -771,7 +785,7 @@ export async function updateOrder(ctx: PortalContext, id: string, patch: OrderPa
       const problems = salesOrderLineErrors(patch.salesOrders, route.stops, { required: true });
       if (problems.length) throw new PortalError(problems[0]);
     }
-    if (touched) await assertSalesOrdersAvailable(ctx, salesOrders, id);
+    if (touched) warnings = await salesOrderDuplicateWarnings(ctx, salesOrders, id);
     await ctx.db
     .prepare(
       `UPDATE loads SET
@@ -810,7 +824,7 @@ export async function updateOrder(ctx: PortalContext, id: string, patch: OrderPa
   void actor;
   const updated = await getOrder(ctx, id);
   if (!updated) throw new PortalError("Order not found", 404);
-  return updated;
+  return { order: updated, warnings };
 }
 
 /**

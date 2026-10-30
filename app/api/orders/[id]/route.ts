@@ -29,8 +29,8 @@ export async function PATCH(req: Request, context: { params: Promise<{ id: strin
     const { id } = await context.params;
     const ctx = await readyPortal();
     const patch = orderPatchSchema.parse(await req.json());
-    const order = await updateOrder(ctx, id, patch, session);
-    return json({ order: presentCustomerOrder(order, session) });
+    const result = await updateOrder(ctx, id, patch, session);
+    return json({ order: presentCustomerOrder(result.order, session), warnings: result.warnings });
   } catch (error) {
     return errorResponse(error);
   }

@@ -115,6 +115,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   const [submitted, setSubmitted] = useState<CustomerOrder | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
+  const [soWarning, setSoWarning] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -213,6 +214,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     setEditing(null);
     setSubmitted(null);
     setFormError("");
+    setSoWarning("");
     setCreating(true);
   }
 
@@ -224,6 +226,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     setDraft(draftFromOrder(body.order));
     setSubmitted(null);
     setFormError("");
+    setSoWarning("");
     setCreating(false);
   }
 
@@ -278,22 +281,6 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
         body: JSON.stringify(payload),
       });
       const body = await response.json();
-      if (response.status === 409 && Array.isArray(body.conflicts)) {
-        const conflicts = body.conflicts as Array<{ number: string; suggestion: string | null }>;
-        setDraft({
-          ...draft,
-          salesOrders: draft.salesOrders.map((line) => {
-            const hit = conflicts.find((item) => item.number === line.number.trim().toUpperCase() && item.suggestion);
-            return hit?.suggestion ? { ...line, number: hit.suggestion } : line;
-          }),
-          soHints: draft.salesOrders.map((line) => {
-            const hit = conflicts.find((item) => item.number === line.number.trim().toUpperCase());
-            return hit ? { suggestion: hit.suggestion, highestInUse: line.number.trim().toUpperCase(), tooLong: !hit.suggestion } : null;
-          }),
-        });
-        setFormError(typeof body.error === "string" ? body.error : "That sales order is already used.");
-        return;
-      }
       if (response.status === 409 && Array.isArray(body.duplicates)) {
         const duplicates = body.duplicates as Array<{
           stopId?: string;
@@ -336,6 +323,13 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
         return;
       }
       if (!response.ok) throw new Error(body.error || "Could not save");
+      const warningText = Array.isArray(body.warnings)
+        ? body.warnings
+            .map((item: { message?: string }) => (typeof item.message === "string" ? item.message : ""))
+            .filter(Boolean)
+            .join(" ")
+        : "";
+      setSoWarning(warningText);
       if (!editing) {
         setSubmitted(body.order);
         setEditing(body.order);
@@ -347,7 +341,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       }
       setPage(1);
       setReload((value) => value + 1);
-      toast(editing ? "Load saved." : "Load submitted. Select will add the load number.");
+      toast(warningText || (editing ? "Load saved." : "Load submitted. Select will add the load number."));
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "We couldn't save this load. Check the fields and try again.");
     } finally {
@@ -725,6 +719,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
               </>
             )}
             {formError && <p className="error">{formError}</p>}
+            {soWarning && <p className="warn">{soWarning}</p>}
             <LoadForm draft={draft} setDraft={setDraft} order={editing} sites={sites} hideCommercial={!showPricing} />
             {editing && (
               <div className="grid-2">

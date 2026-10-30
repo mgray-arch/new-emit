@@ -73,7 +73,7 @@ export default function UsersPage() {
         password: generate ? undefined : password,
         generatePassword: generate,
         access,
-        permission: profile === "loader" ? "view" : profile === "sales" && (permission === "pricing" || permission === "full") ? "add" : permission,
+        permission: profile === "loader" || profile === "sales" ? "view" : permission,
         chatEnabled,
         profile: profile || null,
       }),
@@ -198,13 +198,12 @@ export default function UsersPage() {
               onChange={(event) => {
                 const next = event.target.value as "" | "sales" | "loader";
                 setProfile(next);
-                if (next === "loader") setPermission("view");
-                if (next === "sales" && (permission === "pricing" || permission === "full")) setPermission("add");
+                if (next === "loader" || next === "sales") setPermission("view");
               }}
             >
               <option value="">Standard</option>
-              <option value="sales">Sales — add loads, no cost</option>
-              <option value="loader">Loader — upload and print, no cost, cannot add loads</option>
+              <option value="sales">Sales — view, upload, and print. No cost. Cannot add loads.</option>
+              <option value="loader">Loader — view, upload, and print. No cost. Cannot add loads.</option>
             </select>
           </div>
           <div className="field">
@@ -214,10 +213,7 @@ export default function UsersPage() {
                 <option
                   key={item.value}
                   value={item.value}
-                  disabled={
-                    (profile === "sales" && (item.value === "pricing" || item.value === "full")) ||
-                    (profile === "loader" && item.value !== "view")
-                  }
+                  disabled={(profile === "sales" || profile === "loader") && item.value !== "view"}
                 >
                   {item.label} — {item.detail}
                 </option>
@@ -278,9 +274,7 @@ export default function UsersPage() {
                 value={user.profile ?? ""}
                 onChange={(event) => {
                   const next = event.target.value === "sales" || event.target.value === "loader" ? event.target.value : null;
-                  let permission = user.permission;
-                  if (next === "loader") permission = "view";
-                  if (next === "sales" && (permission === "pricing" || permission === "full")) permission = "add";
+                  const permission = next === "loader" || next === "sales" ? "view" : user.permission;
                   void saveUser(user, { profile: next, permission });
                 }}
               >
@@ -300,10 +294,7 @@ export default function UsersPage() {
                   <option
                     key={item.value}
                     value={item.value}
-                    disabled={
-                      (user.profile === "sales" && (item.value === "pricing" || item.value === "full")) ||
-                      (user.profile === "loader" && item.value !== "view")
-                    }
+                    disabled={(user.profile === "sales" || user.profile === "loader") && item.value !== "view"}
                   >
                     {item.label}
                   </option>

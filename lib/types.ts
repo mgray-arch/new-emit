@@ -305,33 +305,32 @@ export function canSeePricing(viewer: Viewer): boolean {
   return access.permission === "pricing" || access.permission === "full";
 }
 
-/** View only and see pricing can look. Add loads and full access can create and edit. */
+/** View only and see pricing can look. Add loads and full access can create and edit. Sales and Loader cannot. */
 export function canAddLoads(viewer: Viewer): boolean {
   const access = resolveAccess(viewer);
   if (access.select) return true;
-  if (access.profile === "loader") return false;
-  if (access.profile === "sales") return access.permission !== "view";
+  if (access.profile === "loader" || access.profile === "sales") return false;
   return access.permission === "add" || access.permission === "full";
 }
 
-/** Same people who can add a load can edit its fields. Loader cannot. */
+/** Same people who can add a load can edit its fields. Sales and Loader cannot. */
 export function canEditLoad(viewer: Viewer): boolean {
   return canAddLoads(viewer);
 }
 
-/** BOL, POD, and other files. Loader can upload. View only cannot. */
+/** BOL, POD, and other files. Sales and Loader can upload. View only cannot. */
 export function canUploadDocs(viewer: Viewer): boolean {
   const access = resolveAccess(viewer);
   if (access.select) return true;
-  if (access.profile === "loader") return true;
+  if (access.profile === "loader" || access.profile === "sales") return true;
   return canAddLoads(viewer);
 }
 
-/** Freight photos. Select and Loader. Not a pricing permission. */
+/** Freight photos. Select, Sales, and Loader. Not a pricing permission. */
 export function canUploadPhotos(viewer: Viewer): boolean {
   const access = resolveAccess(viewer);
   if (access.select) return true;
-  return access.profile === "loader";
+  return access.profile === "loader" || access.profile === "sales";
 }
 
 /**

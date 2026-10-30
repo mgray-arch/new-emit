@@ -143,19 +143,24 @@ describe("T-suffix suggestions", () => {
     expect(stored).toMatchObject({ copied_from_id: source.id, customer_cost_cents: null, tracking_link: null });
   });
 
-  it("returns 409 when a second save uses the same SO, and offers the next suffix", async () => {
+  it("saves a duplicate sales order, including one on a cancelled load, and warns without blocking", async () => {
     const first = await post({ salesOrderNumber: "SO-RACE-1", stops: stops.slice(0, 2) });
     expect(first.status).toBe(201);
+    expect((await first.json()).warnings).toEqual([]);
     const second = await post({ salesOrderNumber: "SO-RACE-1", stops: stops.slice(0, 2) });
-    expect(second.status).toBe(409);
-    const conflict = await second.json();
-    expect(conflict.conflicts[0]).toMatchObject({ number: "SO-RACE-1", suggestion: "SO-RACE-1_T2" });
-    expect(conflict.error).toMatch(/use SO-RACE-1_T2/);
+    expect(second.status).toBe(201);
+    const saved = await second.json();
+    expect(saved.order.salesOrderNumber).toBe("SO-RACE-1");
+    expect(saved.warnings).toEqual([{ number: "SO-RACE-1", message: "SO-RACE-1 is already on another load." }]);
+    const count = await ctx.db.prepare(`SELECT COUNT(*) AS n FROM loads WHERE UPPER(sales_order_number) = 'SO-RACE-1'`).get();
+    expect(Number(count?.n)).toBe(2);
 
     const again = await post({ salesOrderNumber: "SO-002003", stops: stops.slice(0, 2) });
-    expect(again.status).toBe(409);
+    expect(again.status).toBe(201);
     const earlier = await again.json();
-    expect(earlier.conflicts[0]).toMatchObject({ number: "SO-002003", suggestion: "SO-002003_T2" });
+    expect(earlier.order.salesOrderNumber).toBe("SO-002003");
+    expect(earlier.warnings[0]).toMatchObject({ number: "SO-002003" });
+    expect(earlier.warnings[0].message).toMatch(/already on another load/);
   });
 
   it("shows a receiver only the sales orders for that receiver's drops", async () => {

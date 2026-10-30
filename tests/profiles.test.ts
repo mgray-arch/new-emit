@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { PATCH as updateUser } from "@/app/api/admin/users/[id]/route";
 import { POST as createUser } from "@/app/api/admin/users/route";
 import { POST as ask } from "@/app/api/ask/route";
+import { GET as copyDraftRoute } from "@/app/api/orders/[id]/copy-draft/route";
 import { POST as uploadDocument } from "@/app/api/orders/[id]/documents/route";
 import { GET as exportOrders } from "@/app/api/orders/export/route";
 import { GET as getOrderRoute, PATCH as patchOrder } from "@/app/api/orders/[id]/route";
@@ -11,7 +12,7 @@ import { answerQuestion, buildModelRequest } from "@/lib/assistant";
 import { presentCustomerOrder } from "@/lib/customer-view";
 import type { PortalContext } from "@/lib/db";
 import { findUserById, sessionFromUser } from "@/lib/passwords";
-import { canSeePricing } from "@/lib/types";
+import { canAddLoads, canSeePricing, canUploadDocs, canUploadPhotos } from "@/lib/types";
 import { createEmitUser } from "@/lib/users";
 import { adminSession, customerSession, expectNoSecrets, seededPortal, sessionCookie } from "./helpers";
 
@@ -37,6 +38,10 @@ describe("Sales and Loader cannot see cost", () => {
     expect(canSeePricing({ role: "emit_admin", permission: "full", profile: "sales" })).toBe(false);
     expect(canSeePricing({ role: "emit_admin", permission: "full", profile: "loader" })).toBe(false);
     expect(canSeePricing({ role: "emit_admin", permission: "full" })).toBe(true);
+    expect(canAddLoads({ role: "customer", permission: "add", profile: "sales" })).toBe(false);
+    expect(canAddLoads({ role: "customer", permission: "full", profile: "loader" })).toBe(false);
+    expect(canUploadDocs({ role: "customer", permission: "view", profile: "sales" })).toBe(true);
+    expect(canUploadPhotos({ role: "customer", permission: "view", profile: "sales" })).toBe(true);
 
     const admin = await sessionCookie(adminSession());
     const denied = await createUser(
@@ -47,13 +52,21 @@ describe("Sales and Loader cannot see cost", () => {
       }),
     );
     expect(denied.status).toBe(400);
+    const deniedAdd = await createUser(
+      new Request("http://portal.test/api/admin/users", {
+        method: "POST",
+        headers: headers(admin, true),
+        body: JSON.stringify({ name: "Sales Add", email: "sales-add@emit.example", password: "temporary-pass", profile: "sales", permission: "add" }),
+      }),
+    );
+    expect(deniedAdd.status).toBe(400);
 
     const sales = await createEmitUser(ctx, {
       name: "Sarah Sales",
       email: "sarah.sales@emit.example",
       password: "temporary-pass",
       profile: "sales",
-      permission: "add",
+      permission: "view",
       chatEnabled: true,
     });
     const loader = await createEmitUser(ctx, {
@@ -77,7 +90,9 @@ describe("Sales and Loader cannot see cost", () => {
       }),
     );
     expect(priced.status).toBe(201);
-    const orderId = (await priced.json()).order.id as string;
+    const pricedBody = await priced.json();
+    const orderId = pricedBody.order.id as string;
+    const pricedOrder = pricedBody.order;
 
     for (const cookie of [salesCookie, loaderCookie]) {
       const list = await listOrdersRoute(new Request("http://portal.test/api/orders?q=SO-PROFILE-COST", { headers: headers(cookie) }));
@@ -106,11 +121,12 @@ describe("Sales and Loader cannot see cost", () => {
         body: JSON.stringify({ ...lane, salesOrderNumber: "SO-SALES-NEW", customerCost: 2222, rateReason: "Team" }),
       }),
     );
-    expect(salesWrite.status).toBe(201);
-    const salesOrder = (await salesWrite.json()).order;
-    expect(salesOrder.customerCost).toBeUndefined();
-    const stored = await ctx.db.prepare(`SELECT customer_cost_cents, rate_reason FROM loads WHERE id = ?`).get(salesOrder.id);
-    expect(stored).toMatchObject({ customer_cost_cents: null, rate_reason: null });
+    expect(salesWrite.status).toBe(403);
+    const salesCopy = await copyDraftRoute(
+      new Request(`http://portal.test/api/orders/${orderId}/copy-draft`, { headers: headers(salesCookie) }),
+      { params: Promise.resolve({ id: orderId }) },
+    );
+    expect(salesCopy.status).toBe(403);
 
     const patched = await patchOrder(
       new Request(`http://portal.test/api/orders/${orderId}`, {
@@ -120,9 +136,10 @@ describe("Sales and Loader cannot see cost", () => {
       }),
       { params: Promise.resolve({ id: orderId }) },
     );
-    expect(patched.status).toBe(200);
-    const still = await ctx.db.prepare(`SELECT customer_cost_cents FROM loads WHERE id = ?`).get(orderId);
+    expect(patched.status).toBe(403);
+    const still = await ctx.db.prepare(`SELECT customer_cost_cents, comments FROM loads WHERE id = ?`).get(orderId);
     expect(still?.customer_cost_cents).toBe(150000);
+    expect(still?.comments).not.toBe("No price here");
 
     const loaderCreate = await createOrderRoute(
       new Request("http://portal.test/api/orders", {
@@ -141,6 +158,14 @@ describe("Sales and Loader cannot see cost", () => {
       { params: Promise.resolve({ id: orderId }) },
     );
     expect(uploaded.status).toBe(200);
+    const salesForm = new FormData();
+    salesForm.set("file", new File([new TextEncoder().encode("Freight list\nPieces: 3\n")], "sales-bol.txt", { type: "text/plain" }));
+    salesForm.set("slot", "bol");
+    const salesUpload = await uploadDocument(
+      new Request(`http://portal.test/api/orders/${orderId}/documents`, { method: "POST", headers: headers(salesCookie), body: salesForm }),
+      { params: Promise.resolve({ id: orderId }) },
+    );
+    expect(salesUpload.status).toBe(200);
 
     const promoted = await updateUser(
       new Request(`http://portal.test/api/admin/users/${sales.user.id}`, {
@@ -159,12 +184,12 @@ describe("Sales and Loader cannot see cost", () => {
     expect(carrierQuestion.refused).toBe(true);
     expect(carrierQuestion.text).toMatch(/don't have access/i);
     expect(carrierQuestion.text).not.toMatch(/ACME|123456/);
-    const request = buildModelRequest("where is SO-PROFILE-COST?", [{ ...salesOrder, carrierName: "ACME Trucking", carrierMc: "123", driverName: "Pat", customerCost: 1500, bolPrint: { version: 1, printedAt: "", printedByName: "", carrierName: "ACME", carrierMc: "123", driverName: "Pat", documentId: "x", reprint: false, reasons: [], bolRemoved: false } } as never], { includePricing: false });
+    const request = buildModelRequest("where is SO-PROFILE-COST?", [{ ...pricedOrder, carrierName: "ACME Trucking", carrierMc: "123", driverName: "Pat", customerCost: 1500, bolPrint: { version: 1, printedAt: "", printedByName: "", carrierName: "ACME", carrierMc: "123", driverName: "Pat", documentId: "x", reprint: false, reasons: [], bolRemoved: false } } as never], { includePricing: false });
     expect(request.messages[1].content).not.toMatch(/ACME|carrierName|customerCost|1500|bolPrint/);
 
     const hidden = presentCustomerOrder(
-      { ...salesOrder, customerCost: 1500, rateReason: "Team", carrierName: "ACME", carrierMc: "123", driverName: "Pat" },
-      { role: "customer", permission: "add", profile: "sales" },
+      { ...pricedOrder, customerCost: 1500, rateReason: "Team", carrierName: "ACME", carrierMc: "123", driverName: "Pat" },
+      { role: "customer", permission: "view", profile: "sales" },
     );
     expect(hidden.customerCost).toBeUndefined();
     expect(hidden.carrierName).toBe("ACME");

@@ -66,13 +66,11 @@ function roleForAccess(access: EmitAccess): PortalRole {
   return access === "admin" ? "emit_admin" : "customer";
 }
 
-/** Sales and Loader never receive a permission that would show cost or, for Loader, add loads. */
+/** Sales and Loader can view, upload, and print. They cannot add loads or see cost. */
 export function assertProfilePermission(profile: EmitProfile | null, permission: EmitPermission): void {
-  if (profile === "sales" && (permission === "pricing" || permission === "full")) {
-    throw new PortalError("Sales cannot have see pricing or full access.", 400);
-  }
-  if (profile === "loader" && permission !== "view") {
-    throw new PortalError("Loader is view only and cannot add loads or see pricing.", 400);
+  if ((profile === "sales" || profile === "loader") && permission !== "view") {
+    const name = profile === "sales" ? "Sales" : "Loader";
+    throw new PortalError(`${name} can view, upload, and print only. They cannot add loads or see pricing.`, 400);
   }
 }
 
@@ -124,7 +122,7 @@ export async function createEmitUser(
     throw new PortalError("Set a temporary password or generate one.");
   }
   const profile = isEmitProfile(input.profile) ? input.profile : null;
-  const permission = input.permission ?? (profile === "loader" ? "view" : "add");
+  const permission = input.permission ?? (profile === "loader" || profile === "sales" ? "view" : "add");
   assertProfilePermission(profile, permission);
   const access = input.access ?? (permission === "full" ? "admin" : "regular");
   const id = randomUUID();

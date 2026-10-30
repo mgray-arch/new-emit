@@ -19,16 +19,6 @@ export class ConflictError extends PortalError {
   }
 }
 
-/** A sales order on this load is already on another load. The suggestion is advisory. */
-export class SalesOrderConflictError extends PortalError {
-  constructor(
-    message: string,
-    readonly conflicts: Array<{ number: string; suggestion: string | null }>,
-  ) {
-    super(message, 409);
-  }
-}
-
 export function json(data: unknown, status = 200, extra?: HeadersInit): Response {
   const headers = new Headers(extra);
   headers.set("content-type", "application/json; charset=utf-8");
@@ -47,9 +37,6 @@ export function forbidden(): Response {
 export function errorResponse(error: unknown): Response {
   if (error instanceof ZodError) {
     return json({ error: error.issues[0]?.message ?? "Invalid request" }, 400);
-  }
-  if (error instanceof SalesOrderConflictError) {
-    return json({ error: error.message, conflicts: error.conflicts }, 409);
   }
   if (error instanceof ConflictError) {
     return json({ error: error.message, duplicates: error.duplicates }, 409);

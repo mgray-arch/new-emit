@@ -1,5 +1,5 @@
 import { isSession, requireActorAdmin } from "@/lib/guard";
-import { errorResponse, json, PortalError } from "@/lib/http";
+import { errorResponse, json } from "@/lib/http";
 import { clearViewAsCookie, encodeViewAs, parseViewAs, viewAsCookie } from "@/lib/session";
 import type { EmitPermission, ViewAsPreview } from "@/lib/types";
 import { z } from "zod";
@@ -24,10 +24,7 @@ export async function POST(req: Request) {
     if (body.access) {
       let permission: EmitPermission = body.permission ?? (body.access === "admin" ? "full" : "add");
       const profile = body.profile ?? null;
-      if (profile === "loader") permission = "view";
-      if (profile === "sales" && (permission === "pricing" || permission === "full")) {
-        throw new PortalError("Sales cannot have see pricing or full access.", 400);
-      }
+      if (profile === "loader" || profile === "sales") permission = "view";
       viewAs = { access: body.access, permission, ...(profile ? { profile } : {}) };
     } else if (body.role) {
       viewAs = parseViewAs(body.role);
