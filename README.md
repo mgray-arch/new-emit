@@ -2,9 +2,9 @@
 
 Customer portal for EMIT Technologies, a shipper of Select Transport Partners. It replaces the old Lovable app. Put it on a new domain. Do not reuse the old site's hostname unless that is the name you want.
 
-EMIT admins and regular EMIT users sign in with email and password. Select staff sign in with Google. Select adds each EMIT email on Users, marks them as an EMIT admin or a regular user, and gives them one permission: view only, add loads, see pricing, or full access. A regular EMIT user never sees the price EMIT pays Select. An EMIT admin with see pricing or full access does, and so does Select. They never show carrier pay. Carrier pay stays hidden from every EMIT user, in every role and permission, including when Select is viewing as that person. The portal is the order confirmation: submitting an order does not send email. There is no SAM API. The Load Builder bot builds the load from the Slack note `notifyNewLoad` posts. Select can still type the SAM load number. Until a number is stored, EMIT sees **Pending**. The portal does not invent a load number. When SAM assigns or changes a carrier, the bot records the carrier name and MC number. The portal shows that on the load, with a badge until each person opens the order. It does not send email or a push notification, and it has no carrier pay.
+EMIT admins, regular EMIT users, and Select staff sign in with email and password. Select adds each EMIT email on Users, marks them as an EMIT admin or a regular user, and gives them one permission: view only, add loads, see pricing, or full access. A regular EMIT user never sees the price EMIT pays Select. An EMIT admin with see pricing or full access does, and so does Select. They never show carrier pay. Carrier pay stays hidden from every EMIT user, in every role and permission, including when Select is viewing as that person. The portal is the order confirmation: submitting an order does not send email. There is no SAM API. The Load Builder bot builds the load from the Slack note `notifyNewLoad` posts. Select can still type the SAM load number. Until a number is stored, EMIT sees **Pending**. The portal does not invent a load number. When SAM assigns or changes a carrier, the bot records the carrier name and MC number. The portal shows that on the load, with a badge until each person opens the order. It does not send email or a push notification, and it has no carrier pay.
 
-The public hostname is not hardcoded. Set `PORTAL_PUBLIC_URL` to the domain this portal should use. `emit-select.com` in this file is only an example of a previous plan. Google's redirect URI has to match whatever domain you attach. `goselect.com` is Select's Google Workspace, not the portal's address.
+The public hostname is not hardcoded. Set `PORTAL_PUBLIC_URL` to the domain this portal should use. `emit-select.com` in this file is only an example of a previous plan. `goselect.com` is Select's email domain, not the portal's address.
 
 Orders, users, and the document review queue live in Turso. Document and photo bytes live in Vercel Blob. Locally, with those unset, the app uses a SQLite file and `data/blobs`.
 
@@ -43,8 +43,8 @@ For a local demo, set `DEMO_SEED=true` and `NEXT_PUBLIC_DEMO_HINT=true` in `.env
 | EMIT regular, view only | viewer@emit.example | Emit-Demo-2026 | Email and password |
 | EMIT regular, see pricing | pricing@emit.example | Emit-Demo-2026 | Email and password |
 | EMIT admin, full access | lead@emit.example | Emit-Demo-2026 | Email and password |
-| Select | mgray@goselect.com | Emit-Demo-2026 | Google |
-| Select | dmartin@goselect.com | Emit-Demo-2026 | Google |
+| Select | mgray@goselect.com | Emit-Demo-2026 | Email and password |
+| Select | dmartin@goselect.com | Emit-Demo-2026 | Email and password |
 
 Those passwords exist only when the demo seed runs. Production with `DEMO_SEED=false` creates nobody.
 
@@ -69,15 +69,12 @@ Set these on the Vercel project for **Production**. Preview can keep `DEMO_SEED=
 | `BLOB_READ_WRITE_TOKEN` | Filled in when the Blob store is connected. |
 | `DEMO_SEED` | `false` |
 | `NEXT_PUBLIC_DEMO_HINT` | `false` |
-| `SELECT_ADMIN_EMAILS` | `mgray@goselect.com,dmartin@goselect.com` |
+| `SELECT_ADMIN_EMAILS` | `mgray@goselect.com,dmartin@goselect.com`. Add every other Select admin, including Ainsley, before creating that account. |
 | `EMIT_EMAIL_DOMAINS` | `emit.com,emittechnologies.com` |
-| `GOOGLE_CLIENT_ID` | Select Workspace OAuth client id. |
-| `GOOGLE_CLIENT_SECRET` | That client's secret. |
-| `GOOGLE_HOSTED_DOMAIN` | `goselect.com` |
 
 ## Preview environment variables
 
-Vercel Preview builds with `NODE_ENV=production`. An unset `DEMO_SEED` does **not** create `m.gray@emit.example`. Variables checked only for Production are invisible to the preview, so email sign-in fails and the page cannot open a database. Google stays off until `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` exist. That part is expected.
+Vercel Preview builds with `NODE_ENV=production`. An unset `DEMO_SEED` does **not** create `m.gray@emit.example`. Variables checked only for Production are invisible to the preview, so email sign-in fails and the page cannot open a database. That part is expected.
 
 Sign-in does not use Blob. A missing `BLOB_READ_WRITE_TOKEN` only blocks file uploads, and the upload error names that variable.
 
@@ -91,11 +88,10 @@ Use a **second Turso database** for Preview. If Preview points at the production
 6. `TURSO_AUTH_TOKEN` — the token for that same preview database.
 7. `DEMO_SEED` — `true` for Preview. Production stays `false`.
 8. `NEXT_PUBLIC_DEMO_HINT` — `true` for Preview, so the sign-in page shows the test password. Production stays `false`.
-9. Leave `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` empty until the Workspace OAuth client exists. The Google button stays hidden, with a note to use email and password.
-10. Leave `PORTAL_PUBLIC_URL` unset on Preview so links use the preview host. Production is the new hostname.
-11. `BLOB_READ_WRITE_TOKEN` — required on Preview if you want the sample BOL and POD files (or any upload) to be stored. Connect the Blob store to Preview, or paste a token and check Preview. Tracking links do not need it.
-12. **Deployments** → the latest Preview deployment → **Redeploy**. Environment changes do not apply to a deployment that is already built. A push to the preview branch also starts a new deployment.
-13. Open the preview URL. Sign in as `m.gray@emit.example` / `Emit-Demo-2026`.
+9. Leave `PORTAL_PUBLIC_URL` unset on Preview so links use the preview host. Production is the new hostname.
+10. `BLOB_READ_WRITE_TOKEN` — required on Preview if you want the sample BOL and POD files (or any upload) to be stored. Connect the Blob store to Preview, or paste a token and check Preview. Tracking links do not need it.
+11. **Deployments** → the latest Preview deployment → **Redeploy**. Environment changes do not apply to a deployment that is already built. A push to the preview branch also starts a new deployment.
+12. Open the preview URL. Sign in as `m.gray@emit.example` / `Emit-Demo-2026`.
 
 A preview updates its own Turso database when its server starts. Accounts and loads stay. No wipe is required. With `DEMO_SEED=true`, that start also fills sample paperwork and fake tracking links onto the existing demo loads:
 
@@ -141,30 +137,25 @@ Do not set `DEMO_USER_PASSWORD` in production. Do not set a Gmail client. Order 
 3. Set `AUTH_SECRET`, `DEMO_SEED=false`, and `NEXT_PUBLIC_DEMO_HINT=false`.
 4. Set `PORTAL_PUBLIC_URL` to `https://` plus the new hostname, with no trailing slash.
 5. Set `EMIT_EMAIL_DOMAINS` to the real EMIT domains. Drop `emit.example`.
-6. In Google Cloud, OAuth consent screen **Internal**, client type Web application.
-   - Authorized redirect URI: `{PORTAL_PUBLIC_URL}/api/auth/google/callback`
-   - Authorized JavaScript origin: the same origin, with no path
-   - Scopes: `openid`, `email`, `profile`
-   - Put the client id and secret in `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
-7. Attach the new domain (steps below) and redeploy Production. Leave the old Lovable hostname where it is.
-8. Sign in as `mgray@goselect.com` or `dmartin@goselect.com` with Google. That first sign-in creates the admin. There is no password for that account in production.
-9. Open **Users**. Add each EMIT person (name and email). Set a temporary password or generate one, and send it to them yourself. The portal does not email it. Choose **EMIT admin** or **Regular EMIT user**, and one permission: **View only**, **Add loads**, **See pricing**, or **Full access**. A regular user never sees what Select charges EMIT. An EMIT admin with see pricing or full access does. An email that is not on this list cannot sign in. **Chat enabled** stays off until you check it for that person. Select staff always have Messages.
-10. Ask one EMIT person to sign in and change the password under **Password**.
-11. Submit a test order. Confirm the Select load says Pending, and that the build status says **Sent to Slack** once `SLACK_NEW_LOADS_WEBHOOK_URL` is set. There is no **Build load in SAM** button. After the bot stores the SAM number (for example `458934-1`), the status says **Built in SAM: 458934-1**. Paste the public tracking link. Confirm EMIT sees that number and a Track button. Sign in as a view-only user and confirm the status is visible and there is nothing to click that builds or edits the load. Sign in as a regular user and confirm the cost line is gone. Sign in as an EMIT admin with full access and confirm the cost is there. Use **View as** a regular user and confirm the cost line is gone, then **View as** an EMIT admin and confirm it is there, without signing out.
-12. Add receiver companies under Settings only when a receiver should have a private link.
+6. Attach the new domain (steps below) and redeploy Production. Leave the old Lovable hostname where it is.
+7. Set the first Select password, then sign in. See **Select passwords** below. There is no Google sign-in.
+8. Open **Users**. Under **Select staff**, add Drew and any other address on `SELECT_ADMIN_EMAILS`. Set or generate a temporary password and give it to them yourself. The portal does not email it. Then add each EMIT person. Choose **EMIT admin** or **Regular EMIT user**, and one permission: **View only**, **Add loads**, **See pricing**, or **Full access**. A regular user never sees the price EMIT pays Select. An EMIT admin with see pricing or full access does. An email that is not on this list cannot sign in as EMIT. **Chat enabled** stays off until you check it for that person. Select staff always have Messages.
+9. Ask one EMIT person to sign in and change the password under **Password**.
+10. Submit a test order. Confirm the Select load says Pending, and that the build status says **Sent to Slack** once `SLACK_NEW_LOADS_WEBHOOK_URL` is set. There is no **Build load in SAM** button. After the bot stores the SAM number (for example `458934-1`), the status says **Built in SAM: 458934-1**. Paste the public tracking link. Confirm EMIT sees that number and a Track button. Sign in as a view-only user and confirm the status is visible and there is nothing to click that builds or edits the load. Sign in as a regular user and confirm the cost line is gone. Sign in as an EMIT admin with full access and confirm the cost is there. Use **View as** a regular user and confirm the cost line is gone, then **View as** an EMIT admin and confirm it is there, without signing out.
+11. Add receiver companies under Settings only when a receiver should have a private link.
 
 Microsoft sign-in can stay unconfigured. The login page hides that button until the Azure variables are set.
 
 ## Custom domain
 
-Use a new domain for this portal. Do not point the old Lovable site's name at this app unless that name is the one you actually want. Nothing in the running code hardcodes `emit-select.com`. Links and the Google callback come from `PORTAL_PUBLIC_URL`. If that is blank in production, links fall back to `VERCEL_PROJECT_PRODUCTION_URL` (the domain attached to the Vercel project). Auth callbacks use the host the browser called when `PORTAL_PUBLIC_URL` is blank. Set `PORTAL_PUBLIC_URL` anyway so a preview deployment cannot mint a production link.
+Use a new domain for this portal. Do not point the old Lovable site's name at this app unless that name is the one you actually want. Nothing in the running code hardcodes `emit-select.com`. Links come from `PORTAL_PUBLIC_URL`. If that is blank in production, links fall back to `VERCEL_PROJECT_PRODUCTION_URL` (the domain attached to the Vercel project). Set `PORTAL_PUBLIC_URL` anyway so a preview deployment cannot mint a production link.
 
 These are the only domain-shaped settings:
 
 | What | Tied to |
 | --- | --- |
-| Portal links, tracking links, receiver links, Google callback | `PORTAL_PUBLIC_URL` |
-| Select Google sign-in | `GOOGLE_HOSTED_DOMAIN` (default `goselect.com`) and the redirect URI you register, which must be `{PORTAL_PUBLIC_URL}/api/auth/google/callback` |
+| Portal links, tracking links, receiver links | `PORTAL_PUBLIC_URL` |
+| Who may be a Select admin | `SELECT_ADMIN_EMAILS` |
 | Who may be added as EMIT | `EMIT_EMAIL_DOMAINS` and `EMIT_ALLOWED_EMAILS` |
 | SAM load link | `SAM_LOAD_URL_TEMPLATE` |
 
@@ -174,8 +165,25 @@ These are the only domain-shaped settings:
    - Value: `76.76.21.21`
    If the DNS host supports ALIAS or ANAME, `cname.vercel-dns.com` is the other form Vercel accepts. For `www`, add a **CNAME** to `cname.vercel-dns.com`.
 3. Wait until Vercel marks the domain Valid. Vercel requests the certificate. Do not turn on a proxy that rewrites the host.
-4. Set `PORTAL_PUBLIC_URL` to `https://` plus that hostname, with no trailing slash. In Google Cloud, set the authorized redirect URI to `https://<that-host>/api/auth/google/callback` and the JavaScript origin to `https://<that-host>`.
-5. Redeploy Production. Open the new hostname and sign in with Google. A preview URL (`*.vercel.app`) is not the production site.
+4. Set `PORTAL_PUBLIC_URL` to `https://` plus that hostname, with no trailing slash.
+5. Redeploy Production. Open the new hostname and sign in with email and password. A preview URL (`*.vercel.app`) is not the production site.
+
+## Select passwords
+
+Select staff use the same sign-in form as EMIT. The account is an admin only when the email is on `SELECT_ADMIN_EMAILS`. Passwords are stored as hashes. The portal does not email them.
+
+The first Select password, before anyone can sign in as Select:
+
+1. In Vercel, open the project, then **Settings**, then **Environment Variables**. Add `SELECT_SETUP_KEY` for **Production**. The value is a random string you create, at least 16 characters. Do not put it in git.
+2. Add any missing Select address, including Ainsley's, to `SELECT_ADMIN_EMAILS`. The default already includes `mgray@goselect.com` and `dmartin@goselect.com`.
+3. Redeploy Production. Environment changes do not apply to a deployment that is already built.
+4. Open the production site and the sign-in page. A **Set a Select password** section is there because the setup key is set.
+5. Enter the setup key, the Select email, and a new password of at least 10 characters. Save it.
+6. Sign in with that email and password.
+7. Open **Users**. Under **Select staff**, add the other people and set or generate a password for each. Give them the password yourself.
+8. Delete `SELECT_SETUP_KEY` and redeploy. The setup section disappears. Later password resets are done on **Users** by a signed-in Select admin.
+
+`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_HOSTED_DOMAIN` are not used. Remove them from Vercel.
 
 ## Select load numbers
 
@@ -191,7 +199,7 @@ There is no self-service signup and no password email. Azure is not involved.
 
 ## EMIT permissions and pricing
 
-Select staff (`admin`) sign in with Google and can open Review, Users, and Settings. Every Select account can use **View as**. Building a load in SAM is not a portal action. EMIT people are added only on the Select Users page. Each person has an access and a permission:
+Select staff (`admin`) sign in with email and password and can open Review, Users, and Settings. Every Select account can use **View as**. Building a load in SAM is not a portal action. EMIT people are added only on the Select Users page. Each person has an access and a permission:
 
 | Access | What it changes |
 | --- | --- |

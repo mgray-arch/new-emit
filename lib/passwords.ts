@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { PortalContext } from "@/lib/db";
 import { PortalError } from "@/lib/http";
+import { adminEmails } from "@/lib/auth-policy";
 import { isEmitPermission, permissionFromRole, type EmitPermission, type PortalRole, type Session } from "@/lib/types";
 
 /** Failed attempts against one email before that email is locked. */
@@ -107,6 +108,15 @@ export async function loginLockStatus(
   return { locked, retryAfterSeconds: locked ? Math.ceil(LOGIN_WINDOW_MS / 1000) : 0 };
 }
 
+export async function noteFailedLogin(
+  ctx: PortalContext,
+  email: string,
+  ip: string,
+): Promise<{ locked: boolean; retryAfterSeconds: number }> {
+  await recordFailure(ctx, email, ip);
+  return loginLockStatus(ctx, email, ip);
+}
+
 async function recordFailure(ctx: PortalContext, email: string, ip: string): Promise<void> {
   const now = ctx.now().toISOString();
   const insert = ctx.db.prepare(`INSERT INTO login_attempts (id, bucket, created_at) VALUES (?, ?, ?)`);
@@ -137,6 +147,7 @@ export async function loginWithPassword(
     return { ok: false, reason: "invalid" };
   }
   if (Number(user.active) === 0) return { ok: false, reason: "inactive" };
+  if (user.role === "admin" && !adminEmails().includes(normalized)) return { ok: false, reason: "invalid" };
   await clearEmailFailures(ctx, normalized);
   return {
     ok: true,
@@ -236,7 +247,7 @@ export async function changeOwnPassword(
   const user = await findUserById(ctx, session.userId);
   if (!user) throw new PortalError("User not found", 404);
   if (Number(user.active) === 0) throw new PortalError("This account is deactivated.", 403);
-  if (!user.password_hash) throw new PortalError("This account signs in with Google. There is no password to change.");
+  if (!user.password_hash) throw new PortalError("This account has no password yet.");
   if (!bcrypt.compareSync(currentPassword, user.password_hash)) {
     throw new PortalError("Current password is wrong.");
   }

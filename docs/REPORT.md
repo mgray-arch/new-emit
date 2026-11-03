@@ -1,6 +1,6 @@
 # EMIT portal
 
-The public hostname comes from `PORTAL_PUBLIC_URL`. Use a new domain. `emit-select.com` is not hardcoded. EMIT admins and regular EMIT users sign in with email and password. Select admins sign in with Google. The portal does not send order email and does not invent a SAM load number. A Select admin enters that number after building the load in SAM. `DEMO_SEED=false` starts empty. The go-live checklist is in the README.
+The public hostname comes from `PORTAL_PUBLIC_URL`. Use a new domain. `emit-select.com` is not hardcoded. EMIT admins, regular EMIT users, and Select admins sign in with email and password. The portal does not send order email and does not invent a SAM load number. A Select admin enters that number after building the load in SAM. `DEMO_SEED=false` starts empty. The go-live checklist is in the README.
 
 The notes below also describe the demo seed and the screening rules. Demo load numbers such as 900196-1 exist only when `DEMO_SEED=true`.
 
@@ -155,23 +155,15 @@ The page lists only loads with a drop at that company (any drop, not only the la
 
 ## Auth
 
-EMIT uses email and password. Select admins use Google. Receivers do not sign in. Microsoft is optional code and is not required for go-live.
+EMIT and Select use email and password. Receivers do not sign in. Microsoft is optional code and is not required for go-live.
 
 - **Password** is how EMIT staff sign in. A Select admin creates them under Users, sets or generates a temporary password, and can deactivate them. The person changes that password under Password. Five failures on one email, or thirty from one IP, lock sign-in for 15 minutes. A password change or an admin reset invalidates older cookies. There is no self-service signup and no password email.
-- **Google** is for Select staff. The Workspace hosted domain is `goselect.com`. The only admins are `mgray@goselect.com` (Mike Gray) and `dmartin@goselect.com` (Drew Martin), from `SELECT_ADMIN_EMAILS`. Any other Google account is rejected. EMIT addresses are rejected and told to use email and password. An EMIT admin is a portal access Select sets on Users. It is not a Google or Microsoft role. The first production sign-in has to be one of these Google accounts. That creates the admin who can then add EMIT users.
-- **Microsoft (Entra ID)** can stay unset. If it is configured later, an EMIT domain (`EMIT_EMAIL_DOMAINS`) or an address in `EMIT_ALLOWED_EMAILS` can sign in as EMIT staff. A Select address is rejected and told to use Google. A deactivated user is rejected here too.
+- **Select staff** sign in with email and password. The admin addresses are `SELECT_ADMIN_EMAILS` (by default `mgray@goselect.com` and `dmartin@goselect.com`). Add any other Select admin to that list before creating the account. EMIT addresses cannot be Select admins. An EMIT admin is a portal access Select sets on Users. It is not a Microsoft role. The first production Select password is set with `SELECT_SETUP_KEY`, then that key is removed. After that, a signed-in Select admin sets the other passwords on Users.
+- **Microsoft (Entra ID)** can stay unset. If it is configured later, an EMIT domain (`EMIT_EMAIL_DOMAINS`) or an address in `EMIT_ALLOWED_EMAILS` can sign in as EMIT staff. A Select address is rejected and told to use email and password. A deactivated user is rejected here too.
 
 ### What Mike needs to create
 
-Google sign-in, in Select's Google Cloud project, OAuth consent screen set to **Internal** (goselect.com only). This client is only for staff login.
-
-- OAuth client type: Web application.
-- Authorized redirect URI: `{PORTAL_PUBLIC_URL}/api/auth/google/callback`
-- Authorized JavaScript origin: `{PORTAL_PUBLIC_URL}`
-- Scopes: `openid`, `email`, `profile`
-- Client id and secret go in `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. `GOOGLE_HOSTED_DOMAIN` stays `goselect.com`.
-
-The portal also sends `hd=goselect.com` so the Google screen prefers the Select Workspace.
+The first Select password uses `SELECT_SETUP_KEY` on the sign-in page. The steps are in the README. Google sign-in is not used.
 
 Microsoft is not part of go-live. If EMIT asks for it later: app registration, type Web, single tenant, redirect URI `{PORTAL_PUBLIC_URL}/api/auth/microsoft/callback`, scopes `openid`, `profile`, `email`, and the three `AZURE_AD_*` values. Leave them blank until then.
 
@@ -202,7 +194,7 @@ docker run --rm -p 3000:3000 \
   emit-portal
 ```
 
-Set `DEMO_SEED=false` before any real EMIT user can sign in. With that set, a new database has no users and no demo password. `AUTH_SECRET` shorter than 16 characters throws on startup in production. Leave `NEXT_PUBLIC_DEMO_HINT` unset or `false` in production. The demo password is not included in the page unless the server is actually seeding the demo. Set `PORTAL_PUBLIC_URL` to the new origin so tracking links, receiver links, and the Google callback use that hostname. If it is blank in production, links use `VERCEL_PROJECT_PRODUCTION_URL` rather than the per-deployment `VERCEL_URL`.
+Set `DEMO_SEED=false` before any real EMIT user can sign in. With that set, a new database has no users and no demo password. `AUTH_SECRET` shorter than 16 characters throws on startup in production. Leave `NEXT_PUBLIC_DEMO_HINT` unset or `false` in production. The demo password is not included in the page unless the server is actually seeding the demo. Set `PORTAL_PUBLIC_URL` to the new origin so tracking links and receiver links use that hostname. If it is blank in production, links use `VERCEL_PROJECT_PRODUCTION_URL` rather than the per-deployment `VERCEL_URL`.
 
 There is no public test URL in this environment.
 
@@ -215,12 +207,11 @@ There is no public test URL in this environment.
 | `TURSO_DATABASE_URL` | Turso, the `libsql://` URL | Hosted database on Vercel. Leave unset locally. |
 | `TURSO_AUTH_TOKEN` | Turso, full-access token | Auth for that database. Leave unset locally. |
 | `BLOB_READ_WRITE_TOKEN` | Vercel, added when the Blob store is connected | Private document and photo bytes. Leave unset locally. |
-| `PORTAL_PUBLIC_URL` | `https://` plus the new hostname | Tracking links, receiver links, and the Google callback. |
+| `PORTAL_PUBLIC_URL` | `https://` plus the new hostname | Tracking links and receiver links. |
 | `AZURE_AD_TENANT_ID`, `AZURE_AD_CLIENT_ID`, `AZURE_AD_CLIENT_SECRET` | Leave blank | Optional Microsoft sign-in. Not required. |
 | `SELECT_ADMIN_EMAILS` | Defaults to `mgray@goselect.com,dmartin@goselect.com`. Change only if those addresses change. | |
 | `EMIT_EMAIL_DOMAINS` or `EMIT_ALLOWED_EMAILS` | Mike | Which addresses a Select admin may create as EMIT password users. |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Select Google Cloud, internal OAuth client | Select admin sign-in. |
-| `GOOGLE_HOSTED_DOMAIN` | Default `goselect.com` | Workspace domain check. |
+| `SELECT_SETUP_KEY` | A random string, at least 16 characters, Production only | Lets the first Select password be set. Remove it after that password is saved. |
 | `AI_API_KEY`, optional `AI_BASE_URL`, `AI_MODEL` | Select | OpenAI-compatible chat. Blank uses the built-in answerer. |
 | `CARRIER_PHOTO_INGEST_TOKEN` | Select | Bearer token for the photo ingest API. At least 16 characters. |
 | `BOT_UPLOAD_KEY` | Select | Bearer token for `POST /api/integrations/documents`, `POST /api/integrations/tracking-link`, and `POST /api/integrations/loads/import`. At least 16 characters. One key for all three. |
@@ -247,7 +238,7 @@ There is no public test URL in this environment.
 
 ## Open questions
 
-Answered and in this build: a rate confirmation cannot be released to EMIT. Select can approve an unclear file or delete it. An EMIT admin with see pricing or full access sees the price EMIT pays. A regular EMIT user does not, at any permission. Carrier pay is not stored and is hidden from every EMIT role, every permission, and from Select while viewing as EMIT. The portal is the confirmation. No order email is sent. EMIT signs in with a password a Select admin sets. Select admins sign in with Google and can mark an EMIT user as an EMIT admin or a regular user. View-as is read-only. Microsoft is optional. Receiver companies and contact emails are edited in admin. Receivers use a private link and do not sign in. A Select admin can paste a public tracking link on each load. The public hostname is `PORTAL_PUBLIC_URL`, not a name baked into the code. Vercel hosting uses Turso for the database and Vercel Blob for document and photo bytes. Local dev still uses SQLite and files.
+Answered and in this build: a rate confirmation cannot be released to EMIT. Select can approve an unclear file or delete it. An EMIT admin with see pricing or full access sees the price EMIT pays. A regular EMIT user does not, at any permission. Carrier pay is not stored and is hidden from every EMIT role, every permission, and from Select while viewing as EMIT. The portal is the confirmation. No order email is sent. EMIT signs in with a password a Select admin sets. Select admins sign in with email and password and can mark an EMIT user as an EMIT admin or a regular user. View-as is read-only. Microsoft is optional. Receiver companies and contact emails are edited in admin. Receivers use a private link and do not sign in. A Select admin can paste a public tracking link on each load. The public hostname is `PORTAL_PUBLIC_URL`, not a name baked into the code. Vercel hosting uses Turso for the database and Vercel Blob for document and photo bytes. Local dev still uses SQLite and files.
 
 Still open:
 
