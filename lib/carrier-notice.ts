@@ -124,7 +124,6 @@ export async function recordCarrierAssignment(
   ctx: PortalContext,
   order: CustomerOrder,
   incoming: CarrierUpdate,
-  fetchImpl: typeof fetch = fetch,
 ): Promise<CarrierNoticeResult> {
   const row = await ctx.db
     .prepare(`SELECT carrier_name, carrier_mc, carrier_notice_log FROM loads WHERE id = ?`)
@@ -173,13 +172,13 @@ export async function recordCarrierAssignment(
   }
   if (!emailConfig()) {
     throw new PortalError(
-      "Email is not configured. Set EMAIL_FROM and EMAIL_API_KEY (at least 16 characters). The carrier was not saved.",
+      "Email is not configured. Set SMTP_USER and SMTP_APP_PASSWORD (at least 16 characters). The carrier was not saved.",
       503,
     );
   }
   let sent = false;
   try {
-    sent = await sendEmail({ to, subject: mail.subject, text: mail.text }, fetchImpl);
+    sent = await sendEmail({ to, subject: mail.subject, text: mail.text });
   } catch {
     sent = false;
   }

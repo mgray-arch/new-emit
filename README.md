@@ -123,9 +123,9 @@ Leave these blank unless you are turning that feature on:
 | `LOAD_BUILDER_WEBHOOK_URL` | Leave blank. The portal does not call it. The Load Builder bot reads the Slack note instead. |
 | `LOAD_BUILDER_SECRET` | Shared bearer secret, at least 16 characters. The bot sends it on `POST /api/integrations/sam-load`. A session cookie is not accepted. |
 | `LOAD_STATUS_WEBHOOK_SECRET` | Optional second bearer secret for that same callback, at least 16 characters. Either this or `LOAD_BUILDER_SECRET` is enough. |
-| `EMAIL_FROM` | From address for a carrier assignment email. Required before that mail can send. |
-| `EMAIL_API_KEY` | Bearer key for the mail provider, at least 16 characters. Unset: a carrier update is refused and not stored, so the bot can retry. |
-| `EMAIL_API_URL` | Optional. Defaults to `https://api.resend.com/emails`. The body is `{ from, to, subject, text }`. |
+| `SMTP_USER` | Workspace mailbox that sends a carrier assignment email, such as `mgray@goselect.com`. Unset: a carrier update is refused and not stored, so the bot can retry. |
+| `SMTP_APP_PASSWORD` | Google app password for that mailbox, at least 16 characters. Spaces are ignored. Sent over SMTPS to `smtp.gmail.com` port 465. |
+| `SMTP_FROM_NAME` | Optional display name. Defaults to `Select Transport`. The From line is `Select Transport <SMTP_USER>`. |
 | `SAM_LOAD_URL_TEMPLATE` | Link for a stored SAM number. Must contain `{loadNumber}`. Example: `https://sam.example.com/loads/{loadNumber}`. Unset: the number shows and is not a link. |
 | `SAM_API_BASE_URL`, `SAM_API_TOKEN`, `SAM_CUSTOMER_ID` | Leave blank. The portal does not call the SAM API. |
 | `SLACK_NEW_LOADS_WEBHOOK_URL` | Slack incoming webhook for a new-load note. Unset: no Slack message is sent. The note names the owner and who entered the load. It does not include carrier pay. A missing equipment type or destination adds a line that the owner needs a human check. |
@@ -133,7 +133,7 @@ Leave these blank unless you are turning that feature on:
 | `SLACK_MESSAGES_WEBHOOK_URL` | Slack incoming webhook when an EMIT user posts in Messages. Unset: no Slack message is sent. The note has the load number (when one is attached), a short preview, and a link. It does not include the full message or carrier pay. |
 | `MESSAGE_NOTIFY_EMAILS` | Optional comma-separated addresses for that same note. Message notes are not emailed. Setting this does not send mail and does not block the message. |
 
-Do not set `DEMO_USER_PASSWORD` in production. Do not set a Gmail client. Order mail has been removed.
+Do not set `DEMO_USER_PASSWORD` in production. Do not set a Gmail OAuth client. Submitting an order still does not send email. Carrier assignment mail uses the SMTP variables above.
 
 `ALLOW_PASSWORD_LOGIN` is not a variable anymore. Email and password is how EMIT signs in.
 
@@ -348,7 +348,7 @@ Name the load with `orderId` or `salesOrderNumber` (`sales_order_number` too). `
 
 `carrierName` (`carrier_name` too) and `mcNumber` (`mc_number` or `mc` too) are the assigned carrier. The portal stores that name and MC so it can tell a first assignment from a change. It does not store carrier pay. A blank name or MC leaves the stored value as it is. `MC 445566` and `445566` are the same MC.
 
-The first time a carrier is stored, and again when the name or MC changes, the portal emails `entered_by_email` on that order (the account that submitted it). The message has the SO number, the order id, the Select load number or Pending, pickup and delivery city and date, the carrier name, the MC, and whether it is a new assignment or a carrier change. It has no price, no carrier pay, and no rate confirmation. Sending the same carrier again does not send another email. If `EMAIL_FROM` or `EMAIL_API_KEY` is missing, or the provider does not accept the message, the carrier is not saved and the response is 503 so the bot can retry. A load number in that same request is still saved. An order with no creator email stores the carrier and does not send mail.
+The first time a carrier is stored, and again when the name or MC changes, the portal emails `entered_by_email` on that order (the account that submitted it). The message has the SO number, the order id, the Select load number or Pending, pickup and delivery city and date, the carrier name, the MC, and whether it is a new assignment or a carrier change. It has no price, no carrier pay, and no rate confirmation. Sending the same carrier again does not send another email. Mail goes out through Gmail SMTP, `smtp.gmail.com` port 465, as `SMTP_FROM_NAME <SMTP_USER>` (`Select Transport` when the name is blank). If `SMTP_USER` or `SMTP_APP_PASSWORD` is missing, or Gmail does not accept the message, the carrier is not saved and the response is 503 so the bot can retry. A load number in that same request is still saved. An order with no creator email stores the carrier and does not send mail.
 
 Each email that was sent is appended to **History** on the load page. View only can read that history. They cannot edit it.
 

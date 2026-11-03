@@ -147,7 +147,7 @@ describe("production sign-in and an empty database", () => {
     }
   });
 
-  it("keeps password sign-in on with no break-glass flag and no Gmail sender", async () => {
+  it("keeps password sign-in on with no break-glass flag and no Gmail API client", async () => {
     expect(existsSync("lib/email.ts")).toBe(true);
     const loginSource = readFileSync("app/api/auth/login/route.ts", "utf8");
     expect(loginSource).not.toMatch(/ALLOW_PASSWORD_LOGIN|passwordLoginAllowed|DEMO_SEED/);
