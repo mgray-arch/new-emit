@@ -96,6 +96,13 @@ export interface TimelineEvent {
   label: string;
 }
 
+/** A carrier email that was actually sent. The text names the carrier and MC. It has no pay. */
+export interface OrderNotice {
+  at: string;
+  kind: "assigned" | "changed";
+  text: string;
+}
+
 export interface CustomerDocument {
   id: string;
   kind: "attachment" | "bol";
@@ -156,6 +163,12 @@ export interface CustomerOrder {
   samBuildAt?: string | null;
   /** Select only. Present when SAM_LOAD_URL_TEMPLATE can build a link. */
   samUrl?: string | null;
+  /** Read-only. "Sent to Slack", or "Built in SAM: <load number>". Null until one of those is true. */
+  buildStatus?: string | null;
+  /** Carrier emails that were sent for this order. Empty until one is sent. */
+  notices?: OrderNotice[];
+  /** Internal. When the Slack new-load note was accepted. Omitted from portal responses. */
+  slackNotifiedAt?: string | null;
 }
 
 export interface PublicTracking {

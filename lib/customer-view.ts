@@ -1,6 +1,7 @@
 import type {
   CustomerDocument,
   CustomerOrder,
+  OrderNotice,
   Place,
   PortalStatus,
   PublicTracking,
@@ -18,6 +19,7 @@ import {
   TRANSIT_OPTIONS,
   TRUCK_TYPES,
 } from "@/lib/types";
+import { buildStatusLabel } from "@/lib/build-status";
 import { portalPublicUrl } from "@/lib/public-url";
 import { redactSensitiveText } from "@/lib/sensitive";
 import { samLoadUrl } from "@/lib/sam-link";
@@ -197,7 +199,21 @@ export function presentCustomerOrder(order: CustomerOrder, viewer: Viewer): Cust
     const url = samLoadUrl(view.loadNumber);
     if (url) view.samUrl = url;
   }
+  view.buildStatus = buildStatusLabel(view.loadNumber, order.slackNotifiedAt);
+  view.notices = presentNotices(order.notices);
   return view;
+}
+
+function presentNotices(notices: OrderNotice[] | undefined): OrderNotice[] {
+  if (!notices?.length) return [];
+  const safe: OrderNotice[] = [];
+  for (const notice of notices) {
+    if (notice.kind !== "assigned" && notice.kind !== "changed") continue;
+    const text = redactSensitiveText(notice.text);
+    if (!text) continue;
+    safe.push({ at: notice.at, kind: notice.kind, text });
+  }
+  return safe;
 }
 
 function truckLabel(value: unknown): string | null {

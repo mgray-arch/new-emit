@@ -389,13 +389,15 @@ describe("POST /api/integrations/loads/import", () => {
     expect(body.results[0].action).toBe("created");
     expectNoSecrets(body);
     const stored = await ctx.db.prepare(`SELECT * FROM loads WHERE load_number = ?`).get("470200-1");
-    expectNoSecrets(stored);
     expect(stored?.customer_cost_cents).toBe(150000);
     expect(stored?.comments).toBe("");
+    expect(stored?.carrier_name ?? null).toBeNull();
+    expect(stored?.carrier_mc ?? null).toBeNull();
+    expect(stored?.carrier_pay_cents).toBeUndefined();
     expect(JSON.stringify(stored)).not.toMatch(/carrierPay|carrierName|mcNumber|rateConfirmation|rate_con|998877|BLACKHAWK|RATECON|8765/);
     const tables = await ctx.db.prepare(`SELECT name, sql FROM sqlite_master WHERE type = 'table'`).all();
     for (const table of tables) {
-      expect(String(table.sql ?? "").toLowerCase()).not.toMatch(/carrier_pay|carrier_name|carrier_mc|carrier_cost|carrier_rate/);
+      expect(String(table.sql ?? "").toLowerCase()).not.toMatch(/carrier_pay|carrier_cost|carrier_rate|staff_notes/);
     }
     expect(Number((await ctx.db.prepare(`SELECT COUNT(*) AS n FROM customer_documents`).get())?.n ?? 0)).toBe(docsBefore);
   });

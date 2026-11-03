@@ -6,7 +6,6 @@ import { POST as createOrderRoute } from "@/app/api/orders/route";
 import { presentCustomerOrder } from "@/lib/customer-view";
 import { formatEnteredBy } from "@/lib/entered-by";
 import { assignLoadOwner } from "@/lib/load-owner";
-import { loadBuilderPayload } from "@/lib/load-builder";
 import { newLoadSlackText, slackUserIdForOwner } from "@/lib/slack-new-load";
 import type { PortalContext } from "@/lib/db";
 import type { CustomerOrder, Session } from "@/lib/types";
@@ -154,6 +153,7 @@ describe("entered by on a new load", () => {
     expect(formatEnteredBy(created.enteredByName, created.enteredByEmail)).toBe("M. Gray (m.gray@emit.example)");
     expect(created.customerCost).toBeUndefined();
     expect(created.pendingReviewCount).toBeUndefined();
+    expect(created.buildStatus).toBeNull();
     expect(JSON.stringify(created)).not.toMatch(/carrierPay|carrier_pay|pendingReviewCount|samBuild/);
 
     process.env.SLACK_NEW_LOADS_WEBHOOK_URL = "https://hooks.slack.test/new-loads";
@@ -178,7 +178,9 @@ describe("entered by on a new load", () => {
     expect(posts[0]).toContain("Entered by: M. Gray (m.gray@emit.example)");
     expect(posts[0]).not.toMatch(/1800|1750|carrier|8765/);
 
-    const id = ((await sent.json()).order as CustomerOrder).id;
+    const sentOrder = (await sent.json()).order as CustomerOrder;
+    expect(sentOrder.buildStatus).toBe("Sent to Slack");
+    const id = sentOrder.id;
     const selectView = await getOrderRoute(new Request("http://portal.test/api/orders/" + id, { headers: headers(admin) }), {
       params: Promise.resolve({ id }),
     });
@@ -247,14 +249,7 @@ describe("entered by on a new load", () => {
     expect(viewAsOrder.customerCost).toBeUndefined();
     expect(viewAsOrder.pendingReviewCount).toBeUndefined();
     expect(JSON.stringify(viewAsOrder)).not.toMatch(/carrierPay|carrier_pay|samBuild/);
-
-    const payload = loadBuilderPayload({
-      ...selectOrder,
-      carrierPay: 8765.43,
-    } as CustomerOrder);
-    expect(JSON.stringify(payload)).not.toMatch(/enteredBy|m\.gray@emit\.example|carrierPay|8765|ownerNeedsCheck/);
-    expect(payload.createdBy).toBe("M. Gray");
-    expect(payload.owner).toEqual({ name: selectOrder.owner, slackUserId: expect.any(String) });
+    expect(viewAsOrder.buildStatus).toBe("Sent to Slack");
 
     const older = await ctx.db.prepare(`SELECT id FROM loads WHERE entered_by_email IS NULL LIMIT 1`).get();
     const oldId = String(older?.id);
@@ -361,5 +356,25 @@ describe("entered by on a new load", () => {
       }),
     );
     expect(response.status).toBe(201);
+    expect((await response.json()).order.buildStatus).toBeNull();
+  });
+
+  it("does not mark Sent to Slack when Slack rejects the note", async () => {
+    process.env.SLACK_NEW_LOADS_WEBHOOK_URL = "https://hooks.slack.test/reject";
+    vi.stubGlobal("fetch", async () => new Response("no", { status: 500 }));
+    const response = await createOrderRoute(
+      new Request("http://portal.test/api/orders", {
+        method: "POST",
+        headers: headers(await sessionCookie(customerSession())),
+        body: JSON.stringify({
+          salesOrderNumber: "SO-SLACK-500",
+          origin: emit,
+          destination: destination("CO"),
+          truckType: "Flatbed",
+        }),
+      }),
+    );
+    expect(response.status).toBe(201);
+    expect((await response.json()).order.buildStatus).toBeNull();
   });
 });

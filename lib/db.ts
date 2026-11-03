@@ -84,7 +84,11 @@ CREATE TABLE IF NOT EXISTS loads (
   pending_review_count INTEGER NOT NULL DEFAULT 0,
   sam_build_status TEXT,
   sam_build_error TEXT,
-  sam_build_at TEXT
+  sam_build_at TEXT,
+  slack_notified_at TEXT,
+  carrier_name TEXT,
+  carrier_mc TEXT,
+  carrier_notice_log TEXT
 );
 
 CREATE TABLE IF NOT EXISTS customer_documents (
@@ -223,14 +227,15 @@ CREATE TABLE IF NOT EXISTS message_reads (
 `;
 
 /**
- * Every column stored on a load. Carrier pay is not a column.
+ * Every column the order list reads. Carrier pay is not a column.
+ * Carrier name and MC stay off this list; the notice log is the sentence that was emailed.
  */
 export const CUSTOMER_LOAD_COLUMNS = `
   id, sales_order_number, load_number, portal_status, tracking_stage, timeline_json,
   origin_json, destination_json, stops_json, truck_type, transit, ship_date, ship_time,
   must_deliver_date, truck_eta, latest_eta, tracking_token, tracking_link, customer_cost_cents,
   rate_reason, comments, created_by, entered_by_name, entered_by_email, owner, owner_needs_check, created_at, updated_at, pending_review_count,
-  sam_build_status, sam_build_error, sam_build_at
+  sam_build_status, sam_build_error, sam_build_at, slack_notified_at, carrier_notice_log
 `;
 
 function coerce(value: unknown): unknown {
@@ -392,6 +397,7 @@ export async function openDatabase(file?: string): Promise<SqlDatabase> {
   await migrateDocumentUploaders(db);
   await migrateLoadSource(db);
   await migrateChatEnabled(db);
+  await migrateLoadStatus(db);
   await db.exec(`DROP TABLE IF EXISTS outbox`);
   return db;
 }
@@ -466,9 +472,9 @@ async function migrateStops(db: SqlDatabase): Promise<void> {
   `);
 }
 
-const CARRIER_COLUMNS = ["carrier_pay_cents", "carrier_name", "carrier_mc", "staff_notes"];
+const CARRIER_COLUMNS = ["carrier_pay_cents", "staff_notes"];
 
-/** Carrier pay is not stored. Drop the columns from databases created before that decision. */
+/** Carrier pay and staff notes are not stored. Name and MC stay; they are not pay. */
 async function migrateDropCarrierColumns(db: SqlDatabase): Promise<void> {
   const columns = await columnNames(db, "loads");
   for (const name of CARRIER_COLUMNS) {
@@ -743,6 +749,14 @@ async function migrateLoadSource(db: SqlDatabase): Promise<void> {
 /** EMIT chat is off until Select turns it on. Select staff are not gated by this column. */
 async function migrateChatEnabled(db: SqlDatabase): Promise<void> {
   await ensureColumn(db, "users", "chat_enabled", "INTEGER NOT NULL DEFAULT 0");
+}
+
+/** Slack acceptance time, carrier identity for assignment mail, and the sent-notice log. */
+async function migrateLoadStatus(db: SqlDatabase): Promise<void> {
+  await ensureColumn(db, "loads", "slack_notified_at", "TEXT");
+  await ensureColumn(db, "loads", "carrier_name", "TEXT");
+  await ensureColumn(db, "loads", "carrier_mc", "TEXT");
+  await ensureColumn(db, "loads", "carrier_notice_log", "TEXT");
 }
 
 /** Older document tables have no uploader. The bot upload log is created with the schema. */

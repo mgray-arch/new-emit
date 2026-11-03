@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { SqlArg } from "@/lib/db";
 import type { PortalContext } from "@/lib/db";
 import { CUSTOMER_LOAD_COLUMNS, withTransaction } from "@/lib/db";
+import { buildStatusLabel, parseOrderNotices } from "@/lib/build-status";
 import { serializeCustomerOrder, trackingUrlFor } from "@/lib/customer-view";
 import { addDaysISO, denverDate, weekRange } from "@/lib/dates";
 import type { LoadTab, LoadTabCounts } from "@/lib/load-list";
@@ -89,6 +90,8 @@ interface LoadRow {
   sam_build_status: string | null;
   sam_build_error: string | null;
   sam_build_at: string | null;
+  slack_notified_at: string | null;
+  carrier_notice_log: string | null;
 }
 
 const LIST_SQL_HEAD = `
@@ -137,6 +140,7 @@ async function rowToOrder(ctx: PortalContext, row: LoadRow, withDocuments: boole
   }, { includeEnteredBy: true });
   const status = row.sam_build_status === "building" || row.sam_build_status === "failed" ? row.sam_build_status : null;
   const owner = row.owner === "Drew" || row.owner === "Ainsley" ? row.owner : null;
+  const slackNotifiedAt = row.slack_notified_at || null;
   return {
     ...order,
     owner,
@@ -144,6 +148,9 @@ async function rowToOrder(ctx: PortalContext, row: LoadRow, withDocuments: boole
     samBuildStatus: status,
     samBuildError: row.sam_build_error || null,
     samBuildAt: row.sam_build_at || null,
+    slackNotifiedAt,
+    notices: parseOrderNotices(row.carrier_notice_log),
+    buildStatus: buildStatusLabel(order.loadNumber, slackNotifiedAt),
   };
 }
 
@@ -558,8 +565,13 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
   });
   const order = await getOrder(ctx, id);
   if (!order) throw new PortalError("The order could not be saved", 500);
-  await notifyNewLoad(order, { name: actor.name, email: actor.email });
-  return { order };
+  const posted = await notifyNewLoad(order, { name: actor.name, email: actor.email });
+  if (posted) {
+    await ctx.db.prepare(`UPDATE loads SET slack_notified_at = ? WHERE id = ?`).run(ctx.now().toISOString(), id);
+  }
+  const saved = await getOrder(ctx, id);
+  if (!saved) throw new PortalError("The order could not be saved", 500);
+  return { order: saved };
 }
 
 export async function updateOrder(ctx: PortalContext, id: string, patch: OrderPatch, actor: Session): Promise<CustomerOrder> {
