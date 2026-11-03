@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { BrandLogo } from "@/components/brand-logo";
+import UpdateBanner from "@/components/update-banner";
 import { PERMISSION_LABEL, type EmitPermission, type ViewAsPreview } from "@/lib/types";
 
 interface Me {
@@ -25,6 +26,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [toastMessage, setToastMessage] = useState("");
   const [menu, setMenu] = useState(false);
   const [unread, setUnread] = useState(0);
+  const [updates, setUpdates] = useState(0);
 
   useEffect(() => {
     setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
@@ -84,6 +86,21 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       window.removeEventListener("emit-messages-read", pullUnread);
     };
   }, [pathname, chatEnabled]);
+
+  useEffect(() => {
+    let stop = false;
+    fetch("/api/updates")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: { count?: number } | null) => {
+        if (!stop) setUpdates(Number(body?.count) || 0);
+      })
+      .catch(() => {
+        if (!stop) setUpdates(0);
+      });
+    return () => {
+      stop = true;
+    };
+  }, [pathname]);
 
   useEffect(() => {
     fetch("/api/me")
@@ -251,8 +268,30 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             </button>
           </div>
         ) : null}
+        <UpdateBanner count={updates} />
         {children}
       </div>
+      <nav className="bottom-nav" aria-label="Mobile">
+        <Link href="/" className={pathname === "/" ? "on" : ""}>
+          Loads
+        </Link>
+        {chatEnabled ? (
+          <Link
+            href="/messages"
+            className={pathname === "/messages" ? "on" : ""}
+            aria-label={unread > 0 ? `Messages, ${unread} unread` : "Messages"}
+          >
+            <span>Messages</span>
+            {unread > 0 ? <span className="nav-count">{unread > 99 ? "99+" : unread}</span> : null}
+          </Link>
+        ) : null}
+        <Link href="/ask" className={pathname === "/ask" ? "on" : ""}>
+          Ask
+        </Link>
+        <button type="button" onClick={() => setMenu(true)}>
+          More
+        </button>
+      </nav>
       {toastMessage ? (
         <div className="toast" role="status">
           {toastMessage}

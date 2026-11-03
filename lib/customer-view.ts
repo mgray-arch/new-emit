@@ -1,6 +1,7 @@
 import type {
   CustomerDocument,
   CustomerOrder,
+  HaulCallout,
   OrderNotice,
   Place,
   PortalStatus,
@@ -21,7 +22,7 @@ import {
 } from "@/lib/types";
 import { buildStatusLabel } from "@/lib/build-status";
 import { portalPublicUrl } from "@/lib/public-url";
-import { redactSensitiveText } from "@/lib/sensitive";
+import { redactSensitiveText, sensitiveReason } from "@/lib/sensitive";
 import { samLoadUrl } from "@/lib/sam-link";
 import { sanitizeSchedule } from "@/lib/stop-schedule";
 import { canSeePricing, resolveAccess, type Viewer } from "@/lib/types";
@@ -182,8 +183,13 @@ export function serializeCustomerOrder(value: unknown, options?: CustomerViewOpt
   return order;
 }
 
-/** The order shape that may be sent to this viewer. EMIT admins with see pricing or full access, and Select, get EMIT's cost. Regular EMIT users never do, and neither does a view-as regular preview. Every signed-in user gets who entered the load. Nobody at EMIT gets carrier pay, the review count, or the SAM build controls. */
-export function presentCustomerOrder(order: CustomerOrder, viewer: Viewer): CustomerOrder {
+export interface PresentOrderOptions {
+  /** Unseen carrier update for the signed-in person. Omitted when they have already opened it. */
+  carrierBadge?: "assigned" | "changed" | null;
+}
+
+/** The order shape that may be sent to this viewer. EMIT admins with see pricing or full access, and Select, get EMIT's cost. Regular EMIT users never do, and neither does a view-as regular preview. Every signed-in user gets who entered the load. Nobody gets carrier pay, the review count for EMIT, or the SAM build controls. */
+export function presentCustomerOrder(order: CustomerOrder, viewer: Viewer, options?: PresentOrderOptions): CustomerOrder {
   const access = resolveAccess(viewer);
   const view = serializeCustomerOrder(order, {
     includePricing: canSeePricing(access),
@@ -201,7 +207,18 @@ export function presentCustomerOrder(order: CustomerOrder, viewer: Viewer): Cust
   }
   view.buildStatus = buildStatusLabel(view.loadNumber, order.slackNotifiedAt);
   view.notices = presentNotices(order.notices);
+  const callout = haulCalloutFrom(view.notices);
+  if (callout) view.haulCallout = callout;
+  if (options?.carrierBadge === "assigned" || options?.carrierBadge === "changed") {
+    view.carrierBadge = options.carrierBadge;
+  }
   return view;
+}
+
+function cleanLabel(value: string | undefined): string {
+  const text = value?.trim() ?? "";
+  if (!text || sensitiveReason(text)) return "";
+  return text;
 }
 
 function presentNotices(notices: OrderNotice[] | undefined): OrderNotice[] {
@@ -211,9 +228,23 @@ function presentNotices(notices: OrderNotice[] | undefined): OrderNotice[] {
     if (notice.kind !== "assigned" && notice.kind !== "changed") continue;
     const text = redactSensitiveText(notice.text);
     if (!text) continue;
-    safe.push({ at: notice.at, kind: notice.kind, text });
+    const company = cleanLabel(notice.company);
+    const mc = cleanLabel(notice.mc);
+    const row: OrderNotice = { at: notice.at, kind: notice.kind, text };
+    if (company) row.company = company;
+    if (mc) row.mc = mc;
+    safe.push(row);
   }
   return safe;
+}
+
+function haulCalloutFrom(notices: OrderNotice[] | undefined): HaulCallout | null {
+  if (!notices?.length) return null;
+  const latest = notices[notices.length - 1];
+  const company = latest.company?.trim() ?? "";
+  const mc = latest.mc?.trim() ?? "";
+  if (!company && !mc) return null;
+  return { company, mc, at: latest.at, kind: latest.kind };
 }
 
 function truckLabel(value: unknown): string | null {

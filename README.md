@@ -2,7 +2,7 @@
 
 Customer portal for EMIT Technologies, a shipper of Select Transport Partners. It replaces the old Lovable app. Put it on a new domain. Do not reuse the old site's hostname unless that is the name you want.
 
-EMIT admins and regular EMIT users sign in with email and password. Select staff sign in with Google. Select adds each EMIT email on Users, marks them as an EMIT admin or a regular user, and gives them one permission: view only, add loads, see pricing, or full access. A regular EMIT user never sees the price EMIT pays Select. An EMIT admin with see pricing or full access does, and so does Select. They never show carrier pay. Carrier pay stays hidden from every EMIT user, in every role and permission, including when Select is viewing as that person. The portal is the order confirmation: submitting an order does not send email. There is no SAM API. The Load Builder bot builds the load from the Slack note `notifyNewLoad` posts. Select can still type the SAM load number. Until a number is stored, EMIT sees **Pending**. The portal does not invent a load number. When SAM assigns or changes a carrier, the bot records the carrier name and MC number and the portal emails the person who submitted the order. That email has no carrier pay.
+EMIT admins and regular EMIT users sign in with email and password. Select staff sign in with Google. Select adds each EMIT email on Users, marks them as an EMIT admin or a regular user, and gives them one permission: view only, add loads, see pricing, or full access. A regular EMIT user never sees the price EMIT pays Select. An EMIT admin with see pricing or full access does, and so does Select. They never show carrier pay. Carrier pay stays hidden from every EMIT user, in every role and permission, including when Select is viewing as that person. The portal is the order confirmation: submitting an order does not send email. There is no SAM API. The Load Builder bot builds the load from the Slack note `notifyNewLoad` posts. Select can still type the SAM load number. Until a number is stored, EMIT sees **Pending**. The portal does not invent a load number. When SAM assigns or changes a carrier, the bot records the carrier name and MC number. The portal shows that on the load, with a badge until each person opens the order. It does not send email or a push notification, and it has no carrier pay.
 
 The public hostname is not hardcoded. Set `PORTAL_PUBLIC_URL` to the domain this portal should use. `emit-select.com` in this file is only an example of a previous plan. Google's redirect URI has to match whatever domain you attach. `goselect.com` is Select's Google Workspace, not the portal's address.
 
@@ -109,7 +109,7 @@ If the sample PDFs are missing and the Track buttons are there, Preview has no B
 
 If a name is still missing, the sign-in page lists it. Redeploy after you save the variable.
 
-View-as and EMIT permissions do not add environment variables. The portal no longer posts a load to a build webhook. The variables for the Slack note, the status callback, and carrier email are in the table below.
+View-as and EMIT permissions do not add environment variables. The portal no longer posts a load to a build webhook, and it does not email a carrier assignment. The variables for the Slack note and the status callback are in the table below.
 
 Leave these blank unless you are turning that feature on:
 
@@ -123,9 +123,6 @@ Leave these blank unless you are turning that feature on:
 | `LOAD_BUILDER_WEBHOOK_URL` | Leave blank. The portal does not call it. The Load Builder bot reads the Slack note instead. |
 | `LOAD_BUILDER_SECRET` | Shared bearer secret, at least 16 characters. The bot sends it on `POST /api/integrations/sam-load`. A session cookie is not accepted. |
 | `LOAD_STATUS_WEBHOOK_SECRET` | Optional second bearer secret for that same callback, at least 16 characters. Either this or `LOAD_BUILDER_SECRET` is enough. |
-| `EMAIL_FROM` | From address for a carrier assignment email. Required before that mail can send. |
-| `EMAIL_API_KEY` | Bearer key for the mail provider, at least 16 characters. Unset: a carrier update is refused and not stored, so the bot can retry. |
-| `EMAIL_API_URL` | Optional. Defaults to `https://api.resend.com/emails`. The body is `{ from, to, subject, text }`. |
 | `SAM_LOAD_URL_TEMPLATE` | Link for a stored SAM number. Must contain `{loadNumber}`. Example: `https://sam.example.com/loads/{loadNumber}`. Unset: the number shows and is not a link. |
 | `SAM_API_BASE_URL`, `SAM_API_TOKEN`, `SAM_CUSTOMER_ID` | Leave blank. The portal does not call the SAM API. |
 | `SLACK_NEW_LOADS_WEBHOOK_URL` | Slack incoming webhook for a new-load note. Unset: no Slack message is sent. The note names the owner and who entered the load. It does not include carrier pay. A missing equipment type or destination adds a line that the owner needs a human check. |
@@ -348,11 +345,11 @@ Name the load with `orderId` or `salesOrderNumber` (`sales_order_number` too). `
 
 `carrierName` (`carrier_name` too) and `mcNumber` (`mc_number` or `mc` too) are the assigned carrier. The portal stores that name and MC so it can tell a first assignment from a change. It does not store carrier pay. A blank name or MC leaves the stored value as it is. `MC 445566` and `445566` are the same MC.
 
-The first time a carrier is stored, and again when the name or MC changes, the portal emails `entered_by_email` on that order (the account that submitted it). The message has the SO number, the order id, the Select load number or Pending, pickup and delivery city and date, the carrier name, the MC, and whether it is a new assignment or a carrier change. It has no price, no carrier pay, and no rate confirmation. Sending the same carrier again does not send another email. If `EMAIL_FROM` or `EMAIL_API_KEY` is missing, or the provider does not accept the message, the carrier is not saved and the response is 503 so the bot can retry. A load number in that same request is still saved. An order with no creator email stores the carrier and does not send mail.
+The first time a carrier is stored, and again when the name or MC changes, the portal writes a **History** line and marks the order updated. It does not send email and it does not send a push notification. No mail environment variables are required. Sending the same carrier again does not add another History line. The line names the company and MC, and on a change it names the previous company. It has no price, no carrier pay, and no rate confirmation.
 
-Each email that was sent is appended to **History** on the load page. View only can read that history. They cannot edit it.
+Each person sees a **Carrier assigned** or **Carrier changed** badge on that order until they open it. Opening it clears the badge for that person only. After sign-in, a banner says how many orders were updated since their last visit. Tapping it filters the list to those orders. The load page highlights the company and MC.
 
-A rate, pay, cost, price, or rate-confirmation field anywhere in the JSON, including inside a stop, is 400. Nothing is written. The response without a carrier change is `{ orderId, salesOrderNumber, loadNumber }`. A carrier call also includes `notice`: `assigned`, `changed`, `unchanged`, or `skipped`.
+A rate, pay, cost, price, or rate-confirmation field anywhere in the JSON, including inside a stop, is 400. Nothing is written. The response without a carrier change is `{ orderId, salesOrderNumber, loadNumber }`. A carrier call also includes `notice`: `assigned`, `changed`, or `unchanged`.
 
 ```json
 { "salesOrderNumber": "SO4429", "loadNumber": "458934-1", "carrierName": "Northline Freight", "mcNumber": "445566" }

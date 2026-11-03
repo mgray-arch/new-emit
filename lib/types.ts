@@ -96,11 +96,23 @@ export interface TimelineEvent {
   label: string;
 }
 
-/** A carrier email that was actually sent. The text names the carrier and MC. It has no pay. */
+/** A carrier update recorded on the load. The text names the company and MC. It has no pay. */
 export interface OrderNotice {
   at: string;
   kind: "assigned" | "changed";
   text: string;
+  /** Company on the update. Omitted when an older line could not be parsed. */
+  company?: string;
+  /** MC number without a prefix. Empty when it was not provided. */
+  mc?: string;
+}
+
+/** Current assignment shown on the load. No pay. */
+export interface HaulCallout {
+  company: string;
+  mc: string;
+  at: string;
+  kind: "assigned" | "changed";
 }
 
 export interface CustomerDocument {
@@ -165,8 +177,12 @@ export interface CustomerOrder {
   samUrl?: string | null;
   /** Read-only. "Sent to Slack", or "Built in SAM: <load number>". Null until one of those is true. */
   buildStatus?: string | null;
-  /** Carrier emails that were sent for this order. Empty until one is sent. */
+  /** Carrier updates for this order. Empty until one is recorded. */
   notices?: OrderNotice[];
+  /** Current assignment, when one is stored. Omitted until then. No pay. */
+  haulCallout?: HaulCallout | null;
+  /** Set when this person has not opened the latest carrier update. */
+  carrierBadge?: "assigned" | "changed" | null;
   /** Internal. When the Slack new-load note was accepted. Omitted from portal responses. */
   slackNotifiedAt?: string | null;
 }

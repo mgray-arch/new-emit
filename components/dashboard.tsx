@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import CarrierBadge from "@/components/carrier-badge";
 import DocumentLinks from "@/components/document-links";
 import LoadForm, { draftFromOrder, emptyDraft, payloadFromDraft, useSites, type Draft } from "@/components/load-form";
 import BuildStatus from "@/components/build-status";
@@ -87,6 +88,8 @@ function Note({ text }: { text: string }) {
 
 export default function Dashboard({ startNew = false }: { startNew?: boolean }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const updatedOnly = searchParams.get("updated") === "1";
   const sites = useSites();
   const [tab, setTab] = useState<LoadTab>("active");
   const [listReady, setListReady] = useState(false);
@@ -112,6 +115,14 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   const [formError, setFormError] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const updatedRef = useRef(updatedOnly);
+
+  useEffect(() => {
+    if (updatedRef.current === updatedOnly) return;
+    updatedRef.current = updatedOnly;
+    setPage(1);
+    setRows([]);
+  }, [updatedOnly]);
 
   useEffect(() => {
     const handle = setTimeout(() => setQuery(q), 250);
@@ -173,6 +184,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     if (shipTo) params.set("shipTo", shipTo);
     if (pickup) params.set("pickup", pickup);
     if (receiver) params.set("receiver", receiver);
+    if (updatedOnly) params.set("updated", "1");
     params.set("page", String(page));
     params.set("pageSize", String(PAGE_SIZE));
     fetch(`/api/orders?${params}`)
@@ -190,7 +202,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
         setError("");
       })
       .catch(() => setError("We couldn't load your loads. Refresh the page and try again."));
-  }, [listReady, tab, status, query, shipFrom, shipTo, pickup, receiver, page, reload]);
+  }, [listReady, tab, status, query, shipFrom, shipTo, pickup, receiver, page, reload, updatedOnly]);
 
   async function openEdit(id: string) {
     const response = await fetch(`/api/orders/${id}`);
@@ -412,6 +424,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
               onClick={() => {
                 setTab(item);
                 setPage(1);
+                if (updatedOnly) router.replace("/");
               }}
             >
               <strong>{counts[item] ?? 0}</strong>
@@ -488,7 +501,15 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
           </button>
         )}
       </div>
-      {data?.scope === "all" && query.trim() ? <p className="mini">Showing matches from every tab.</p> : null}
+      {updatedOnly ? (
+        <p className="mini update-filter">
+          Showing orders with a carrier update.{" "}
+          <button className="text-btn" type="button" onClick={() => router.push("/")}>
+            Show all loads
+          </button>
+        </p>
+      ) : null}
+      {data?.scope === "all" && query.trim() && !updatedOnly ? <p className="mini">Showing matches from every tab.</p> : null}
       {error && <p className="error">{error}</p>}
       <div className="board">
         {groups.map((group) => (
@@ -518,7 +539,10 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                     <div className="lane">
                       {order.origin.city}, {order.origin.state} → {order.destination.city}, {order.destination.state}
                     </div>
-                    <StatusPill status={displayStatus(order, today, { needsAttention: selectView })} />
+                    <div className="load-row-status">
+                      {order.carrierBadge ? <CarrierBadge kind={order.carrierBadge} /> : null}
+                      <StatusPill status={displayStatus(order, today, { needsAttention: selectView })} />
+                    </div>
                   </div>
                   <div className="date-grid">
                     <div className="date-pair">
@@ -590,7 +614,9 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
         ))}
         {data && rows.length === 0 ? (
           <p className="empty">
-            {emptyListMessage(tab, Boolean(query.trim() || status || shipFrom || shipTo || pickup || receiver))}
+            {updatedOnly
+              ? "No carrier updates are waiting for you."
+              : emptyListMessage(tab, Boolean(query.trim() || status || shipFrom || shipTo || pickup || receiver))}
           </p>
         ) : null}
       </div>
@@ -660,12 +686,18 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
               <div className="grid-2">
                 <div className="field">
                   <label>Attachments</label>
-                  <input aria-label="Upload attachment" type="file" onChange={(event) => event.target.files?.[0] && upload("attachment", event.target.files[0])} />
+                  <label className="btn secondary file-btn">
+                    Upload attachment
+                    <input aria-label="Upload attachment" type="file" onChange={(event) => event.target.files?.[0] && upload("attachment", event.target.files[0])} />
+                  </label>
                   <FileList docs={editing.documents.filter((doc) => doc.kind === "attachment")} />
                 </div>
                 <div className="field">
                   <label>BOL</label>
-                  <input aria-label="Upload BOL" type="file" onChange={(event) => event.target.files?.[0] && upload("bol", event.target.files[0])} />
+                  <label className="btn secondary file-btn">
+                    Upload BOL
+                    <input aria-label="Upload BOL" type="file" onChange={(event) => event.target.files?.[0] && upload("bol", event.target.files[0])} />
+                  </label>
                   <FileList docs={editing.documents.filter((doc) => doc.kind === "bol")} />
                 </div>
               </div>

@@ -102,7 +102,11 @@ export default function PhotoGallery({
                 {photo.source} · {formatWhen(photo.receivedAt)}
               </div>
               {photo.subject ? <div>{photo.subject}</div> : null}
-              {photo.held ? <div className="held-flag">Waiting for Select to review this photo</div> : null}
+              {photo.held ? <div className="held-flag">Waiting for Select to review this photo</div> : (
+                <a className="btn secondary" href={`/api/carrier-photos/${photo.id}/print`} target="_blank" rel="noreferrer">
+                  Print
+                </a>
+              )}
             </figcaption>
           </figure>
         ))}
@@ -118,17 +122,20 @@ export default function PhotoGallery({
             onChange={(event) => setSource(event.target.value)}
             placeholder="Source, such as gmail"
           />
-          <input
-            aria-label="Upload carrier photo"
-            type="file"
-            accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif"
-            disabled={busy}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.target.value = "";
-              if (file) void upload(file);
-            }}
-          />
+          <label className="btn file-btn">
+            {busy ? "Uploading…" : "Upload photo"}
+            <input
+              aria-label="Upload carrier photo"
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif"
+              disabled={busy}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                if (file) void upload(file);
+              }}
+            />
+          </label>
         </div>
       )}
     </section>

@@ -224,11 +224,18 @@ CREATE TABLE IF NOT EXISTS message_reads (
   user_id TEXT PRIMARY KEY,
   read_seq INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS order_seen (
+  user_id TEXT NOT NULL,
+  load_id TEXT NOT NULL,
+  seen_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, load_id)
+);
 `;
 
 /**
  * Every column the order list reads. Carrier pay is not a column.
- * Carrier name and MC stay off this list; the notice log is the sentence that was emailed.
+ * Carrier name and MC stay off this list. The notice log is the in-portal history.
  */
 export const CUSTOMER_LOAD_COLUMNS = `
   id, sales_order_number, load_number, portal_status, tracking_stage, timeline_json,
@@ -751,7 +758,7 @@ async function migrateChatEnabled(db: SqlDatabase): Promise<void> {
   await ensureColumn(db, "users", "chat_enabled", "INTEGER NOT NULL DEFAULT 0");
 }
 
-/** Slack acceptance time, carrier identity for assignment mail, and the sent-notice log. */
+/** Slack acceptance time, carrier identity, and the in-portal history log. */
 async function migrateLoadStatus(db: SqlDatabase): Promise<void> {
   await ensureColumn(db, "loads", "slack_notified_at", "TEXT");
   await ensureColumn(db, "loads", "carrier_name", "TEXT");

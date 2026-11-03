@@ -1,13 +1,11 @@
 import type { PortalContext } from "@/lib/db";
-import { emailConfig, sendEmail } from "@/lib/email";
 import { PortalError } from "@/lib/http";
 import { sensitiveReason } from "@/lib/sensitive";
 import type { CustomerOrder } from "@/lib/types";
 
 const RATE_KEY = /pay|rate|margin|cost|price|charge|line[\s_-]*haul|rate[\s_-]*con/i;
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export type CarrierNoticeResult = "assigned" | "changed" | "unchanged" | "skipped";
+export type CarrierNoticeResult = "assigned" | "changed" | "unchanged";
 
 export interface CarrierIdentity {
   name: string;
@@ -55,49 +53,22 @@ export function sameCarrier(left: CarrierIdentity, right: CarrierIdentity): bool
   );
 }
 
-export function carrierEmail(input: {
-  kind: "assigned" | "changed";
-  salesOrderNumber: string;
-  orderId: string;
-  loadNumber: string | null;
-  originCity: string;
-  originState: string;
-  destinationCity: string;
-  destinationState: string;
-  shipDate: string | null;
-  mustDeliverDate: string | null;
-  carrierName: string;
-  mc: string;
-}): { subject: string; text: string } {
-  const change = input.kind === "changed";
-  const subject = change
-    ? `Carrier changed for ${input.salesOrderNumber}`
-    : `Carrier assigned for ${input.salesOrderNumber}`;
-  const pickupWhen = input.shipDate ? ` on ${input.shipDate}` : "";
-  const deliverWhen = input.mustDeliverDate ? ` on ${input.mustDeliverDate}` : "";
-  const lines = [
-    `SO number: ${input.salesOrderNumber}`,
-    `Order: ${input.orderId}`,
-    `Select load: ${input.loadNumber?.trim() || "Pending"}`,
-    `Pickup: ${input.originCity}, ${input.originState}${pickupWhen}`,
-    `Delivery: ${input.destinationCity}, ${input.destinationState}${deliverWhen}`,
-    `Carrier: ${input.carrierName}`,
-    `MC: ${input.mc || "not provided"}`,
-    change ? "The assigned carrier changed." : "This is a new carrier assignment.",
-  ];
-  return { subject, text: lines.join("\n") };
-}
-
-export function carrierNoticeText(kind: "assigned" | "changed", to: string, carrier: CarrierIdentity): string {
-  const lead = kind === "changed" ? "Carrier change email sent" : "New carrier assignment email sent";
-  const mc = carrier.mc ? ` MC ${carrier.mc}.` : " MC not provided.";
-  return `${lead} to ${to}. Carrier: ${carrier.name}.${mc}`;
+/** History line for the load page. It names the company and MC. It has no pay and it is not an email. */
+export function historyText(kind: "assigned" | "changed", next: CarrierIdentity, previous: CarrierIdentity): string {
+  const name = next.name || "Name not provided";
+  const mc = next.mc ? `MC ${next.mc}` : "MC not provided";
+  if (kind === "assigned") return `Carrier assigned: ${name}. ${mc}.`;
+  const from = previous.name || "the previous carrier";
+  const fromMc = previous.mc ? ` (MC ${previous.mc})` : "";
+  return `Carrier changed from ${from}${fromMc} to ${name}. ${mc}.`;
 }
 
 interface NoticeEntry {
   at: string;
   kind: "assigned" | "changed";
   text: string;
+  company: string;
+  mc: string;
 }
 
 function parseLog(raw: unknown): NoticeEntry[] {
@@ -116,15 +87,14 @@ function parseLog(raw: unknown): NoticeEntry[] {
 }
 
 /**
- * Store a new or changed carrier and email the person who submitted the order.
- * The same carrier again does not send mail. A failed send leaves the stored carrier alone.
+ * Store a new or changed carrier and append a History line.
+ * The same carrier again does not write another line. Nothing is emailed.
  * Carrier pay is not a parameter and is not written.
  */
 export async function recordCarrierAssignment(
   ctx: PortalContext,
   order: CustomerOrder,
   incoming: CarrierUpdate,
-  fetchImpl: typeof fetch = fetch,
 ): Promise<CarrierNoticeResult> {
   const row = await ctx.db
     .prepare(`SELECT carrier_name, carrier_mc, carrier_notice_log FROM loads WHERE id = ?`)
@@ -145,50 +115,13 @@ export async function recordCarrierAssignment(
   }
 
   const kind = stored.name || stored.mc ? "changed" : "assigned";
-  const to = order.enteredByEmail?.trim() ?? "";
-  const now = ctx.now().toISOString();
-  if (!EMAIL.test(to)) {
-    await ctx.db
-      .prepare(`UPDATE loads SET carrier_name = ?, carrier_mc = ?, updated_at = ? WHERE id = ?`)
-      .run(next.name || null, next.mc || null, now, order.id);
-    return "skipped";
-  }
-
-  const mail = carrierEmail({
-    kind,
-    salesOrderNumber: order.salesOrderNumber,
-    orderId: order.id,
-    loadNumber: order.loadNumber,
-    originCity: order.origin.city,
-    originState: order.origin.state,
-    destinationCity: order.destination.city,
-    destinationState: order.destination.state,
-    shipDate: order.shipDate,
-    mustDeliverDate: order.mustDeliverDate,
-    carrierName: next.name,
-    mc: next.mc,
-  });
-  if (sensitiveReason(mail.text) || sensitiveReason(mail.subject)) {
+  const text = historyText(kind, next, stored);
+  if (sensitiveReason(text)) {
     throw new PortalError("Carrier details cannot include rates or pay.");
   }
-  if (!emailConfig()) {
-    throw new PortalError(
-      "Email is not configured. Set EMAIL_FROM and EMAIL_API_KEY (at least 16 characters). The carrier was not saved.",
-      503,
-    );
-  }
-  let sent = false;
-  try {
-    sent = await sendEmail({ to, subject: mail.subject, text: mail.text }, fetchImpl);
-  } catch {
-    sent = false;
-  }
-  if (!sent) {
-    throw new PortalError("The carrier email could not be sent. The carrier was not saved.", 503);
-  }
-
+  const now = ctx.now().toISOString();
   const log = parseLog(row?.carrier_notice_log);
-  log.push({ at: now, kind, text: carrierNoticeText(kind, to, next) });
+  log.push({ at: now, kind, text, company: next.name, mc: next.mc });
   await ctx.db
     .prepare(`UPDATE loads SET carrier_name = ?, carrier_mc = ?, carrier_notice_log = ?, updated_at = ? WHERE id = ?`)
     .run(next.name || null, next.mc || null, JSON.stringify(log), now, order.id);

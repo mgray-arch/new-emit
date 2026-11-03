@@ -107,7 +107,6 @@ export async function applyLoadStatus(
     loadNumber?: string;
     carrier: CarrierUpdate | null;
   },
-  fetchImpl: typeof fetch = fetch,
 ): Promise<{ order: CustomerOrder; notice: CarrierNoticeResult | null }> {
   const id = await orderIdForCallback(ctx, input.orderId?.trim() ?? "", input.salesOrderNumber?.trim() ?? "");
   if (input.loadNumber?.trim()) {
@@ -117,7 +116,7 @@ export async function applyLoadStatus(
   if (input.carrier) {
     const current = await getOrder(ctx, id);
     if (!current) throw new PortalError("Order not found", 404);
-    notice = await recordCarrierAssignment(ctx, current, input.carrier, fetchImpl);
+    notice = await recordCarrierAssignment(ctx, current, input.carrier);
   }
   const order = await getOrder(ctx, id);
   if (!order) throw new PortalError("Order not found", 404);
