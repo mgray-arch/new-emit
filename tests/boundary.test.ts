@@ -37,8 +37,9 @@ describe("boundaries", () => {
     expect(isPublicPath("/api/auth/providers")).toBe(true);
     expect(isPublicPath("/api/admin/users")).toBe(false);
     expect(isPublicPath("/api/me/password")).toBe(false);
-    expect(isPublicPath("/api/auth/google")).toBe(true);
-    expect(isPublicPath("/api/auth/google/callback")).toBe(true);
+    expect(isPublicPath("/api/auth/google")).toBe(false);
+    expect(isPublicPath("/api/auth/google/callback")).toBe(false);
+    expect(isPublicPath("/api/auth/select-setup")).toBe(true);
     expect(isPublicPath("/api/admin/receivers")).toBe(false);
     expect(isPublicPath("/r/demo-receiver-token")).toBe(true);
     expect(isPublicPath("/api/r/demo-receiver-token")).toBe(true);

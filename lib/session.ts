@@ -127,7 +127,7 @@ export function isPublicPath(pathname: string): boolean {
   if (pathname === "/login") return true;
   if (pathname === "/api/auth/login" || pathname === "/api/auth/logout" || pathname === "/api/auth/providers") return true;
   if (pathname === "/api/auth/microsoft" || pathname.startsWith("/api/auth/microsoft/")) return true;
-  if (pathname === "/api/auth/google" || pathname.startsWith("/api/auth/google/")) return true;
+  if (pathname === "/api/auth/select-setup") return true;
   if (pathname.startsWith("/track/")) return true;
   if (pathname.startsWith("/api/track/")) return true;
   if (pathname.startsWith("/r/")) return true;
@@ -144,7 +144,7 @@ export function isPublicPath(pathname: string): boolean {
   return false;
 }
 
-export function oauthCallbackUrl(req: Request, provider: "microsoft" | "google"): string {
+export function oauthCallbackUrl(req: Request, provider: "microsoft"): string {
   const path = `/api/auth/${provider}/callback`;
   return `${requestOrigin(req)}${path}`;
 }
@@ -183,23 +183,4 @@ export function microsoftAuthorizeUrl(state: string, redirectUri: string): strin
 
 export function redirectUriFrom(req: Request): string {
   return oauthCallbackUrl(req, "microsoft");
-}
-
-export function googleConfigured(): boolean {
-  return Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
-}
-
-export function googleAuthorizeUrl(state: string, redirectUri: string): string {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  if (!clientId) throw new Error("Google sign-in is not configured");
-  const domain = (process.env.GOOGLE_HOSTED_DOMAIN || "goselect.com").trim().toLowerCase();
-  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-  url.searchParams.set("client_id", clientId);
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("redirect_uri", redirectUri);
-  url.searchParams.set("scope", "openid email profile");
-  url.searchParams.set("state", state);
-  url.searchParams.set("hd", domain);
-  url.searchParams.set("prompt", "select_account");
-  return url.toString();
 }

@@ -3,6 +3,14 @@
 import { useEffect, useState } from "react";
 import Shell from "@/components/shell";
 
+interface SelectStaff {
+  id: string;
+  email: string;
+  name: string;
+  active: boolean;
+  hasPassword: boolean;
+}
+
 interface EmitUser {
   id: string;
   email: string;
@@ -25,6 +33,12 @@ const PERMISSIONS: Array<{ value: EmitUser["permission"]; label: string; detail:
 
 export default function UsersPage() {
   const [users, setUsers] = useState<EmitUser[]>([]);
+  const [staff, setStaff] = useState<SelectStaff[]>([]);
+  const [staffName, setStaffName] = useState("");
+  const [staffEmail, setStaffEmail] = useState("");
+  const [staffPassword, setStaffPassword] = useState("");
+  const [staffResetFor, setStaffResetFor] = useState<string | null>(null);
+  const [staffResetPassword, setStaffResetPassword] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -38,10 +52,15 @@ export default function UsersPage() {
   const [resetPassword, setResetPassword] = useState("");
 
   async function load() {
-    const response = await fetch("/api/admin/users");
-    if (!response.ok) return;
-    const body = await response.json();
-    setUsers(body.users ?? []);
+    const [people, selectStaff] = await Promise.all([fetch("/api/admin/users"), fetch("/api/admin/staff")]);
+    if (people.ok) {
+      const body = await people.json();
+      setUsers(body.users ?? []);
+    }
+    if (selectStaff.ok) {
+      const body = await selectStaff.json();
+      setStaff(body.staff ?? []);
+    }
   }
 
   useEffect(() => {
@@ -128,6 +147,70 @@ export default function UsersPage() {
     await load();
   }
 
+  async function saveStaff(generate: boolean) {
+    setError("");
+    setMessage("");
+    setSharedPassword("");
+    const response = await fetch("/api/admin/staff", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: staffName,
+        email: staffEmail,
+        password: generate ? undefined : staffPassword,
+        generatePassword: generate,
+      }),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      setError(body.error || "Could not add that Select account");
+      return;
+    }
+    setStaffName("");
+    setStaffEmail("");
+    setStaffPassword("");
+    showResult(body, `Added ${body.user.email} as Select staff.`);
+    await load();
+  }
+
+  async function setStaffActive(person: SelectStaff, active: boolean) {
+    setError("");
+    const response = await fetch(`/api/admin/staff/${person.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ active }),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      setError(body.error || "Could not update that account");
+      return;
+    }
+    setMessage(active ? `${person.email} can sign in again.` : `${person.email} is deactivated.`);
+    await load();
+  }
+
+  async function resetStaff(person: SelectStaff, generate: boolean) {
+    setError("");
+    setSharedPassword("");
+    const response = await fetch(`/api/admin/staff/${person.id}/password`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        password: generate ? undefined : staffResetPassword,
+        generatePassword: generate,
+      }),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      setError(body.error || "Could not reset that password");
+      return;
+    }
+    setStaffResetFor(null);
+    setStaffResetPassword("");
+    showResult(body, `Password updated for ${person.email}.`);
+    await load();
+  }
+
   async function reset(user: EmitUser, generate: boolean) {
     setError("");
     setSharedPassword("");
@@ -153,7 +236,84 @@ export default function UsersPage() {
   return (
     <Shell>
       <main className="page">
-        <h1>EMIT users</h1>
+        <h1>Users</h1>
+        <h2>Select staff</h2>
+        <p className="lede">
+          Mike, Drew, Ainsley, and other Select admins sign in with email and password. An address has to be on SELECT_ADMIN_EMAILS before it can be added here. They keep Select admin access. This does not change EMIT permissions.
+        </p>
+        <div className="receiver-card">
+          <div className="grid-2">
+            <div className="field">
+              <label htmlFor="staff-name">Name</label>
+              <input id="staff-name" value={staffName} onChange={(event) => setStaffName(event.target.value)} />
+            </div>
+            <div className="field">
+              <label htmlFor="staff-email">Email</label>
+              <input id="staff-email" type="email" value={staffEmail} onChange={(event) => setStaffEmail(event.target.value)} />
+            </div>
+          </div>
+          <div className="field">
+            <label htmlFor="staff-password">Temporary password</label>
+            <input
+              id="staff-password"
+              type="text"
+              autoComplete="off"
+              value={staffPassword}
+              placeholder="At least 10 characters, or generate one"
+              onChange={(event) => setStaffPassword(event.target.value)}
+            />
+          </div>
+          <div className="actions" style={{ justifyContent: "flex-start" }}>
+            <button className="btn" type="button" onClick={() => void saveStaff(false)}>
+              Add Select staff
+            </button>
+            <button className="btn secondary" type="button" onClick={() => void saveStaff(true)}>
+              Add and generate password
+            </button>
+          </div>
+        </div>
+        {staff.length === 0 && <p className="mini">No Select staff yet.</p>}
+        {staff.map((person) => (
+          <article className="receiver-card" key={person.id}>
+            <h2>
+              {person.name} {!person.active && <span className="mini">· deactivated</span>}
+            </h2>
+            <p className="mini">{person.email} · Select admin</p>
+            <div className="actions" style={{ justifyContent: "flex-start" }}>
+              <button className="btn secondary" type="button" onClick={() => void setStaffActive(person, !person.active)}>
+                {person.active ? "Deactivate" : "Activate"}
+              </button>
+              <button
+                className="btn secondary"
+                type="button"
+                onClick={() => setStaffResetFor(staffResetFor === person.id ? null : person.id)}
+              >
+                Reset password
+              </button>
+            </div>
+            {staffResetFor === person.id && (
+              <div className="confirm-box">
+                <input
+                  aria-label={`New password for ${person.email}`}
+                  type="text"
+                  autoComplete="off"
+                  value={staffResetPassword}
+                  placeholder="Temporary password"
+                  onChange={(event) => setStaffResetPassword(event.target.value)}
+                />
+                <div className="actions" style={{ justifyContent: "flex-start" }}>
+                  <button className="btn" type="button" onClick={() => void resetStaff(person, false)}>
+                    Set password
+                  </button>
+                  <button className="btn secondary" type="button" onClick={() => void resetStaff(person, true)}>
+                    Generate password
+                  </button>
+                </div>
+              </div>
+            )}
+          </article>
+        ))}
+        <h2>EMIT users</h2>
         <p className="lede">
           Only Select can add someone here. An email that is not on this list cannot sign in as EMIT. Each person is an EMIT admin or a regular user, and has one permission. A regular user never sees the price EMIT pays Select. An EMIT admin with see pricing or full access does. They never show carrier pay. An EMIT admin can manage saved locations unless the permission is view only.
         </p>

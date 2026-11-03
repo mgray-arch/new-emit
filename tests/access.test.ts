@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { identityFromGoogle, identityFromMicrosoft } from "@/lib/auth-policy";
+import { identityFromMicrosoft } from "@/lib/auth-policy";
 import { answerQuestion } from "@/lib/assistant";
 import type { PortalContext } from "@/lib/db";
 import { listCustomerDocuments } from "@/lib/documents";
@@ -9,7 +9,6 @@ import { POST as regenerateLink } from "@/app/api/admin/receivers/[id]/regenerat
 import { GET as listReceiversRoute, POST as createReceiverRoute } from "@/app/api/admin/receivers/route";
 import { GET as downloadDoc } from "@/app/api/documents/[id]/route";
 import { GET as receiverPortal } from "@/app/api/r/[token]/route";
-import { GET as googleStart } from "@/app/api/auth/google/route";
 import { adminSession, customerSession, expectNoSecrets, seededPortal, sessionCookie } from "./helpers";
 
 let ctx: PortalContext;
@@ -26,7 +25,7 @@ async function enchantedToken(): Promise<string> {
 }
 
 describe("sign-in providers", () => {
-  it("sends EMIT staff to Microsoft and Select admins to Google", () => {
+  it("keeps Microsoft for EMIT staff and refuses Select addresses", () => {
     expect(identityFromMicrosoft("m.gray@emit.com")).toEqual({ ok: true, role: "customer", email: "m.gray@emit.com" });
     expect(identityFromMicrosoft("mgray@goselect.com")).toMatchObject({ ok: false });
     expect(identityFromMicrosoft("someone@goselect.com")).toMatchObject({ ok: false });
@@ -35,33 +34,6 @@ describe("sign-in providers", () => {
       error: expect.stringMatching(/private link/i),
     });
     expect(identityFromMicrosoft("stranger@example.com")).toMatchObject({ ok: false });
-
-    expect(
-      identityFromGoogle({ email: "mgray@goselect.com", emailVerified: true, hostedDomain: "goselect.com" }),
-    ).toEqual({ ok: true, role: "admin", email: "mgray@goselect.com" });
-    expect(
-      identityFromGoogle({ email: "dmartin@goselect.com", emailVerified: true, hostedDomain: "goselect.com" }),
-    ).toEqual({ ok: true, role: "admin", email: "dmartin@goselect.com" });
-    expect(identityFromGoogle({ email: "other@goselect.com", emailVerified: true, hostedDomain: "goselect.com" })).toMatchObject({
-      ok: false,
-    });
-    expect(identityFromGoogle({ email: "m.gray@emit.com", emailVerified: true, hostedDomain: null })).toMatchObject({ ok: false });
-    expect(identityFromGoogle({ email: "mgray@goselect.com", emailVerified: false, hostedDomain: "goselect.com" })).toMatchObject({
-      ok: false,
-    });
-    expect(identityFromGoogle({ email: "mgray@gmail.com", emailVerified: true, hostedDomain: null })).toMatchObject({ ok: false });
-  });
-
-  it("leaves Google sign-in unconfigured until the client id exists", async () => {
-    const previousId = process.env.GOOGLE_CLIENT_ID;
-    const previousSecret = process.env.GOOGLE_CLIENT_SECRET;
-    delete process.env.GOOGLE_CLIENT_ID;
-    delete process.env.GOOGLE_CLIENT_SECRET;
-    const response = await googleStart(new Request("http://portal.test/api/auth/google"));
-    expect(response.status).toBe(302);
-    expect(response.headers.get("location")).toContain("google=unconfigured");
-    if (previousId) process.env.GOOGLE_CLIENT_ID = previousId;
-    if (previousSecret) process.env.GOOGLE_CLIENT_SECRET = previousSecret;
   });
 });
 

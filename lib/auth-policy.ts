@@ -1,8 +1,8 @@
 /**
  * Who may sign in, and through which provider.
- * EMIT staff use email and password. Microsoft Entra is optional and not required.
- * Select admins use Google. Receivers do not sign in. They open a private link.
- * Select admins are the addresses in SELECT_ADMIN_EMAILS.
+ * EMIT staff and Select staff use email and password. Microsoft Entra is optional and not required.
+ * Receivers do not sign in. They open a private link.
+ * Select admins are the addresses in SELECT_ADMIN_EMAILS. They are not EMIT users.
  * An EMIT admin is a portal role a Select admin sets on the Users page. It is not an identity-provider role.
  */
 
@@ -61,7 +61,7 @@ export function canProvisionEmitUser(email: string): IdentityDecision {
   const normalized = email.trim().toLowerCase();
   if (!normalized.includes("@")) return { ok: false, error: "Enter an email address." };
   if (isSelectEmail(normalized)) {
-    return { ok: false, error: "Select staff sign in with Google. This page is for EMIT staff." };
+    return { ok: false, error: "Select staff sign in with email and password. Add them under Select staff, not as an EMIT user." };
   }
   if (!isEmitStaff(normalized)) {
     return {
@@ -79,7 +79,7 @@ export function identityFromMicrosoft(email: string): IdentityDecision {
     return { ok: false, error: "Microsoft did not return an email address." };
   }
   if (isSelectEmail(normalized)) {
-    return { ok: false, error: "Select staff sign in with Google, not Microsoft." };
+    return { ok: false, error: "Select staff sign in with email and password, not Microsoft." };
   }
   if (isEmitStaff(normalized)) return { ok: true, role: "customer", email: normalized };
   return {
@@ -88,27 +88,3 @@ export function identityFromMicrosoft(email: string): IdentityDecision {
   };
 }
 
-/** Google Workspace. Only the two Select admins, and only @goselect.com. */
-export function identityFromGoogle(input: {
-  email: string;
-  emailVerified: boolean;
-  hostedDomain: string | null;
-}): IdentityDecision {
-  const normalized = input.email.trim().toLowerCase();
-  if (!input.emailVerified) {
-    return { ok: false, error: "Google did not confirm this email address." };
-  }
-  if (!normalized.endsWith(`@${selectDomain()}`)) {
-    return { ok: false, error: "Select staff sign in with a goselect.com Google account." };
-  }
-  if (input.hostedDomain && input.hostedDomain.toLowerCase() !== selectDomain()) {
-    return { ok: false, error: "This Google account is not in the Select Workspace." };
-  }
-  if (isEmitStaff(normalized)) {
-    return { ok: false, error: "EMIT signs in with email and password, not Google." };
-  }
-  if (!adminEmails().includes(normalized)) {
-    return { ok: false, error: "This Google account is not a Select portal admin." };
-  }
-  return { ok: true, role: "admin", email: normalized };
-}

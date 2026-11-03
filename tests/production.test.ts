@@ -107,7 +107,8 @@ describe("production sign-in and an empty database", () => {
       expect((await response.json()).error).toMatch(/no accounts/);
       const listed = await providers(new Request("http://portal.test/api/auth/providers"));
       const payload = await listed.json();
-      expect(payload.google).toBe(false);
+      expect(payload.google).toBeUndefined();
+      expect(payload.selectSetup).toBe(false);
       expect(payload.setup.join(" ")).toMatch(/DEMO_SEED/);
     } finally {
       useTestPortal(ctx);
@@ -139,7 +140,8 @@ describe("production sign-in and an empty database", () => {
       const listed = await providers(new Request("http://portal.test/api/auth/providers"));
       expect((await listed.json()).setup.join(" ")).toMatch(/TURSO_DATABASE_URL/);
       const page = readFileSync("app/login/page.tsx", "utf8");
-      expect(page).toMatch(/Google sign-in isn't set up/);
+      expect(page).not.toMatch(/Sign in with Google|api\/auth\/google/);
+      expect(page).toMatch(/Email and password/);
       expect(page).toMatch(/EMIT staff/);
       expect(page).toMatch(/Select staff/);
     } finally {
