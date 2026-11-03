@@ -107,6 +107,14 @@ export interface OrderNotice {
   mc?: string;
 }
 
+/** A portal stage change. The text is the stage names only. It has no pay. */
+export interface StageEvent {
+  at: string;
+  from: PortalStatus | null;
+  to: PortalStatus;
+  text: string;
+}
+
 /** Current assignment shown on the load. No pay. */
 export interface HaulCallout {
   company: string;
@@ -179,6 +187,8 @@ export interface CustomerOrder {
   buildStatus?: string | null;
   /** Carrier updates for this order. Empty until one is recorded. */
   notices?: OrderNotice[];
+  /** Stage changes for this order. Empty until one is recorded. */
+  stageEvents?: StageEvent[];
   /** Current assignment, when one is stored. Omitted until then. No pay. */
   haulCallout?: HaulCallout | null;
   /** Set when this person has not opened the latest carrier update. */

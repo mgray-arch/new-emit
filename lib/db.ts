@@ -86,9 +86,11 @@ CREATE TABLE IF NOT EXISTS loads (
   sam_build_error TEXT,
   sam_build_at TEXT,
   slack_notified_at TEXT,
+  slack_ready_at TEXT,
   carrier_name TEXT,
   carrier_mc TEXT,
-  carrier_notice_log TEXT
+  carrier_notice_log TEXT,
+  stage_log TEXT
 );
 
 CREATE TABLE IF NOT EXISTS customer_documents (
@@ -242,7 +244,7 @@ export const CUSTOMER_LOAD_COLUMNS = `
   origin_json, destination_json, stops_json, truck_type, transit, ship_date, ship_time,
   must_deliver_date, truck_eta, latest_eta, tracking_token, tracking_link, customer_cost_cents,
   rate_reason, comments, created_by, entered_by_name, entered_by_email, owner, owner_needs_check, created_at, updated_at, pending_review_count,
-  sam_build_status, sam_build_error, sam_build_at, slack_notified_at, carrier_notice_log
+  sam_build_status, sam_build_error, sam_build_at, slack_notified_at, carrier_notice_log, stage_log
 `;
 
 function coerce(value: unknown): unknown {
@@ -761,9 +763,11 @@ async function migrateChatEnabled(db: SqlDatabase): Promise<void> {
 /** Slack acceptance time, carrier identity, and the in-portal history log. */
 async function migrateLoadStatus(db: SqlDatabase): Promise<void> {
   await ensureColumn(db, "loads", "slack_notified_at", "TEXT");
+  await ensureColumn(db, "loads", "slack_ready_at", "TEXT");
   await ensureColumn(db, "loads", "carrier_name", "TEXT");
   await ensureColumn(db, "loads", "carrier_mc", "TEXT");
   await ensureColumn(db, "loads", "carrier_notice_log", "TEXT");
+  await ensureColumn(db, "loads", "stage_log", "TEXT");
 }
 
 /** Older document tables have no uploader. The bot upload log is created with the schema. */

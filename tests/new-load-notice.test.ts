@@ -1,12 +1,12 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { PATCH as setOwnerRoute } from "@/app/api/admin/orders/[id]/owner/route";
 import { GET as listOrdersRoute } from "@/app/api/orders/route";
-import { GET as getOrderRoute } from "@/app/api/orders/[id]/route";
+import { GET as getOrderRoute, PATCH as patchOrderRoute } from "@/app/api/orders/[id]/route";
 import { POST as createOrderRoute } from "@/app/api/orders/route";
 import { presentCustomerOrder } from "@/lib/customer-view";
 import { formatEnteredBy } from "@/lib/entered-by";
 import { assignLoadOwner } from "@/lib/load-owner";
-import { newLoadSlackText, slackUserIdForOwner } from "@/lib/slack-new-load";
+import { newLoadSlackText, readyToShipSlackText, slackUserIdForOwner } from "@/lib/slack-new-load";
 import type { PortalContext } from "@/lib/db";
 import type { CustomerOrder, Session } from "@/lib/types";
 import { adminSession, customerSession, seededPortal, sessionCookie } from "./helpers";
@@ -89,6 +89,9 @@ describe("new load slack text", () => {
 
   it("names the owner and who entered the load, and never includes a price", () => {
     const text = newLoadSlackText(notice, {});
+    expect(text.startsWith("New load request\nBeing Prepared\n")).toBe(true);
+    expect(text).toContain("SO: SO-1");
+    expect(text).not.toContain("Ready to Ship");
     expect(text).toContain("Owner: Drew");
     expect(text).not.toContain("Needs a human check");
     expect(text).toContain("Entered by: Jane Doe (jane@emit.example)");
@@ -103,6 +106,14 @@ describe("new load slack text", () => {
   it("mentions a Slack user id and falls back to the plain name", () => {
     expect(slackUserIdForOwner("Drew", {})).toBeNull();
     expect(slackUserIdForOwner("Drew", { SLACK_USER_ID_DREW: "not an id" })).toBeNull();
+    const ready = readyToShipSlackText({ ...notice, shipDate: "2026-11-10", salesOrderNumber: "so-44" }, { SLACK_USER_ID_DREW: "UDREW123" });
+    expect(ready.startsWith("Ready to Ship\n")).toBe(true);
+    expect(ready).toContain("SO: SO-44");
+    expect(ready).toContain("Sheridan, WY → Houston, TX");
+    expect(ready).toContain("Equipment: 53' Flatbed");
+    expect(ready).toContain("Ship date: 2026-11-10");
+    expect(ready).toContain("Owner: <@UDREW123>");
+    expect(ready).not.toMatch(/pay|rate|\$|New load request|Being Prepared/i);
     expect(newLoadSlackText(notice, { SLACK_USER_ID_DREW: "UDREW123" })).toContain("Owner: <@UDREW123>");
     expect(newLoadSlackText({ ...notice, owner: "Ainsley" }, { SLACK_USER_ID_AINSLEY: "WAINSLEY1" })).toContain(
       "Owner: <@WAINSLEY1>",
@@ -174,9 +185,12 @@ describe("entered by on a new load", () => {
     expect(sent.status).toBe(201);
     expect(posts).toHaveLength(1);
     expect(posts[0]).toContain("https://hooks.slack.test/new-loads");
+    expect(posts[0]).toContain("New load request");
+    expect(posts[0]).toContain("Being Prepared");
+    expect(posts[0]).not.toContain("Ready to Ship");
     expect(posts[0]).toContain("Owner: <@UDREW123>");
     expect(posts[0]).toContain("Entered by: M. Gray (m.gray@emit.example)");
-    expect(posts[0]).not.toMatch(/1800|1750|carrier|8765/);
+    expect(posts[0]).not.toMatch(/1800|1750|carrier|8765|\$/);
 
     const sentOrder = (await sent.json()).order as CustomerOrder;
     expect(sentOrder.buildStatus).toBe("Sent to Slack");
@@ -376,5 +390,105 @@ describe("entered by on a new load", () => {
     );
     expect(response.status).toBe(201);
     expect((await response.json()).order.buildStatus).toBeNull();
+  });
+});
+
+describe("stage changes", () => {
+  it("lets an add-loads user move Being Prepared to Ready to Ship once, and records History", async () => {
+    process.env.SLACK_NEW_LOADS_WEBHOOK_URL = "https://hooks.slack.test/new-loads";
+    process.env.SLACK_USER_ID_DREW = "UDREW123";
+    const posts: string[] = [];
+    vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => {
+      posts.push(String(init?.body));
+      return new Response("ok", { status: 200 });
+    });
+    const cookie = await sessionCookie(customerSession());
+    const created = await createOrderRoute(
+      new Request("http://portal.test/api/orders", {
+        method: "POST",
+        headers: headers(cookie),
+        body: JSON.stringify({
+          salesOrderNumber: "so-stage",
+          origin: emit,
+          destination: destination("TX"),
+          truckType: "53' Flatbed",
+          shipDate: "2026-11-10",
+          comments: "carrier pay 8765.43",
+        }),
+      }),
+    );
+    expect(created.status).toBe(201);
+    const order = (await created.json()).order as CustomerOrder;
+    expect(order.stageEvents?.map((event) => event.text)).toEqual(["Stage set to Being Prepared."]);
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toContain("New load request");
+    expect(posts[0]).toContain("Being Prepared");
+    expect(posts[0]).toContain("SO: SO-STAGE");
+    expect(posts[0]).not.toContain("Ready to Ship");
+    expect(posts[0]).not.toMatch(/8765|\$|carrier pay/i);
+
+    const viewer = await sessionCookie({
+      userId: "emit-viewer-1",
+      email: "viewer@emit.example",
+      name: "View Only",
+      role: "emit_viewer",
+      permission: "view",
+    });
+    const refused = await patchOrderRoute(
+      new Request(`http://portal.test/api/orders/${order.id}`, {
+        method: "PATCH",
+        headers: headers(viewer),
+        body: JSON.stringify({ portalStatus: "ready_to_ship" }),
+      }),
+      { params: Promise.resolve({ id: order.id }) },
+    );
+    expect(refused.status).toBe(403);
+
+    const moved = await patchOrderRoute(
+      new Request(`http://portal.test/api/orders/${order.id}`, {
+        method: "PATCH",
+        headers: headers(cookie),
+        body: JSON.stringify({ portalStatus: "ready_to_ship" }),
+      }),
+      { params: Promise.resolve({ id: order.id }) },
+    );
+    expect(moved.status).toBe(200);
+    const ready = (await moved.json()).order as CustomerOrder;
+    expect(ready.portalStatus).toBe("ready_to_ship");
+    expect(ready.stageEvents?.map((event) => event.text)).toEqual([
+      "Stage set to Being Prepared.",
+      "Stage changed from Being Prepared to Ready to Ship.",
+    ]);
+    expect(posts).toHaveLength(2);
+    expect(posts[1]).toContain("Ready to Ship");
+    expect(posts[1]).toContain("SO: SO-STAGE");
+    expect(posts[1]).toContain("Sheridan, WY → Houston, TX");
+    expect(posts[1]).toContain("Equipment: 53' Flatbed");
+    expect(posts[1]).toContain("Ship date: 2026-11-10");
+    expect(posts[1]).toContain("Owner: <@UDREW123>");
+    expect(posts[1]).not.toMatch(/8765|\$|carrier pay|New load request/i);
+
+    const again = await patchOrderRoute(
+      new Request(`http://portal.test/api/orders/${order.id}`, {
+        method: "PATCH",
+        headers: headers(cookie),
+        body: JSON.stringify({ portalStatus: "shipped" }),
+      }),
+      { params: Promise.resolve({ id: order.id }) },
+    );
+    expect(again.status).toBe(200);
+    expect((await again.json()).order.stageEvents?.at(-1)?.text).toBe("Stage changed from Ready to Ship to Shipped.");
+    expect(posts).toHaveLength(2);
+
+    const back = await patchOrderRoute(
+      new Request(`http://portal.test/api/orders/${order.id}`, {
+        method: "PATCH",
+        headers: headers(cookie),
+        body: JSON.stringify({ portalStatus: "ready_to_ship" }),
+      }),
+      { params: Promise.resolve({ id: order.id }) },
+    );
+    expect(back.status).toBe(200);
+    expect(posts).toHaveLength(2);
   });
 });

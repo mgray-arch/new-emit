@@ -2,18 +2,18 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { SqlArg } from "@/lib/db";
 import type { PortalContext } from "@/lib/db";
 import { CUSTOMER_LOAD_COLUMNS, withTransaction } from "@/lib/db";
-import { buildStatusLabel, parseOrderNotices } from "@/lib/build-status";
+import { buildStatusLabel, parseOrderNotices, parseStageEvents, stageHistoryText } from "@/lib/build-status";
 import { serializeCustomerOrder, trackingUrlFor } from "@/lib/customer-view";
 import { addDaysISO, denverDate, weekRange } from "@/lib/dates";
 import type { LoadTab, LoadTabCounts } from "@/lib/load-list";
 import { listCustomerDocuments } from "@/lib/documents";
 import { PortalError } from "@/lib/http";
 import { deleteStoredBytes } from "@/lib/storage";
-import type { CustomerOrder, PortalStatus, Session, TimelineEvent, TrackingStage } from "@/lib/types";
+import type { CustomerOrder, PortalStatus, Session, StageEvent, TimelineEvent, TrackingStage } from "@/lib/types";
 import { STAGE_LABEL, TRACKING_STAGES, canAddLoads, canSeePricing } from "@/lib/types";
 import { syncStopLocations } from "@/lib/locations";
 import { assignLoadOwner, type LoadOwner } from "@/lib/load-owner";
-import { notifyNewLoad } from "@/lib/slack-new-load";
+import { notifyNewLoad, notifyReadyToShip } from "@/lib/slack-new-load";
 import { legacyStops, resolvedRoute } from "@/lib/stops";
 import type { OrderInput, OrderPatch } from "@/lib/validate";
 import type { Stop } from "@/lib/types";
@@ -96,6 +96,7 @@ interface LoadRow {
   sam_build_at: string | null;
   slack_notified_at: string | null;
   carrier_notice_log: string | null;
+  stage_log: string | null;
 }
 
 const LIST_SQL_HEAD = `
@@ -154,6 +155,7 @@ async function rowToOrder(ctx: PortalContext, row: LoadRow, withDocuments: boole
     samBuildAt: row.sam_build_at || null,
     slackNotifiedAt,
     notices: parseOrderNotices(row.carrier_notice_log),
+    stageEvents: parseStageEvents(row.stage_log),
     buildStatus: buildStatusLabel(order.loadNumber, slackNotifiedAt),
   };
 }
@@ -307,19 +309,9 @@ function buildWhere(filter: OrderFilter, today: string): { sql: string; params: 
   return { sql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
 }
 
-function groupOrderSql(): string {
-  return `ORDER BY
-    CASE
-      WHEN ship_date IS NULL OR ship_date = '' THEN 5
-      WHEN ship_date < ? THEN 0
-      WHEN ship_date = ? THEN 1
-      WHEN ship_date = ? THEN 2
-      WHEN ship_date <= ? THEN 3
-      ELSE 4
-    END,
-    CASE WHEN ship_date < ? THEN ship_date END DESC,
-    ship_date ASC,
-    sales_order_number ASC`;
+/** Newest orders first. Created time is the default order on the loads page. */
+function listOrderSql(): string {
+  return `ORDER BY created_at DESC, sales_order_number ASC`;
 }
 
 export async function listOrders(ctx: PortalContext, filter: OrderFilter = {}): Promise<OrderPage> {
@@ -327,28 +319,11 @@ export async function listOrders(ctx: PortalContext, filter: OrderFilter = {}): 
   const pageSize = Math.min(cap, Math.max(1, filter.pageSize ?? 8));
   const page = Math.max(1, filter.page ?? 1);
   const today = denverDate(ctx.now());
-  const tomorrow = addDaysISO(today, 1);
-  const { end: weekEnd } = weekRange(ctx.now());
   const where = buildWhere(filter, today);
   const totalRow = await ctx.db.prepare(`SELECT COUNT(*) AS n FROM loads ${where.sql}`).get(...where.params);
-  const grouped = Boolean(filter.grouped || filter.tab);
   const rows = (await ctx.db
-    .prepare(
-      grouped
-        ? `${LIST_SQL_HEAD} ${where.sql} ${groupOrderSql()} LIMIT ? OFFSET ?`
-        : `${LIST_SQL_HEAD} ${where.sql}
-       ORDER BY ship_date IS NULL,
-         CASE WHEN ship_date >= ? THEN 0 ELSE 1 END,
-         CASE WHEN ship_date >= ? THEN ship_date END ASC,
-         ship_date DESC,
-         sales_order_number ASC
-       LIMIT ? OFFSET ?`,
-    )
-    .all(
-      ...(grouped
-        ? [...where.params, today, today, tomorrow, weekEnd, today, pageSize, (page - 1) * pageSize]
-        : [...where.params, today, today, pageSize, (page - 1) * pageSize]),
-    )) as unknown as LoadRow[];
+    .prepare(`${LIST_SQL_HEAD} ${where.sql} ${listOrderSql()} LIMIT ? OFFSET ?`)
+    .all(...where.params, pageSize, (page - 1) * pageSize)) as unknown as LoadRow[];
   return {
     orders: await Promise.all(rows.map((row) => rowToOrder(ctx, row, false))),
     total: Number(totalRow?.n ?? 0),
@@ -513,6 +488,36 @@ function routeFrom(input: { origin?: OrderInput["origin"]; destination?: OrderIn
   }
 }
 
+async function writeStage(ctx: PortalContext, id: string, from: PortalStatus | null, to: PortalStatus, at: string): Promise<void> {
+  const row = await ctx.db.prepare(`SELECT stage_log FROM loads WHERE id = ?`).get(id);
+  const events: StageEvent[] = parseStageEvents(typeof row?.stage_log === "string" ? row.stage_log : null);
+  events.push({ at, from, to, text: stageHistoryText(from, to) });
+  await ctx.db.prepare(`UPDATE loads SET stage_log = ? WHERE id = ?`).run(JSON.stringify(events), id);
+}
+
+async function markSlack(ctx: PortalContext, id: string, ready: boolean): Promise<void> {
+  const now = ctx.now().toISOString();
+  if (ready) {
+    await ctx.db
+      .prepare(
+        `UPDATE loads SET slack_ready_at = COALESCE(slack_ready_at, ?), slack_notified_at = COALESCE(slack_notified_at, ?) WHERE id = ?`,
+      )
+      .run(now, now, id);
+    return;
+  }
+  await ctx.db.prepare(`UPDATE loads SET slack_notified_at = COALESCE(slack_notified_at, ?) WHERE id = ?`).run(now, id);
+}
+
+/** Post Ready to Ship once. A later edit does not post it again. */
+async function postReadyToShip(ctx: PortalContext, id: string): Promise<void> {
+  const row = await ctx.db.prepare(`SELECT slack_ready_at FROM loads WHERE id = ?`).get(id);
+  if (row?.slack_ready_at) return;
+  const order = await getOrder(ctx, id);
+  if (!order) return;
+  const posted = await notifyReadyToShip(order);
+  if (posted) await markSlack(ctx, id, true);
+}
+
 export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: Session): Promise<{
   order: CustomerOrder;
 }> {
@@ -576,11 +581,14 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
         now,
       );
   });
+  await writeStage(ctx, id, null, portalStatus, now);
   const order = await getOrder(ctx, id);
   if (!order) throw new PortalError("The order could not be saved", 500);
-  const posted = await notifyNewLoad(order, { name: actor.name, email: actor.email });
-  if (posted) {
-    await ctx.db.prepare(`UPDATE loads SET slack_notified_at = ? WHERE id = ?`).run(ctx.now().toISOString(), id);
+  if (portalStatus === "ready_to_ship") {
+    await postReadyToShip(ctx, id);
+  } else if (portalStatus === "being_prepared") {
+    const posted = await notifyNewLoad(order, { name: actor.name, email: actor.email });
+    if (posted) await markSlack(ctx, id, false);
   }
   const saved = await getOrder(ctx, id);
   if (!saved) throw new PortalError("The order could not be saved", 500);
@@ -651,6 +659,10 @@ export async function updateOrder(ctx: PortalContext, id: string, patch: OrderPa
       id,
     );
   });
+  if (portalStatus !== current.portalStatus) {
+    await writeStage(ctx, id, current.portalStatus, portalStatus, now);
+  }
+  if (portalStatus === "ready_to_ship") await postReadyToShip(ctx, id);
   void actor;
   const updated = await getOrder(ctx, id);
   if (!updated) throw new PortalError("Order not found", 404);

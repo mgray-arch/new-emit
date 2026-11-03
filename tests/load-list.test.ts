@@ -295,4 +295,20 @@ describe("load lists", () => {
     expect(adminCsv).not.toMatch(/carrierPay|carrier_pay/);
     expectNoSecrets(adminCsv);
   });
+
+  it("lists loads newest first by created time", async () => {
+    const older = "SO-SORT-OLD";
+    const newer = "SO-SORT-NEW";
+    await ctx.db
+      .prepare(
+        `UPDATE loads SET created_at = '2026-01-01T00:00:00.000Z' WHERE id = (SELECT id FROM loads ORDER BY created_at LIMIT 1)`,
+      )
+      .run();
+    const first = await ctx.db.prepare(`SELECT id FROM loads ORDER BY created_at LIMIT 1`).get();
+    const second = await ctx.db.prepare(`SELECT id FROM loads WHERE id != ? LIMIT 1`).get(String(first?.id));
+    await ctx.db.prepare(`UPDATE loads SET sales_order_number = ?, created_at = ? WHERE id = ?`).run(older, "2026-01-02T00:00:00.000Z", String(first?.id));
+    await ctx.db.prepare(`UPDATE loads SET sales_order_number = ?, created_at = ? WHERE id = ?`).run(newer, "2026-12-01T00:00:00.000Z", String(second?.id));
+    const board = await listBoard(ctx, { q: "SO-SORT-", pageSize: 10 });
+    expect(board.orders.map((order) => order.salesOrderNumber)).toEqual([newer, older]);
+  });
 });
