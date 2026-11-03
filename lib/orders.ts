@@ -538,6 +538,7 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
     const syncedStops = await syncStopLocations(ctx, drafted.stops, actor.name, input.stops ?? []);
     route = resolvedRoute({ stops: syncedStops });
     const assignment = assignLoadOwner({
+      destinationCity: route.destination.city,
       destinationState: route.destination.state,
       equipment: input.truckType,
     });

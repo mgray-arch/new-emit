@@ -4,6 +4,8 @@ export type LoadOwner = "Drew" | "Ainsley";
 export interface LoadOwnerInput {
   /** Delivery state, such as TX. Blank means the destination is unknown. */
   destinationState?: string | null;
+  /** Delivery city, such as Price. Used with the state for Price, UT. */
+  destinationCity?: string | null;
   /** Equipment label, such as 53' Flatbed. Blank means the equipment is unknown. */
   equipment?: string | null;
 }
@@ -32,13 +34,22 @@ function deliversToTexas(state: string | null | undefined): boolean | null {
   return value === "tx" || value === "texas";
 }
 
+/** Price, UT. City and state are both required. Equipment does not matter. */
+function deliversToPriceUtah(city: string | null | undefined, state: string | null | undefined): boolean {
+  const place = (city ?? "").trim().toLowerCase();
+  const region = (state ?? "").trim().toLowerCase();
+  return place === "price" && (region === "ut" || region === "utah");
+}
+
 /**
- * Drew owns flatbed (any name containing "flatbed") or hot shot freight that delivers
- * to Texas. Ainsley owns every other load: box trucks, anything that delivers outside
- * Texas, and other equipment. Missing equipment or destination still goes to Ainsley,
- * with needsCheck so the Slack note asks a person to confirm.
+ * Drew owns every load into Price, UT, and flatbed or hot shot freight into Texas.
+ * Ainsley owns every other load. Missing equipment or destination still goes to
+ * Ainsley, with needsCheck, unless the delivery is already Price, UT.
  */
 export function assignLoadOwner(input: LoadOwnerInput): LoadAssignment {
+  if (deliversToPriceUtah(input.destinationCity, input.destinationState)) {
+    return { owner: "Drew", needsCheck: false };
+  }
   const equipment = equipmentKind(input.equipment);
   const texas = deliversToTexas(input.destinationState);
   const needsCheck = equipment === "unknown" || texas === null;

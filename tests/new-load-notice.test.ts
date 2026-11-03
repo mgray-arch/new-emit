@@ -71,6 +71,48 @@ describe("load owner", () => {
     expect(assignLoadOwner({ destinationState: "TX", equipment: "   " })).toEqual({ owner: "Ainsley", needsCheck: true });
     expect(assignLoadOwner({ destinationState: null, equipment: "53' Flatbed" })).toEqual({ owner: "Ainsley", needsCheck: true });
     expect(assignLoadOwner({ destinationState: null, equipment: null })).toEqual({ owner: "Ainsley", needsCheck: true });
+    expect(assignLoadOwner({ destinationCity: "Price", destinationState: "UT", equipment: "24' Box Truck" })).toEqual({
+      owner: "Drew",
+      needsCheck: false,
+    });
+    expect(assignLoadOwner({ destinationCity: " price ", destinationState: "utah", equipment: "LTL" })).toEqual({
+      owner: "Drew",
+      needsCheck: false,
+    });
+    expect(assignLoadOwner({ destinationCity: "Price", destinationState: "UT", equipment: null })).toEqual({
+      owner: "Drew",
+      needsCheck: false,
+    });
+    expect(assignLoadOwner({ destinationCity: "Price", destinationState: "CO", equipment: "24' Box Truck" })).toEqual({
+      owner: "Ainsley",
+      needsCheck: false,
+    });
+    expect(assignLoadOwner({ destinationCity: "Price", destinationState: "TX", equipment: "24' Box Truck" })).toEqual({
+      owner: "Ainsley",
+      needsCheck: false,
+    });
+  });
+
+  it("stores Drew for a box truck delivered to Price, UT", async () => {
+    const cookie = await sessionCookie(customerSession());
+    const created = await createOrderRoute(
+      new Request("http://portal.test/api/orders", {
+        method: "POST",
+        headers: headers(cookie),
+        body: JSON.stringify({
+          salesOrderNumber: "SO-PRICE",
+          origin: emit,
+          destination: { company: "Mine", address1: "1 Main", city: "Price", state: "UT", postalCode: "84501" },
+          truckType: "24' Box Truck",
+        }),
+      }),
+    );
+    expect(created.status).toBe(201);
+    const row = (await ctx.db.prepare(`SELECT owner, owner_needs_check FROM loads WHERE sales_order_number = ?`).get("SO-PRICE")) as {
+      owner: string;
+      owner_needs_check: number;
+    };
+    expect(row).toEqual({ owner: "Drew", owner_needs_check: 0 });
   });
 });
 
@@ -89,8 +131,9 @@ describe("new load slack text", () => {
 
   it("names the owner and who entered the load, and never includes a price", () => {
     const text = newLoadSlackText(notice, {});
-    expect(text.startsWith("New load request\nBeing Prepared\n")).toBe(true);
+    expect(text.startsWith("Order received - Being Prepared\n")).toBe(true);
     expect(text).toContain("SO: SO-1");
+    expect(text).not.toMatch(/New load request/i);
     expect(text).not.toContain("Ready to Ship");
     expect(text).toContain("Owner: Drew");
     expect(text).not.toContain("Needs a human check");
@@ -185,8 +228,8 @@ describe("entered by on a new load", () => {
     expect(sent.status).toBe(201);
     expect(posts).toHaveLength(1);
     expect(posts[0]).toContain("https://hooks.slack.test/new-loads");
-    expect(posts[0]).toContain("New load request");
-    expect(posts[0]).toContain("Being Prepared");
+    expect(posts[0]).toContain("Order received - Being Prepared");
+    expect(posts[0]).not.toMatch(/New load request/i);
     expect(posts[0]).not.toContain("Ready to Ship");
     expect(posts[0]).toContain("Owner: <@UDREW123>");
     expect(posts[0]).toContain("Entered by: M. Gray (m.gray@emit.example)");
@@ -421,8 +464,8 @@ describe("stage changes", () => {
     const order = (await created.json()).order as CustomerOrder;
     expect(order.stageEvents?.map((event) => event.text)).toEqual(["Stage set to Being Prepared."]);
     expect(posts).toHaveLength(1);
-    expect(posts[0]).toContain("New load request");
-    expect(posts[0]).toContain("Being Prepared");
+    expect(posts[0]).toContain("Order received - Being Prepared");
+    expect(posts[0]).not.toMatch(/New load request/i);
     expect(posts[0]).toContain("SO: SO-STAGE");
     expect(posts[0]).not.toContain("Ready to Ship");
     expect(posts[0]).not.toMatch(/8765|\$|carrier pay/i);

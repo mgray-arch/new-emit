@@ -50,13 +50,12 @@ function equipmentLine(equipment: string | null | undefined): string {
 
 /**
  * Slack text for a load that is still Being Prepared.
- * Load Builder must not treat this as a build. It does not say Ready to Ship.
- * There is no price, carrier pay, or carrier name.
+ * Load Builder listens for "New load request" and "Ready to Ship", so this note
+ * must not contain "New load request". There is no price, carrier pay, or carrier name.
  */
 export function newLoadSlackText(notice: NewLoadNotice, env: Record<string, string | undefined> = process.env): string {
   const lines = [
-    "New load request",
-    "Being Prepared",
+    "Order received - Being Prepared",
     `SO: ${salesOrderLabel(notice.salesOrderNumber)}`,
     laneLine(notice),
     equipmentLine(notice.equipment),
@@ -96,6 +95,7 @@ function ownerNotice(order: CustomerOrder): { owner: LoadOwner; needsCheck: bool
     return { owner: order.owner, needsCheck: order.ownerNeedsCheck === true };
   }
   return assignLoadOwner({
+    destinationCity: order.destination.city,
     destinationState: order.destination.state,
     equipment: order.truckType,
   });
