@@ -1,10 +1,17 @@
 import { randomBytes } from "node:crypto";
-import { googleAuthorizeUrl, googleConfigured, oauthCallbackUrl, stateCookie } from "@/lib/session";
+import { googleAuthorizeUrl, googleConfigured, oauthCallbackUrl, oauthStartRedirect, stateCookie } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
+  const bounce = oauthStartRedirect(req, "google");
+  if (bounce) {
+    return new Response(null, {
+      status: 302,
+      headers: { location: bounce, "cache-control": "no-store" },
+    });
+  }
   if (!googleConfigured()) {
     return new Response(null, {
       status: 302,

@@ -175,7 +175,7 @@ These are the only domain-shaped settings:
    If the DNS host supports ALIAS or ANAME, `cname.vercel-dns.com` is the other form Vercel accepts. For `www`, add a **CNAME** to `cname.vercel-dns.com`.
 3. Wait until Vercel marks the domain Valid. Vercel requests the certificate. Do not turn on a proxy that rewrites the host.
 4. Set `PORTAL_PUBLIC_URL` to `https://` plus that hostname, with no trailing slash. In Google Cloud, set the authorized redirect URI to `https://<that-host>/api/auth/google/callback` and the JavaScript origin to `https://<that-host>`.
-5. Redeploy Production. Open the new hostname and sign in with Google. A preview URL (`*.vercel.app`) is not the production site.
+5. Redeploy Production. Open the new hostname and sign in with Google. A `*.vercel.app` address is the same deployment, but Google sign-in started there is sent to `PORTAL_PUBLIC_URL` before the state cookie is set. The authorized redirect URI stays `{PORTAL_PUBLIC_URL}/api/auth/google/callback`. Email and password sign-in is unchanged on either hostname.
 
 ## Select load numbers
 

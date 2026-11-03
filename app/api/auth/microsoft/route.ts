@@ -1,10 +1,17 @@
 import { randomBytes } from "node:crypto";
-import { microsoftAuthorizeUrl, microsoftConfigured, redirectUriFrom, stateCookie } from "@/lib/session";
+import { microsoftAuthorizeUrl, microsoftConfigured, oauthStartRedirect, redirectUriFrom, stateCookie } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
+  const bounce = oauthStartRedirect(req, "microsoft");
+  if (bounce) {
+    return new Response(null, {
+      status: 302,
+      headers: { location: bounce, "cache-control": "no-store" },
+    });
+  }
   if (!microsoftConfigured()) {
     return new Response(null, {
       status: 302,

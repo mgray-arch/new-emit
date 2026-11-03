@@ -10,6 +10,7 @@ import { GET as listReceiversRoute, POST as createReceiverRoute } from "@/app/ap
 import { GET as downloadDoc } from "@/app/api/documents/[id]/route";
 import { GET as receiverPortal } from "@/app/api/r/[token]/route";
 import { GET as googleStart } from "@/app/api/auth/google/route";
+import { POST as passwordLogin } from "@/app/api/auth/login/route";
 import { adminSession, customerSession, expectNoSecrets, seededPortal, sessionCookie } from "./helpers";
 
 let ctx: PortalContext;
@@ -60,8 +61,73 @@ describe("sign-in providers", () => {
     const response = await googleStart(new Request("http://portal.test/api/auth/google"));
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toContain("google=unconfigured");
+    expect(response.headers.get("set-cookie")).toBeNull();
     if (previousId) process.env.GOOGLE_CLIENT_ID = previousId;
     if (previousSecret) process.env.GOOGLE_CLIENT_SECRET = previousSecret;
+  });
+
+  it("moves Google sign-in onto PORTAL_PUBLIC_URL before setting the state cookie", async () => {
+    const previousUrl = process.env.PORTAL_PUBLIC_URL;
+    const previousId = process.env.GOOGLE_CLIENT_ID;
+    const previousSecret = process.env.GOOGLE_CLIENT_SECRET;
+    process.env.PORTAL_PUBLIC_URL = "https://emit-shipping.app";
+    process.env.GOOGLE_CLIENT_ID = "test-client.apps.googleusercontent.com";
+    process.env.GOOGLE_CLIENT_SECRET = "test-secret-not-real";
+    try {
+      const mismatched = await googleStart(
+        new Request("https://new-emit.vercel.app/api/auth/google", {
+          headers: { host: "new-emit.vercel.app", "x-forwarded-host": "new-emit.vercel.app", "x-forwarded-proto": "https" },
+        }),
+      );
+      expect(mismatched.status).toBe(302);
+      expect(mismatched.headers.get("location")).toBe("https://emit-shipping.app/api/auth/google");
+      expect(mismatched.headers.get("set-cookie")).toBeNull();
+
+      const matched = await googleStart(
+        new Request("https://emit-shipping.app/api/auth/google", {
+          headers: { host: "emit-shipping.app", "x-forwarded-host": "emit-shipping.app", "x-forwarded-proto": "https" },
+        }),
+      );
+      expect(matched.status).toBe(302);
+      const location = matched.headers.get("location") || "";
+      const callback = "https://emit-shipping.app/api/auth/google/callback";
+      expect(location.startsWith("https://accounts.google.com/")).toBe(true);
+      expect(location).toContain(encodeURIComponent(callback));
+      const state = new URL(location).searchParams.get("state");
+      expect(state?.startsWith("google.")).toBe(true);
+      expect(matched.headers.get("set-cookie")).toContain(`oauth_state=${state}`);
+    } finally {
+      process.env.PORTAL_PUBLIC_URL = previousUrl;
+      if (previousId === undefined) delete process.env.GOOGLE_CLIENT_ID;
+      else process.env.GOOGLE_CLIENT_ID = previousId;
+      if (previousSecret === undefined) delete process.env.GOOGLE_CLIENT_SECRET;
+      else process.env.GOOGLE_CLIENT_SECRET = previousSecret;
+    }
+  });
+
+  it("keeps email and password sign-in on the host the browser used", async () => {
+    const previousUrl = process.env.PORTAL_PUBLIC_URL;
+    process.env.PORTAL_PUBLIC_URL = "https://emit-shipping.app";
+    try {
+      const response = await passwordLogin(
+        new Request("https://new-emit.vercel.app/api/auth/login", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            host: "new-emit.vercel.app",
+            origin: "https://new-emit.vercel.app",
+          },
+          body: JSON.stringify({ email: "m.gray@emit.example", password: "Emit-Demo-2026" }),
+        }),
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get("location")).toBeNull();
+      expect(response.headers.get("set-cookie") || "").toContain("portal_session=");
+      expect(response.headers.get("set-cookie") || "").not.toContain("emit-shipping.app");
+      expect((await response.json()).email).toBe("m.gray@emit.example");
+    } finally {
+      process.env.PORTAL_PUBLIC_URL = previousUrl;
+    }
   });
 });
 

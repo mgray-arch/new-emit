@@ -149,6 +149,30 @@ export function oauthCallbackUrl(req: Request, provider: "microsoft" | "google")
   return `${requestOrigin(req)}${path}`;
 }
 
+function browserHost(req: Request): string {
+  const forwarded = req.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  return (forwarded || req.headers.get("host") || "").toLowerCase();
+}
+
+/**
+ * OAuth state is a cookie on the host that started the flow. The callback is
+ * PORTAL_PUBLIC_URL. If those hosts differ, send the browser to the canonical
+ * host before the cookie is set. Returns null when this request is already there.
+ */
+export function oauthStartRedirect(req: Request, provider: "microsoft" | "google"): string | null {
+  const configured = process.env.PORTAL_PUBLIC_URL?.trim();
+  if (!configured) return null;
+  let canonical: URL;
+  try {
+    canonical = new URL(configured);
+  } catch {
+    return null;
+  }
+  const host = browserHost(req);
+  if (!host || host === canonical.host.toLowerCase()) return null;
+  return `${canonical.origin}/api/auth/${provider}`;
+}
+
 export function sameOrigin(req: Request): boolean {
   const origin = req.headers.get("origin");
   if (!origin) return true;
