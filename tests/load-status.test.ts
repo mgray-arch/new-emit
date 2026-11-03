@@ -11,28 +11,43 @@ import { buildStatusLabel } from "@/lib/build-status";
 import { carrierEmail, findRateField, sameCarrier } from "@/lib/carrier-notice";
 import type { PortalContext } from "@/lib/db";
 import type { CustomerOrder } from "@/lib/types";
-import { adminSession, customerSession, expectNoSecrets, seededPortal, sessionCookie } from "./helpers";
+import { emailConfig } from "@/lib/email";
+import { customerSession, expectNoSecrets, seededPortal, sessionCookie } from "./helpers";
+
+const sendMail = vi.hoisted(() =>
+  vi.fn(async (_message: { from: string; to: string; subject: string; text: string }) => ({ messageId: "test-message" })),
+);
+const createTransport = vi.hoisted(() => vi.fn(() => ({ sendMail })));
+
+vi.mock("nodemailer", () => ({
+  createTransport,
+  default: { createTransport },
+}));
 
 const SECRET = "status-secret-0123456789";
-const EMAIL_KEY = "email-key-0123456789abcd";
+const SMTP_USER = "mgray@goselect.com";
+const SMTP_APP_PASSWORD = "abcd efgh ijkl mnop";
 
 let ctx: PortalContext;
 const savedEnv: Record<string, string | undefined> = {};
 
 beforeAll(async () => {
   ctx = await seededPortal();
-  for (const key of ["LOAD_BUILDER_SECRET", "LOAD_STATUS_WEBHOOK_SECRET", "EMAIL_FROM", "EMAIL_API_KEY", "EMAIL_API_URL", "SLACK_NEW_LOADS_WEBHOOK_URL"]) {
+  for (const key of ["LOAD_BUILDER_SECRET", "LOAD_STATUS_WEBHOOK_SECRET", "SMTP_USER", "SMTP_APP_PASSWORD", "SMTP_FROM_NAME", "SLACK_NEW_LOADS_WEBHOOK_URL"]) {
     savedEnv[key] = process.env[key];
   }
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  sendMail.mockReset();
+  sendMail.mockResolvedValue({ messageId: "test-message" });
+  createTransport.mockClear();
   process.env.LOAD_BUILDER_SECRET = SECRET;
   delete process.env.LOAD_STATUS_WEBHOOK_SECRET;
-  process.env.EMAIL_FROM = "portal@select.example";
-  process.env.EMAIL_API_KEY = EMAIL_KEY;
-  process.env.EMAIL_API_URL = "https://email.test/send";
+  process.env.SMTP_USER = SMTP_USER;
+  process.env.SMTP_APP_PASSWORD = SMTP_APP_PASSWORD;
+  delete process.env.SMTP_FROM_NAME;
   delete process.env.SLACK_NEW_LOADS_WEBHOOK_URL;
 });
 
@@ -153,13 +168,17 @@ describe("carrier assignment email", () => {
 
   it("does not store a carrier when email is not configured or the send fails", async () => {
     const order = await createLoad("SO-MAIL-DOWN");
-    delete process.env.EMAIL_API_KEY;
+    delete process.env.SMTP_APP_PASSWORD;
     const unconfigured = await postStatus({ orderId: order.id, carrierName: "Northline Freight", mcNumber: "445566" });
     expect(unconfigured.status).toBe(503);
-    process.env.EMAIL_API_KEY = EMAIL_KEY;
-    vi.stubGlobal("fetch", async () => new Response("no", { status: 500 }));
+    expect(createTransport).not.toHaveBeenCalled();
+    process.env.SMTP_APP_PASSWORD = SMTP_APP_PASSWORD;
+    sendMail.mockRejectedValueOnce(new Error("smtp down"));
     const bounced = await postStatus({ orderId: order.id, carrierName: "Northline Freight", mcNumber: "445566" });
     expect(bounced.status).toBe(503);
+    expect(createTransport).toHaveBeenCalledWith(
+      expect.objectContaining({ host: "smtp.gmail.com", port: 465, secure: true, auth: { user: SMTP_USER, pass: "abcdefghijklmnop" } }),
+    );
     const row = await ctx.db.prepare(`SELECT carrier_name, carrier_notice_log FROM loads WHERE id = ?`).get(order.id);
     expect(row?.carrier_name ?? null).toBeNull();
     expect(row?.carrier_notice_log ?? null).toBeNull();
@@ -167,16 +186,6 @@ describe("carrier assignment email", () => {
 
   it("emails on the first assignment, again when the carrier changes, and not when the same carrier is resent", async () => {
     const order = await createLoad("SO-CARRIER");
-    const calls: Array<{ url: string; auth: string; body: { from: string; to: string[]; subject: string; text: string } }> = [];
-    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
-      const headers = new Headers(init?.headers);
-      calls.push({
-        url: String(url),
-        auth: headers.get("authorization") ?? "",
-        body: JSON.parse(String(init?.body)),
-      });
-      return new Response("ok", { status: 200 });
-    });
 
     const noSecret = await postStatus({ orderId: order.id, loadNumber: "459100-1" }, null);
     expect(noSecret.status).toBe(401);
@@ -190,42 +199,47 @@ describe("carrier assignment email", () => {
       salesOrderNumber: "SO-CARRIER",
       loadNumber: "459100-1",
     });
-    expect(calls).toHaveLength(0);
+    expect(sendMail).not.toHaveBeenCalled();
 
     const assigned = await postStatus({ orderId: order.id, carrierName: "Northline Freight", mcNumber: "MC 445566" });
     expect(assigned.status).toBe(200);
     expect((await assigned.json()).notice).toBe("assigned");
-    expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe("https://email.test/send");
-    expect(calls[0].auth).toBe(`Bearer ${EMAIL_KEY}`);
-    expect(calls[0].body.from).toBe("portal@select.example");
-    expect(calls[0].body.to).toEqual(["m.gray@emit.example"]);
-    expect(calls[0].body.subject).toBe("Carrier assigned for SO-CARRIER");
-    expect(calls[0].body.text).toContain("SO number: SO-CARRIER");
-    expect(calls[0].body.text).toContain(`Order: ${order.id}`);
-    expect(calls[0].body.text).toContain("Select load: 459100-1");
-    expect(calls[0].body.text).toContain("Pickup: Sheridan, WY on 2026-11-10");
-    expect(calls[0].body.text).toContain("Delivery: Houston, TX on 2026-11-12");
-    expect(calls[0].body.text).toContain("Carrier: Northline Freight");
-    expect(calls[0].body.text).toContain("MC: 445566");
-    expect(calls[0].body.text).toContain("This is a new carrier assignment.");
-    expect(calls[0].body.text).not.toMatch(/pay|rate|\$|2400|gate code/i);
+    expect(createTransport).toHaveBeenCalledWith(
+      expect.objectContaining({ host: "smtp.gmail.com", port: 465, secure: true, auth: { user: SMTP_USER, pass: "abcdefghijklmnop" } }),
+    );
+    expect(sendMail).toHaveBeenCalledTimes(1);
+    const first = sendMail.mock.calls[0][0];
+    expect(first.from).toBe("Select Transport <mgray@goselect.com>");
+    expect(first.to).toBe("m.gray@emit.example");
+    expect(first.subject).toBe("Carrier assigned for SO-CARRIER");
+    expect(first.text).toContain("SO number: SO-CARRIER");
+    expect(first.text).toContain(`Order: ${order.id}`);
+    expect(first.text).toContain("Select load: 459100-1");
+    expect(first.text).toContain("Pickup: Sheridan, WY on 2026-11-10");
+    expect(first.text).toContain("Delivery: Houston, TX on 2026-11-12");
+    expect(first.text).toContain("Carrier: Northline Freight");
+    expect(first.text).toContain("MC: 445566");
+    expect(first.text).toContain("This is a new carrier assignment.");
+    expect(first.text).not.toMatch(/pay|rate|\$|2400|gate code/i);
+    expect(JSON.stringify(first)).not.toMatch(/carrierPay|carrier_pay|customerCost|rateReason/);
 
     const duplicate = await postStatus({ orderId: order.id, carrierName: " northline   freight ", mcNumber: "mc-445566" });
     expect(duplicate.status).toBe(200);
     expect((await duplicate.json()).notice).toBe("unchanged");
-    expect(calls).toHaveLength(1);
+    expect(sendMail).toHaveBeenCalledTimes(1);
 
     const changed = await postStatus({ orderId: order.id, carrierName: "Red Mesa Transport", mcNumber: "778899" });
     expect(changed.status).toBe(200);
     expect((await changed.json()).notice).toBe("changed");
-    expect(calls).toHaveLength(2);
-    expect(calls[1].body.subject).toBe("Carrier changed for SO-CARRIER");
-    expect(calls[1].body.text).toContain("The assigned carrier changed.");
-    expect(calls[1].body.text).toContain("Carrier: Red Mesa Transport");
-    expect(calls[1].body.text).toContain("MC: 778899");
-    expect(calls[1].body.text).not.toMatch(/pay|rate|\$|2400|gate code/i);
-    expect(JSON.stringify(calls[1].body)).not.toMatch(/carrierPay|carrier_pay|customerCost|rateReason/);
+    expect(sendMail).toHaveBeenCalledTimes(2);
+    const second = sendMail.mock.calls[1][0];
+    expect(second.from).toBe("Select Transport <mgray@goselect.com>");
+    expect(second.subject).toBe("Carrier changed for SO-CARRIER");
+    expect(second.text).toContain("The assigned carrier changed.");
+    expect(second.text).toContain("Carrier: Red Mesa Transport");
+    expect(second.text).toContain("MC: 778899");
+    expect(second.text).not.toMatch(/pay|rate|\$|2400|gate code/i);
+    expect(JSON.stringify(second)).not.toMatch(/carrierPay|carrier_pay|customerCost|rateReason/);
 
     const viewer = await sessionCookie({
       userId: "emit-viewer-1",
@@ -278,5 +292,20 @@ describe("carrier email copy", () => {
     expect(mail.text).toContain("This is a new carrier assignment.");
     expect(mail.text).toContain("Select load: Pending");
     expect(mail.text).not.toMatch(/pay|rate|\$/i);
+  });
+
+  it("builds the Gmail from line and ignores spaces in the app password", () => {
+    expect(emailConfig({ SMTP_USER: "mgray@goselect.com", SMTP_APP_PASSWORD: "abcd efgh ijkl mnop" })).toMatchObject({
+      user: "mgray@goselect.com",
+      password: "abcdefghijklmnop",
+      fromName: "Select Transport",
+      from: "Select Transport <mgray@goselect.com>",
+    });
+    expect(emailConfig({ SMTP_USER: "mgray@goselect.com", SMTP_APP_PASSWORD: "abcdefghijklmnop", SMTP_FROM_NAME: "Dispatch" })?.from).toBe(
+      "Dispatch <mgray@goselect.com>",
+    );
+    expect(emailConfig({ SMTP_USER: "mgray@goselect.com" })).toBeNull();
+    expect(emailConfig({ SMTP_APP_PASSWORD: "abcdefghijklmnop" })).toBeNull();
+    expect(emailConfig({ SMTP_USER: "mgray@goselect.com", SMTP_APP_PASSWORD: "short" })).toBeNull();
   });
 });

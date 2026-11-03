@@ -175,7 +175,7 @@ The portal also sends `hd=goselect.com` so the Google screen prefers the Select 
 
 Microsoft is not part of go-live. If EMIT asks for it later: app registration, type Web, single tenant, redirect URI `{PORTAL_PUBLIC_URL}/api/auth/microsoft/callback`, scopes `openid`, `profile`, `email`, and the three `AZURE_AD_*` values. Leave them blank until then.
 
-Order confirmation email has been removed. There is no Gmail client and no outbox.
+Order confirmation email has been removed. There is no Gmail API client and no outbox. A carrier assignment uses Gmail SMTP with an app password, and that message has no pay.
 
 ## Hosting
 
