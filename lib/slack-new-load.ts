@@ -64,14 +64,17 @@ function ownerNotice(order: CustomerOrder): { owner: LoadOwner; needsCheck: bool
   });
 }
 
-/** Post a new-load note when the webhook is set. A missing URL or a failed post does not fail the load. */
+/**
+ * Post a new-load note when the webhook is set. A missing URL or a failed post does not fail the load.
+ * Returns true only when Slack accepts the note. The text is unchanged.
+ */
 export async function notifyNewLoad(
   order: CustomerOrder,
   enteredBy: { name: string; email: string },
   fetchImpl: typeof fetch = fetch,
-): Promise<void> {
+): Promise<boolean> {
   const url = newLoadWebhookUrl();
-  if (!url) return;
+  if (!url) return false;
   const notice: NewLoadNotice = {
     salesOrderNumber: order.salesOrderNumber,
     originCity: order.origin.city,
@@ -84,13 +87,15 @@ export async function notifyNewLoad(
     enteredByEmail: enteredBy.email,
   };
   try {
-    await fetchImpl(url, {
+    const response = await fetchImpl(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ text: newLoadSlackText(notice) }),
       signal: AbortSignal.timeout(8_000),
     });
+    return response.ok;
   } catch {
     /* The load is already saved. Slack can miss a note without losing the order. */
+    return false;
   }
 }

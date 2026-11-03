@@ -124,7 +124,9 @@ describe("preview database upgrade", () => {
 
   async function expectLoads(db: SqlDatabase) {
     const columns = (await db.prepare(`PRAGMA table_info(loads)`).all()).map((column) => String(column.name));
-    expect(columns).toEqual(expect.arrayContaining(["sam_build_status", "sam_build_error", "sam_build_at"]));
+    expect(columns).toEqual(
+      expect.arrayContaining(["sam_build_status", "sam_build_error", "sam_build_at", "slack_notified_at", "carrier_name", "carrier_mc", "carrier_notice_log"]),
+    );
     const ctx: PortalContext = { db, now: () => new Date("2026-10-21T18:00:00Z") };
     for (const tab of ["attention", "active", "delivered", "history"] as const) {
       const board = await listBoard(ctx, { tab, page: 1, pageSize: 25 });

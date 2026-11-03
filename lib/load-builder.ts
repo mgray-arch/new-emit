@@ -1,14 +1,12 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
+import { recordCarrierAssignment, type CarrierNoticeResult, type CarrierUpdate } from "@/lib/carrier-notice";
 import type { PortalContext } from "@/lib/db";
 import { PortalError } from "@/lib/http";
 import { getOrder } from "@/lib/orders";
 import { assignSelectLoadNumber, parseSelectLoadNumber } from "@/lib/select-load";
-import { assignLoadOwner, type LoadOwner } from "@/lib/load-owner";
-import { slackUserIdForOwner } from "@/lib/slack-new-load";
 import type { CustomerOrder } from "@/lib/types";
 
 const MIN_KEY_LENGTH = 16;
-const BUILDING_WINDOW_MS = 2 * 60 * 1000;
 const CALLBACK_LIMIT = 60;
 const CALLBACK_WINDOW_MS = 60 * 1000;
 
@@ -22,152 +20,36 @@ function tokenMatches(presented: string, expected: string): boolean {
   return timingSafeEqual(actual, wanted);
 }
 
-export function loadBuilderSecret(): string {
-  return process.env.LOAD_BUILDER_SECRET ?? "";
+function presentedBearer(req: Request): string {
+  const header = req.headers.get("authorization") ?? "";
+  return header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
 }
 
-/** Bearer secret only. A session cookie is not enough, and a short or missing secret never matches. */
+/**
+ * Bearer secret only. A session cookie is not enough, and a short or missing secret never matches.
+ * Either LOAD_BUILDER_SECRET or LOAD_STATUS_WEBHOOK_SECRET is accepted. Both are checked.
+ */
 export function loadBuilderSecretMatches(req: Request): boolean {
-  const expected = loadBuilderSecret();
-  const header = req.headers.get("authorization") ?? "";
-  const presented = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
-  if (expected.length < MIN_KEY_LENGTH) {
+  const presented = presentedBearer(req);
+  const secrets = [process.env.LOAD_BUILDER_SECRET ?? "", process.env.LOAD_STATUS_WEBHOOK_SECRET ?? ""].filter(
+    (secret) => secret.length >= MIN_KEY_LENGTH,
+  );
+  if (secrets.length === 0) {
     const standIn = "x".repeat(MIN_KEY_LENGTH);
     tokenMatches(presented || standIn, standIn);
     return false;
   }
-  return tokenMatches(presented, expected);
+  let matched = false;
+  for (const secret of secrets) {
+    if (tokenMatches(presented, secret)) matched = true;
+  }
+  return matched;
 }
 
-export function loadBuilderConfigured(): boolean {
-  const url = process.env.LOAD_BUILDER_WEBHOOK_URL?.trim() ?? "";
-  return url.startsWith("https://") || url.startsWith("http://");
-}
-
-/** Drew's Slack member id, used when SLACK_USER_ID_DREW is not set. */
-export const DREW_SLACK_USER_ID = "U0AGS6MDBL1";
-
-export interface LoadBuilderOwner {
-  name: LoadOwner;
-  /** Slack member id to tag, or null when unknown (tag by name in plain text). */
-  slackUserId: string | null;
-}
-
-/**
- * The same owner the portal assigns and shows: the stored owner, or the
- * load-owner rule from equipment and final delivery state for older loads.
- */
-export function loadBuilderOwner(
-  order: CustomerOrder,
-  env: Record<string, string | undefined> = process.env,
-): LoadBuilderOwner {
-  const lastStop = order.stops[order.stops.length - 1];
-  const name: LoadOwner =
-    order.owner ?? assignLoadOwner({ destinationState: lastStop?.place.state, equipment: order.truckType }).owner;
-  const fromEnv = slackUserIdForOwner(name, env);
-  return { name, slackUserId: fromEnv ?? (name === "Drew" ? DREW_SLACK_USER_ID : null) };
-}
-
-/**
- * What the Load Builder bot receives. An allowlist, so carrier pay cannot ride along
- * even if it is later added to the stored order.
- */
-export function loadBuilderPayload(order: CustomerOrder): Record<string, unknown> {
-  return {
-    orderId: order.id,
-    salesOrderNumber: order.salesOrderNumber,
-    portalStatus: order.portalStatus,
-    stops: order.stops.map((stop) => ({
-      kind: stop.kind,
-      company: stop.place.company,
-      address1: stop.place.address1,
-      address2: stop.place.address2 ?? "",
-      city: stop.place.city,
-      state: stop.place.state,
-      postalCode: stop.place.postalCode,
-      country: stop.place.country,
-    })),
-    truckType: order.truckType,
-    transit: order.transit,
-    shipDate: order.shipDate,
-    shipTime: order.shipTime,
-    mustDeliverDate: order.mustDeliverDate,
-    truckEta: order.truckEta,
-    customerCost: order.customerCost ?? null,
-    rateReason: order.rateReason ?? null,
-    comments: order.comments,
-    createdBy: order.createdBy,
-    owner: loadBuilderOwner(order),
-  };
-}
-
-async function markBuild(
-  ctx: PortalContext,
-  orderId: string,
-  status: "building" | "failed" | null,
-  error: string | null,
-): Promise<void> {
+async function markBuild(ctx: PortalContext, orderId: string): Promise<void> {
   await ctx.db
-    .prepare(`UPDATE loads SET sam_build_status = ?, sam_build_error = ?, sam_build_at = ?, updated_at = ? WHERE id = ?`)
-    .run(status, error, status ? ctx.now().toISOString() : null, ctx.now().toISOString(), orderId);
-}
-
-export async function requestLoadBuild(
-  ctx: PortalContext,
-  orderId: string,
-  fetchImpl: typeof fetch = fetch,
-): Promise<CustomerOrder> {
-  const order = await getOrder(ctx, orderId);
-  if (!order) throw new PortalError("Order not found", 404);
-  if (order.loadNumber) return order;
-  const url = process.env.LOAD_BUILDER_WEBHOOK_URL?.trim() ?? "";
-  if (!loadBuilderConfigured()) {
-    throw new PortalError(
-      "LOAD_BUILDER_WEBHOOK_URL is not set. In Vercel, add it for this environment and redeploy. The load was not sent.",
-      503,
-    );
-  }
-  if (loadBuilderSecret().length < MIN_KEY_LENGTH) {
-    throw new PortalError(
-      "LOAD_BUILDER_SECRET is missing or shorter than 16 characters. Add it in Vercel and redeploy. The load was not sent.",
-      503,
-    );
-  }
-  if (order.samBuildStatus === "building" && order.samBuildError == null) {
-    const row = await ctx.db.prepare(`SELECT sam_build_at FROM loads WHERE id = ?`).get(orderId);
-    const at = Date.parse(String(row?.sam_build_at ?? ""));
-    if (Number.isFinite(at) && ctx.now().getTime() - at < BUILDING_WINDOW_MS) {
-      throw new PortalError("This load is already being built in SAM.", 409);
-    }
-  }
-  await markBuild(ctx, orderId, "building", null);
-  const payload = loadBuilderPayload(order);
-  let response: Response;
-  try {
-    response = await fetchImpl(url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${loadBuilderSecret()}`,
-      },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(20_000),
-    });
-  } catch {
-    await markBuild(ctx, orderId, "failed", "The Load Builder bot did not answer. Try again.");
-    const failed = await getOrder(ctx, orderId);
-    if (!failed) throw new PortalError("Order not found", 404);
-    return failed;
-  }
-  if (!response.ok) {
-    await markBuild(ctx, orderId, "failed", `The Load Builder bot returned ${response.status}. Try again.`);
-    const failed = await getOrder(ctx, orderId);
-    if (!failed) throw new PortalError("Order not found", 404);
-    return failed;
-  }
-  const building = await getOrder(ctx, orderId);
-  if (!building) throw new PortalError("Order not found", 404);
-  return building;
+    .prepare(`UPDATE loads SET sam_build_status = NULL, sam_build_error = NULL, sam_build_at = NULL, updated_at = ? WHERE id = ?`)
+    .run(ctx.now().toISOString(), orderId);
 }
 
 export async function consumeLoadBuilderCallback(
@@ -212,7 +94,32 @@ export async function acceptBuiltLoadNumber(
     throw new PortalError("This load already has a different Select load number.", 409);
   }
   const saved = current.loadNumber === parsed ? current : await assignSelectLoadNumber(ctx, id, parsed, "sam");
-  await markBuild(ctx, id, null, null);
+  await markBuild(ctx, id);
   const done = await getOrder(ctx, id);
   return done ?? saved;
+}
+
+export async function applyLoadStatus(
+  ctx: PortalContext,
+  input: {
+    orderId?: string;
+    salesOrderNumber?: string;
+    loadNumber?: string;
+    carrier: CarrierUpdate | null;
+  },
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ order: CustomerOrder; notice: CarrierNoticeResult | null }> {
+  const id = await orderIdForCallback(ctx, input.orderId?.trim() ?? "", input.salesOrderNumber?.trim() ?? "");
+  if (input.loadNumber?.trim()) {
+    await acceptBuiltLoadNumber(ctx, { orderId: id, loadNumber: input.loadNumber });
+  }
+  let notice: CarrierNoticeResult | null = null;
+  if (input.carrier) {
+    const current = await getOrder(ctx, id);
+    if (!current) throw new PortalError("Order not found", 404);
+    notice = await recordCarrierAssignment(ctx, current, input.carrier, fetchImpl);
+  }
+  const order = await getOrder(ctx, id);
+  if (!order) throw new PortalError("Order not found", 404);
+  return { order, notice };
 }

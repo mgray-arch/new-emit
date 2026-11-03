@@ -382,14 +382,16 @@ td select {
   color: #1c1916;
   border-color: #7a5b10;
 }
-.sam-build { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: 100%; }
-.sam-state {
-  font-size: 12px;
+.build-status {
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--muted);
 }
+.build-status[data-build-status="built"] { color: var(--text); }
+.notice-log { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; gap: 10px; }
+.notice-log p { margin: 2px 0 0; }
 .demo-hint { background: #241c14; border: 1px solid #4a3824; border-radius: 10px; padding: 10px 12px; color: #f0d3a4; font-size: 13px; margin: 12px 0; }
 .demo-hint p { margin: 3px 0; }
 .error { color: var(--danger); font-size: 15px; margin: 0 0 8px; }
@@ -893,8 +895,7 @@ html[data-theme="light"] .pill.status-cancelled { background: #efe8dc; color: #3
   .actions .btn { flex: 1 1 160px; text-align: center; }
   .view-as-bar { align-items: stretch; }
   .view-as-bar .btn { flex: 1 1 100%; }
-  .sam-build { display: flex; width: 100%; }
-  .sam-build .btn, .sam-build a.btn { flex: 1 1 auto; text-align: center; }
+  .build-status { display: flex; }
 }
 .thread {
   display: flex;

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import DocumentLinks from "@/components/document-links";
 import LoadForm, { draftFromOrder, emptyDraft, payloadFromDraft, useSites, type Draft } from "@/components/load-form";
-import SamBuildButton from "@/components/sam-build-button";
+import BuildStatus from "@/components/build-status";
 import PhotoGallery from "@/components/photo-gallery";
 import SelectLoadField from "@/components/select-load-field";
 import StatusPill from "@/components/status-pill";
@@ -535,6 +535,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                     {order.stops.length > 2 ? ` · ${order.stops.length} stops` : ""} · {fileSummary({ ...order, pendingReviewCount: 0 })}
                   </div>
                   <div className="load-meta">Entered by: {formatEnteredBy(order.enteredByName, order.enteredByEmail)}</div>
+                  <BuildStatus status={order.buildStatus} />
                   {selectView ? (
                     <div className="load-meta">
                       Owner: {order.owner ?? "Not set"}
@@ -547,7 +548,6 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                   ) : null}
                   {order.comments ? <Note text={order.comments} /> : null}
                   <div className="load-row-actions">
-                    {selectView ? <SamBuildButton order={order} onUpdated={replaceOrder} /> : null}
                     <TrackLink href={order.trackingLink} />
                     {showPricing && (
                       <span className="load-meta">
@@ -629,13 +629,13 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                   <b>Select load {formatLoadNumber(submitted.loadNumber)}</b>
                 </div>
                 <p className="mini">
-                  This screen is the confirmation. No email is sent. The Select load number stays pending until a Select admin enters the number from SAM.
+                  This screen is the confirmation. Submitting an order does not send email. The Select load number stays pending until it is stored from SAM.
                 </p>
               </div>
             )}
             {selectView && editing && (
               <>
-                <SamBuildButton order={editing} onUpdated={replaceOrder} />
+                <BuildStatus status={editing.buildStatus} />
                 <SelectLoadField
                   orderId={editing.id}
                   loadNumber={editing.loadNumber}

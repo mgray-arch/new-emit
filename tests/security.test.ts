@@ -40,7 +40,8 @@ const ADVERSARIAL = [
 
 describe("carrier pay never reaches EMIT", () => {
   it("keeps carrier columns out of the customer SQL", () => {
-    expect(CUSTOMER_LOAD_COLUMNS.toLowerCase()).not.toMatch(/carrier|staff_notes/);
+    expect(CUSTOMER_LOAD_COLUMNS.toLowerCase()).not.toMatch(/carrier_pay|carrier_name|carrier_mc|carrier_cost|carrier_rate|staff_notes/);
+    expect(CUSTOMER_LOAD_COLUMNS.toLowerCase()).toContain("carrier_notice_log");
     expect(CUSTOMER_DOCUMENT_READ_SQL.toLowerCase()).not.toContain("internal_documents");
   });
 
@@ -117,9 +118,11 @@ describe("carrier pay never reaches EMIT", () => {
     for (const table of tables) {
       const columns = (await ctx.db.prepare(`PRAGMA table_info(${table.name})`).all()) as Array<{ name: string }>;
       for (const column of columns) {
-        expect(column.name.toLowerCase()).not.toMatch(/carrier_pay|carrier_name|carrier_mc|staff_notes|carrier_cost|carrier_rate/);
+        const name = column.name.toLowerCase();
+        expect(name).not.toMatch(/carrier_pay|staff_notes|carrier_cost|carrier_rate/);
+        if (name === "carrier_name" || name === "carrier_mc") expect(table.name).toBe("loads");
       }
-      expect((table.sql || "").toLowerCase()).not.toMatch(/carrier_pay|carrier_name|carrier_mc|staff_notes/);
+      expect((table.sql || "").toLowerCase()).not.toMatch(/carrier_pay|staff_notes|carrier_cost|carrier_rate/);
       if (table.name === "customer_documents" || table.name === "internal_documents" || table.name === "carrier_photos") {
         const names = columns.map((column) => column.name);
         expect(names).toContain("storage_key");

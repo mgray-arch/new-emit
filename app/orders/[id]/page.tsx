@@ -6,7 +6,8 @@ import { useParams } from "next/navigation";
 import DocumentLinks from "@/components/document-links";
 import LoadOwnerField from "@/components/load-owner-field";
 import PhotoGallery from "@/components/photo-gallery";
-import SamBuildButton from "@/components/sam-build-button";
+import BuildStatus from "@/components/build-status";
+import OrderHistory from "@/components/order-history";
 import SelectLoadField from "@/components/select-load-field";
 import Shell from "@/components/shell";
 import StatusPill from "@/components/status-pill";
@@ -93,6 +94,7 @@ export default function OrderPage() {
             <p className="lede">
               {order.salesOrderNumber} · Select load {formatLoadNumber(order.loadNumber)}
             </p>
+            <BuildStatus status={order.buildStatus} />
             {me?.chatEnabled ? (
               <p>
                 <Link href={`/messages?load=${order.id}`} className="text-link">
@@ -111,17 +113,9 @@ export default function OrderPage() {
               </div>
             </div>
             {!order.loadNumber && (
-              <p className="mini">Select has not entered the load number yet. This page is the confirmation. No email is sent.</p>
+              <p className="mini">The SAM load number is not stored yet. This page is the confirmation. Submitting an order does not send email.</p>
             )}
             <div className="load-row-actions">
-              {selectView ? (
-                <SamBuildButton
-                  order={order}
-                  onUpdated={(next) => {
-                    setOrder(next);
-                  }}
-                />
-              ) : null}
               <TrackLink href={order.trackingLink} />
               {allowLoads ? (
                 readOnly ? (
@@ -141,6 +135,8 @@ export default function OrderPage() {
               <Timeline order={order} />
               <p className="mini">Latest ETA: {order.latestEta ? formatWhen(order.latestEta) : "Not posted yet"}</p>
             </section>
+
+            <OrderHistory notices={order.notices} />
 
             <section className="detail-section">
               <h2>Stops</h2>
