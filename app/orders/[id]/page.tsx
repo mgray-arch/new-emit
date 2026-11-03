@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import CarrierCallout from "@/components/carrier-callout";
 import DocumentLinks from "@/components/document-links";
 import LoadOwnerField from "@/components/load-owner-field";
 import PhotoGallery from "@/components/photo-gallery";
@@ -95,6 +96,7 @@ export default function OrderPage() {
               {order.salesOrderNumber} · Select load {formatLoadNumber(order.loadNumber)}
             </p>
             <BuildStatus status={order.buildStatus} />
+            {order.haulCallout ? <CarrierCallout haul={order.haulCallout} badge={order.carrierBadge} /> : null}
             {me?.chatEnabled ? (
               <p>
                 <Link href={`/messages?load=${order.id}`} className="text-link">
@@ -117,6 +119,9 @@ export default function OrderPage() {
             )}
             <div className="load-row-actions">
               <TrackLink href={order.trackingLink} />
+              <button className="btn secondary" type="button" onClick={() => window.print()}>
+                Print
+              </button>
               {allowLoads ? (
                 readOnly ? (
                   <button className="btn secondary" type="button" disabled title="Read-only preview">

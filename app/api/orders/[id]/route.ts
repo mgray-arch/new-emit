@@ -1,3 +1,4 @@
+import { badgeForOrder, latestNotice, markCarrierSeen, seenMap } from "@/lib/carrier-seen";
 import { presentCustomerOrder } from "@/lib/customer-view";
 import { errorResponse, json } from "@/lib/http";
 import { isSession, requireSession } from "@/lib/guard";
@@ -16,7 +17,11 @@ export async function GET(req: Request, context: { params: Promise<{ id: string 
     const ctx = await readyPortal();
     const order = await getOrder(ctx, id);
     if (!order) return json({ error: "Order not found" }, 404);
-    return json({ order: presentCustomerOrder(order, session) });
+    const seen = await seenMap(ctx, session.userId);
+    const carrierBadge = badgeForOrder(order, seen);
+    const latest = latestNotice(order.notices);
+    if (latest?.at) await markCarrierSeen(ctx, session.userId, order.id, latest.at);
+    return json({ order: presentCustomerOrder(order, session, { carrierBadge }) });
   } catch (error) {
     return errorResponse(error);
   }

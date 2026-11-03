@@ -148,14 +148,14 @@ describe("production sign-in and an empty database", () => {
   });
 
   it("keeps password sign-in on with no break-glass flag and no Gmail sender", async () => {
-    expect(existsSync("lib/email.ts")).toBe(true);
+    expect(existsSync("lib/email.ts")).toBe(false);
     const loginSource = readFileSync("app/api/auth/login/route.ts", "utf8");
     expect(loginSource).not.toMatch(/ALLOW_PASSWORD_LOGIN|passwordLoginAllowed|DEMO_SEED/);
     const lib = readdirSync("lib")
       .filter((name) => name.endsWith(".ts"))
       .map((name) => readFileSync(path.join("lib", name), "utf8"))
       .join("\n");
-    expect(lib).not.toMatch(/gmail\.googleapis|GMAIL_CLIENT|GMAIL_REFRESH|sendOrderConfirmation|nextLoadNumber/);
+    expect(lib).not.toMatch(/gmail\.googleapis|GMAIL_CLIENT|GMAIL_REFRESH|sendOrderConfirmation|nextLoadNumber|EMAIL_FROM|EMAIL_API_KEY|EMAIL_API_URL|api\.resend\.com|sendEmail/);
     expect(readFileSync("lib/orders.ts", "utf8")).not.toMatch(/sendEmail|EMAIL_FROM/);
     process.env.DEMO_SEED = "false";
     delete process.env.ALLOW_PASSWORD_LOGIN;

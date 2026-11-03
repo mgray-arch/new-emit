@@ -38,6 +38,10 @@ export interface OrderFilter {
   grouped?: boolean;
   /** Internal. The CSV export asks for every matching row. */
   exportAll?: boolean;
+  /** Limit the list to these load ids. An empty list matches nothing. */
+  ids?: string[] | null;
+  /** Skip the tab filter so a carrier-update list can include every list. */
+  acrossTabs?: boolean;
 }
 
 export interface OrderPage {
@@ -292,6 +296,14 @@ function buildWhere(filter: OrderFilter, today: string): { sql: string; params: 
     );
     params.push(like, like, like, like, like);
   }
+  if (filter.ids) {
+    if (filter.ids.length === 0) {
+      clauses.push("1 = 0");
+    } else {
+      clauses.push(`id IN (${filter.ids.map(() => "?").join(", ")})`);
+      params.push(...filter.ids);
+    }
+  }
   return { sql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
 }
 
@@ -389,10 +401,11 @@ export async function listBoard(ctx: PortalContext, filter: OrderFilter & { tab?
   const includeAttention = includeAttentionList(filter);
   const tab: LoadTab = resolvedTab(filter.tab ?? (includeAttention ? "attention" : "active"), includeAttention);
   const searching = Boolean(filter.q && filter.q.trim());
+  const across = searching || filter.acrossTabs === true;
   const page = await listOrders(ctx, {
     ...filter,
     includeAttention,
-    tab: searching ? null : tab,
+    tab: across ? null : tab,
     grouped: true,
   });
   const names = await ctx.db
@@ -405,11 +418,11 @@ export async function listBoard(ctx: PortalContext, filter: OrderFilter & { tab?
     .all();
   return {
     ...page,
-    counts: await countTabs(ctx, filter, today),
+    counts: await countTabs(ctx, { ...filter, ids: undefined, acrossTabs: undefined }, today),
     today,
     tomorrow,
     weekEnd,
-    scope: searching ? "all" : "tab",
+    scope: across ? "all" : "tab",
     tab,
     receivers: names.map((row) => String(row.company)).filter(Boolean),
   };

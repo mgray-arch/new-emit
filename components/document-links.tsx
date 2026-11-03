@@ -23,6 +23,9 @@ export default function DocumentLinks({ doc, label }: { doc: CustomerDocument; l
       >
         Download
       </a>
+      <a href={`/api/documents/${doc.id}/print`} target="_blank" rel="noopener noreferrer" aria-label={`Print ${doc.filename}`}>
+        Print
+      </a>
     </div>
   );
 }

@@ -6,15 +6,20 @@ import { POST as samCallback } from "@/app/api/integrations/sam-load/route";
 import { GET as getOrderRoute } from "@/app/api/orders/[id]/route";
 import { GET as listOrdersRoute, POST as createOrderRoute } from "@/app/api/orders/route";
 import BuildStatus from "@/components/build-status";
+import CarrierBadge from "@/components/carrier-badge";
+import CarrierCallout from "@/components/carrier-callout";
 import OrderHistory from "@/components/order-history";
+import UpdateBanner from "@/components/update-banner";
+import { GET as updatesRoute } from "@/app/api/updates/route";
 import { buildStatusLabel } from "@/lib/build-status";
-import { carrierEmail, findRateField, sameCarrier } from "@/lib/carrier-notice";
+import { findRateField, historyText, sameCarrier } from "@/lib/carrier-notice";
+import { carrierBadgeLabel, updateBannerText } from "@/lib/carrier-seen";
+import { documentPrintHtml } from "@/lib/document-print";
 import type { PortalContext } from "@/lib/db";
 import type { CustomerOrder } from "@/lib/types";
 import { adminSession, customerSession, expectNoSecrets, seededPortal, sessionCookie } from "./helpers";
 
 const SECRET = "status-secret-0123456789";
-const EMAIL_KEY = "email-key-0123456789abcd";
 
 let ctx: PortalContext;
 const savedEnv: Record<string, string | undefined> = {};
@@ -30,9 +35,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
   process.env.LOAD_BUILDER_SECRET = SECRET;
   delete process.env.LOAD_STATUS_WEBHOOK_SECRET;
-  process.env.EMAIL_FROM = "portal@select.example";
-  process.env.EMAIL_API_KEY = EMAIL_KEY;
-  process.env.EMAIL_API_URL = "https://email.test/send";
+  delete process.env.EMAIL_FROM;
+  delete process.env.EMAIL_API_KEY;
+  delete process.env.EMAIL_API_URL;
   delete process.env.SLACK_NEW_LOADS_WEBHOOK_URL;
 });
 
@@ -101,13 +106,27 @@ describe("build status label", () => {
     expect(renderToStaticMarkup(createElement(BuildStatus, { status: null }))).toBe("");
     const history = renderToStaticMarkup(
       createElement(OrderHistory, {
-        notices: [{ at: "2026-11-03T16:00:00.000Z", kind: "assigned", text: "New carrier assignment email sent to m.gray@emit.example. Carrier: Northline Freight. MC 445566." }],
+        notices: [{ at: "2026-11-03T16:00:00.000Z", kind: "assigned", text: "Carrier assigned: Northline Freight. MC 445566." }],
       }),
     );
     expect(history).toContain("History");
     expect(history).toContain("Northline Freight");
     expect(history).toContain("445566");
-    expect(history).not.toMatch(/pay|rate|\$/i);
+    expect(history).toContain('dateTime="2026-11-03T16:00:00.000Z"');
+    expect(history).not.toMatch(/pay|rate|\$|email/i);
+    const callout = renderToStaticMarkup(
+      createElement(CarrierCallout, {
+        haul: { company: "Northline Freight", mc: "445566", at: "2026-11-03T16:00:00.000Z", kind: "assigned" },
+        badge: "assigned",
+      }),
+    );
+    expect(callout).toContain("Northline Freight");
+    expect(callout).toContain("MC 445566");
+    expect(callout).toContain("Carrier assigned");
+    expect(callout).not.toMatch(/pay|rate|\$/i);
+    expect(renderToStaticMarkup(createElement(CarrierBadge, { kind: "changed" }))).toContain("Carrier changed");
+    expect(renderToStaticMarkup(createElement(UpdateBanner, { count: 2 }))).toContain("2 orders updated since your last visit");
+    expect(renderToStaticMarkup(createElement(UpdateBanner, { count: 0 }))).toBe("");
   });
 
   it("removes the SAM build control from the list and the load page", () => {
@@ -124,7 +143,7 @@ describe("build status label", () => {
   });
 });
 
-describe("carrier assignment email", () => {
+describe("carrier assignment in the portal", () => {
   it("rejects rate fields and does not store them", async () => {
     const order = await createLoad("SO-RATE-NO");
     expect(findRateField({ carrierPay: 1 })).toBe("carrierPay");
@@ -151,31 +170,33 @@ describe("carrier assignment email", () => {
     expect(row?.customer_cost_cents ?? null).toBeNull();
   });
 
-  it("does not store a carrier when email is not configured or the send fails", async () => {
-    const order = await createLoad("SO-MAIL-DOWN");
+  it("stores the carrier with no mail configuration and does not call a mail API", async () => {
+    const order = await createLoad("SO-NO-MAIL");
+    delete process.env.EMAIL_FROM;
     delete process.env.EMAIL_API_KEY;
-    const unconfigured = await postStatus({ orderId: order.id, carrierName: "Northline Freight", mcNumber: "445566" });
-    expect(unconfigured.status).toBe(503);
-    process.env.EMAIL_API_KEY = EMAIL_KEY;
-    vi.stubGlobal("fetch", async () => new Response("no", { status: 500 }));
-    const bounced = await postStatus({ orderId: order.id, carrierName: "Northline Freight", mcNumber: "445566" });
-    expect(bounced.status).toBe(503);
-    const row = await ctx.db.prepare(`SELECT carrier_name, carrier_notice_log FROM loads WHERE id = ?`).get(order.id);
-    expect(row?.carrier_name ?? null).toBeNull();
-    expect(row?.carrier_notice_log ?? null).toBeNull();
+    delete process.env.EMAIL_API_URL;
+    let calls = 0;
+    vi.stubGlobal("fetch", async () => {
+      calls += 1;
+      throw new Error("mail is not used");
+    });
+    const assigned = await postStatus({ orderId: order.id, carrierName: "Northline Freight", mcNumber: "445566" });
+    expect(assigned.status).toBe(200);
+    expect((await assigned.json()).notice).toBe("assigned");
+    expect(calls).toBe(0);
+    const row = await ctx.db.prepare(`SELECT carrier_name, carrier_mc, carrier_notice_log FROM loads WHERE id = ?`).get(order.id);
+    expect(row?.carrier_name).toBe("Northline Freight");
+    expect(row?.carrier_mc).toBe("445566");
+    expect(String(row?.carrier_notice_log)).toContain("Carrier assigned");
+    expect(String(row?.carrier_notice_log)).not.toMatch(/email|pay|rate|\$/i);
   });
 
-  it("emails on the first assignment, again when the carrier changes, and not when the same carrier is resent", async () => {
+  it("records the first assignment and a change once each, and shows a badge until that user opens the order", async () => {
     const order = await createLoad("SO-CARRIER");
-    const calls: Array<{ url: string; auth: string; body: { from: string; to: string[]; subject: string; text: string } }> = [];
-    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
-      const headers = new Headers(init?.headers);
-      calls.push({
-        url: String(url),
-        auth: headers.get("authorization") ?? "",
-        body: JSON.parse(String(init?.body)),
-      });
-      return new Response("ok", { status: 200 });
+    let calls = 0;
+    vi.stubGlobal("fetch", async () => {
+      calls += 1;
+      return new Response("no", { status: 500 });
     });
 
     const noSecret = await postStatus({ orderId: order.id, loadNumber: "459100-1" }, null);
@@ -190,43 +211,21 @@ describe("carrier assignment email", () => {
       salesOrderNumber: "SO-CARRIER",
       loadNumber: "459100-1",
     });
-    expect(calls).toHaveLength(0);
 
     const assigned = await postStatus({ orderId: order.id, carrierName: "Northline Freight", mcNumber: "MC 445566" });
     expect(assigned.status).toBe(200);
     expect((await assigned.json()).notice).toBe("assigned");
-    expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe("https://email.test/send");
-    expect(calls[0].auth).toBe(`Bearer ${EMAIL_KEY}`);
-    expect(calls[0].body.from).toBe("portal@select.example");
-    expect(calls[0].body.to).toEqual(["m.gray@emit.example"]);
-    expect(calls[0].body.subject).toBe("Carrier assigned for SO-CARRIER");
-    expect(calls[0].body.text).toContain("SO number: SO-CARRIER");
-    expect(calls[0].body.text).toContain(`Order: ${order.id}`);
-    expect(calls[0].body.text).toContain("Select load: 459100-1");
-    expect(calls[0].body.text).toContain("Pickup: Sheridan, WY on 2026-11-10");
-    expect(calls[0].body.text).toContain("Delivery: Houston, TX on 2026-11-12");
-    expect(calls[0].body.text).toContain("Carrier: Northline Freight");
-    expect(calls[0].body.text).toContain("MC: 445566");
-    expect(calls[0].body.text).toContain("This is a new carrier assignment.");
-    expect(calls[0].body.text).not.toMatch(/pay|rate|\$|2400|gate code/i);
 
     const duplicate = await postStatus({ orderId: order.id, carrierName: " northline   freight ", mcNumber: "mc-445566" });
     expect(duplicate.status).toBe(200);
     expect((await duplicate.json()).notice).toBe("unchanged");
-    expect(calls).toHaveLength(1);
 
     const changed = await postStatus({ orderId: order.id, carrierName: "Red Mesa Transport", mcNumber: "778899" });
     expect(changed.status).toBe(200);
     expect((await changed.json()).notice).toBe("changed");
-    expect(calls).toHaveLength(2);
-    expect(calls[1].body.subject).toBe("Carrier changed for SO-CARRIER");
-    expect(calls[1].body.text).toContain("The assigned carrier changed.");
-    expect(calls[1].body.text).toContain("Carrier: Red Mesa Transport");
-    expect(calls[1].body.text).toContain("MC: 778899");
-    expect(calls[1].body.text).not.toMatch(/pay|rate|\$|2400|gate code/i);
-    expect(JSON.stringify(calls[1].body)).not.toMatch(/carrierPay|carrier_pay|customerCost|rateReason/);
+    expect(calls).toBe(0);
 
+    const submitter = await sessionCookie(customerSession());
     const viewer = await sessionCookie({
       userId: "emit-viewer-1",
       email: "viewer@emit.example",
@@ -234,49 +233,104 @@ describe("carrier assignment email", () => {
       role: "emit_viewer",
       permission: "view",
     });
-    const detail = await getOrderRoute(new Request(`http://portal.test/api/orders/${order.id}`, { headers: headers(viewer) }), {
+
+    const before = await listOrdersRoute(new Request("http://portal.test/api/orders?q=SO-CARRIER", { headers: headers(submitter) }));
+    const beforeBody = await before.json();
+    const beforeRow = beforeBody.orders.find((item: CustomerOrder) => item.id === order.id);
+    expect(beforeRow.carrierBadge).toBe("changed");
+    expect(beforeRow.haulCallout.company).toBe("Red Mesa Transport");
+    expect(beforeRow.haulCallout.mc).toBe("778899");
+    expect(beforeBody.updatedCount).toBeGreaterThanOrEqual(1);
+    expect(JSON.stringify(beforeRow.haulCallout) + JSON.stringify(beforeRow.notices)).not.toMatch(/pay|rate|\$|email|gate code/i);
+    expect(JSON.stringify(beforeRow)).not.toMatch(/"carrier_name"|"carrier_mc"|carrierPay/);
+
+    const other = await listOrdersRoute(new Request("http://portal.test/api/orders?q=SO-CARRIER", { headers: headers(viewer) }));
+    const otherRow = (await other.json()).orders.find((item: CustomerOrder) => item.id === order.id);
+    expect(otherRow.carrierBadge).toBe("changed");
+
+    const detail = await getOrderRoute(new Request(`http://portal.test/api/orders/${order.id}`, { headers: headers(submitter) }), {
       params: Promise.resolve({ id: order.id }),
     });
     const seen = (await detail.json()).order as CustomerOrder;
     expect(seen.buildStatus).toBe("Built in SAM: 459100-1");
     expect(seen.notices?.map((notice) => notice.kind)).toEqual(["assigned", "changed"]);
-    expect(seen.notices?.[0].text).toContain("New carrier assignment email sent to m.gray@emit.example");
-    expect(seen.notices?.[0].text).toContain("Northline Freight");
-    expect(seen.notices?.[0].text).toContain("445566");
-    expect(seen.notices?.[1].text).toContain("Carrier change email sent");
+    expect(seen.notices?.[0].text).toContain("Carrier assigned: Northline Freight");
+    expect(seen.notices?.[0].text).toContain("MC 445566");
+    expect(seen.notices?.[0].at).toBeTruthy();
+    expect(seen.notices?.[1].text).toContain("Carrier changed from Northline Freight");
     expect(seen.notices?.[1].text).toContain("Red Mesa Transport");
+    expect(seen.notices?.[1].text).toContain("MC 778899");
+    expect(seen.haulCallout?.company).toBe("Red Mesa Transport");
+    expect(seen.haulCallout?.mc).toBe("778899");
+    expect(seen.carrierBadge).toBe("changed");
     expect(seen.customerCost).toBeUndefined();
     expect("samBuildStatus" in seen).toBe(false);
     expectNoSecrets(seen);
+    expect(JSON.stringify(seen.notices) + JSON.stringify(seen.haulCallout)).not.toMatch(/email|\$|pay|rate/i);
+    expect(JSON.stringify(seen)).not.toMatch(/"carrier_name"|carrierPay/);
 
-    const listed = await listOrdersRoute(new Request("http://portal.test/api/orders?q=SO-CARRIER", { headers: headers(viewer) }));
-    const row = (await listed.json()).orders.find((item: CustomerOrder) => item.id === order.id);
-    expect(row.buildStatus).toBe("Built in SAM: 459100-1");
-    expect(row.notices).toHaveLength(2);
-    expectNoSecrets(row);
+    const after = await listOrdersRoute(new Request("http://portal.test/api/orders?q=SO-CARRIER", { headers: headers(submitter) }));
+    const afterBody = await after.json();
+    const cleared = afterBody.orders.find((item: CustomerOrder) => item.id === order.id);
+    expect(cleared.carrierBadge).toBeUndefined();
+    expect(cleared.haulCallout.company).toBe("Red Mesa Transport");
+
+    const still = await listOrdersRoute(new Request("http://portal.test/api/orders?updated=1", { headers: headers(viewer) }));
+    const stillBody = await still.json();
+    expect(stillBody.orders.some((item: CustomerOrder) => item.id === order.id)).toBe(true);
+    expect(stillBody.orders.find((item: CustomerOrder) => item.id === order.id).carrierBadge).toBe("changed");
+
+    const hidden = await listOrdersRoute(new Request("http://portal.test/api/orders?updated=1", { headers: headers(submitter) }));
+    const hiddenBody = await hidden.json();
+    expect(hiddenBody.orders.some((item: CustomerOrder) => item.id === order.id)).toBe(false);
+
+    const banner = await updatesRoute(new Request("http://portal.test/api/updates", { headers: headers(viewer) }));
+    expect(banner.status).toBe(200);
+    expect((await banner.json()).count).toBeGreaterThanOrEqual(1);
+    const quiet = await updatesRoute(new Request("http://portal.test/api/updates", { headers: headers(submitter) }));
+    const quietCount = (await quiet.json()).count as number;
+    const viewerCount = (await (await updatesRoute(new Request("http://portal.test/api/updates", { headers: headers(viewer) }))).json()).count as number;
+    expect(viewerCount).toBeGreaterThan(quietCount);
   });
 });
 
-describe("carrier email copy", () => {
-  it("describes a first assignment without a price", () => {
+describe("carrier history copy", () => {
+  it("describes an assignment and a change without a price or an email", () => {
     expect(sameCarrier({ name: "Northline Freight", mc: "445566" }, { name: "northline freight", mc: "MC 445566" })).toBe(true);
-    const mail = carrierEmail({
-      kind: "assigned",
-      salesOrderNumber: "SO-1",
-      orderId: "order-1",
-      loadNumber: null,
-      originCity: "Sheridan",
-      originState: "WY",
-      destinationCity: "Houston",
-      destinationState: "TX",
-      shipDate: "2026-11-10",
-      mustDeliverDate: "2026-11-12",
-      carrierName: "Northline Freight",
-      mc: "445566",
-    });
-    expect(mail.subject).toBe("Carrier assigned for SO-1");
-    expect(mail.text).toContain("This is a new carrier assignment.");
-    expect(mail.text).toContain("Select load: Pending");
-    expect(mail.text).not.toMatch(/pay|rate|\$/i);
+    const assigned = historyText("assigned", { name: "Northline Freight", mc: "445566" }, { name: "", mc: "" });
+    expect(assigned).toBe("Carrier assigned: Northline Freight. MC 445566.");
+    expect(assigned).not.toMatch(/pay|rate|\$|email/i);
+    const changed = historyText(
+      "changed",
+      { name: "Red Mesa Transport", mc: "778899" },
+      { name: "Northline Freight", mc: "445566" },
+    );
+    expect(changed).toContain("Carrier changed from Northline Freight (MC 445566) to Red Mesa Transport");
+    expect(changed).not.toMatch(/pay|rate|\$|email/i);
+    expect(carrierBadgeLabel("assigned")).toBe("Carrier assigned");
+    expect(carrierBadgeLabel("changed")).toBe("Carrier changed");
+    expect(updateBannerText(1)).toBe("1 order updated since your last visit");
+    expect(updateBannerText(4)).toBe("4 orders updated since your last visit");
+  });
+
+  it("keeps the phone layout and a print page free of prices", () => {
+    const dashboard = readFileSync("components/dashboard.tsx", "utf8");
+    const shell = readFileSync("components/shell.tsx", "utf8");
+    const css = readFileSync("app/globals.css", "utf8");
+    expect(dashboard).toContain("load-row-status");
+    expect(dashboard).toContain("CarrierBadge");
+    expect(dashboard).toContain("file-btn");
+    expect(shell).toContain("bottom-nav");
+    expect(shell).toContain("UpdateBanner");
+    expect(css).toContain(".bottom-nav");
+    expect(css).toMatch(/\.load-row-status\s*\{[^}]*order:\s*-1/);
+    expect(readFileSync("components/document-links.tsx", "utf8")).toContain("/print");
+    expect(existsSync("lib/email.ts")).toBe(false);
+    const page = documentPrintHtml({ src: "/api/documents/doc-1", filename: "bol.pdf", mediaType: "application/pdf" });
+    expect(page).toContain("Print");
+    expect(page).toContain('src="/api/documents/doc-1"');
+    expect(page).toContain("min-height: 48px");
+    expect(page).not.toMatch(/pay|rate|\$/i);
+    expect(readFileSync("app/orders/[id]/page.tsx", "utf8")).toContain("CarrierCallout");
   });
 });
