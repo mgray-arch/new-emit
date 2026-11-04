@@ -5,6 +5,7 @@ import type {
   OrderNotice,
   Place,
   PortalStatus,
+  StageEvent,
   PublicTracking,
   RateReason,
   Stop,
@@ -207,6 +208,8 @@ export function presentCustomerOrder(order: CustomerOrder, viewer: Viewer, optio
   }
   view.buildStatus = buildStatusLabel(view.loadNumber, order.slackNotifiedAt);
   view.notices = presentNotices(order.notices);
+  const stages = presentStageEvents(order.stageEvents);
+  if (stages.length) view.stageEvents = stages;
   const callout = haulCalloutFrom(view.notices);
   if (callout) view.haulCallout = callout;
   if (options?.carrierBadge === "assigned" || options?.carrierBadge === "changed") {
@@ -234,6 +237,19 @@ function presentNotices(notices: OrderNotice[] | undefined): OrderNotice[] {
     if (company) row.company = company;
     if (mc) row.mc = mc;
     safe.push(row);
+  }
+  return safe;
+}
+
+function presentStageEvents(events: StageEvent[] | undefined): StageEvent[] {
+  if (!events?.length) return [];
+  const safe: StageEvent[] = [];
+  for (const event of events) {
+    if (!(PORTAL_STATUSES as readonly string[]).includes(event.to)) continue;
+    const text = redactSensitiveText(event.text);
+    if (!text) continue;
+    const from = event.from && (PORTAL_STATUSES as readonly string[]).includes(event.from) ? event.from : null;
+    safe.push({ at: event.at, from, to: event.to as PortalStatus, text });
   }
   return safe;
 }

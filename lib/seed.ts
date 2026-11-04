@@ -898,7 +898,11 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
       const latestEta =
         load.etaOffset == null ? null : denverLocalToISO(addDaysISO(today, load.etaOffset), "15:00");
       const anchor = latestEta ?? denverLocalToISO(shipDate, load.shipTime);
-      const assignment = assignLoadOwner({ destinationState: load.destination.state, equipment: load.truckType });
+      const assignment = assignLoadOwner({
+        destinationCity: load.destination.city,
+        destinationState: load.destination.state,
+        equipment: load.truckType,
+      });
       await insertLoad.run(
         randomUUID(),
         load.salesOrderNumber,

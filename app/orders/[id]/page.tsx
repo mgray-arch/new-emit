@@ -9,6 +9,7 @@ import LoadOwnerField from "@/components/load-owner-field";
 import PhotoGallery from "@/components/photo-gallery";
 import BuildStatus from "@/components/build-status";
 import OrderHistory from "@/components/order-history";
+import StageField from "@/components/stage-field";
 import SelectLoadField from "@/components/select-load-field";
 import Shell from "@/components/shell";
 import StatusPill from "@/components/status-pill";
@@ -20,7 +21,7 @@ import { formatStopSchedule } from "@/lib/stop-schedule";
 import { formatEnteredBy } from "@/lib/entered-by";
 import { displayStatus, fileSummary } from "@/lib/load-list";
 import { toast } from "@/lib/toast";
-import { canAddLoads, canSeePricing, formatLoadNumber, formatPlace, type CustomerOrder, type PortalRole, type ViewAsPreview } from "@/lib/types";
+import { STATUS_LABEL, canAddLoads, canSeePricing, formatLoadNumber, formatPlace, type CustomerOrder, type PortalRole, type PortalStatus, type ViewAsPreview } from "@/lib/types";
 
 interface Me {
   role: PortalRole;
@@ -35,6 +36,7 @@ export default function OrderPage() {
   const [order, setOrder] = useState<CustomerOrder | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const [problem, setProblem] = useState("");
+  const [stageBusy, setStageBusy] = useState(false);
 
   useEffect(() => {
     fetch("/api/me")
@@ -74,6 +76,24 @@ export default function OrderPage() {
 
   const today = denverDate(new Date());
 
+  async function changeStage(status: PortalStatus) {
+    if (!order || status === order.portalStatus || readOnly || !allowLoads) return;
+    setStageBusy(true);
+    const response = await fetch(`/api/orders/${order.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ portalStatus: status }),
+    });
+    const body = await response.json().catch(() => ({}));
+    setStageBusy(false);
+    if (!response.ok) {
+      toast(typeof body.error === "string" ? body.error : "Could not change the stage.");
+      return;
+    }
+    setOrder(body.order);
+    toast(`Stage is ${STATUS_LABEL[status]}.`);
+  }
+
   return (
     <Shell>
       <main className="page">
@@ -95,6 +115,7 @@ export default function OrderPage() {
             <p className="lede">
               {order.salesOrderNumber} · Select load {formatLoadNumber(order.loadNumber)}
             </p>
+            <StageField order={order} canChange={allowLoads && !readOnly} busy={stageBusy} onChange={(status) => void changeStage(status)} />
             <BuildStatus status={order.buildStatus} />
             {order.haulCallout ? <CarrierCallout haul={order.haulCallout} badge={order.carrierBadge} /> : null}
             {me?.chatEnabled ? (
@@ -141,7 +162,7 @@ export default function OrderPage() {
               <p className="mini">Latest ETA: {order.latestEta ? formatWhen(order.latestEta) : "Not posted yet"}</p>
             </section>
 
-            <OrderHistory notices={order.notices} />
+            <OrderHistory notices={order.notices} stages={order.stageEvents} />
 
             <section className="detail-section">
               <h2>Stops</h2>

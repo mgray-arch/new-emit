@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import CarrierBadge from "@/components/carrier-badge";
 import DocumentLinks from "@/components/document-links";
@@ -16,16 +16,13 @@ import { deleteConfirmText } from "@/lib/delete-confirm";
 import { formatEnteredBy } from "@/lib/entered-by";
 import {
   LOAD_TAB_LABEL,
-  PICKUP_GROUP_LABEL,
   attentionReasons,
   displayStatus,
   emptyListMessage,
   fileSummary,
-  pickupGroup,
   visibleLoadTabs,
   type LoadTab,
   type LoadTabCounts,
-  type PickupGroup,
 } from "@/lib/load-list";
 import { toast } from "@/lib/toast";
 import {
@@ -343,17 +340,6 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   }
 
   const counts: LoadTabCounts = data?.counts ?? { active: 0, delivered: 0, history: 0 };
-  const groups = useMemo(() => {
-    if (!data) return [];
-    const blocks: Array<{ id: PickupGroup; orders: CustomerOrder[] }> = [];
-    for (const order of rows) {
-      const id = pickupGroup(order.shipDate, data.today, data.tomorrow, data.weekEnd);
-      const last = blocks[blocks.length - 1];
-      if (!last || last.id !== id) blocks.push({ id, orders: [order] });
-      else last.orders.push(order);
-    }
-    return blocks;
-  }, [rows, data]);
 
   function exportHistory() {
     const params = new URLSearchParams();
@@ -512,12 +498,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       {data?.scope === "all" && query.trim() && !updatedOnly ? <p className="mini">Showing matches from every tab.</p> : null}
       {error && <p className="error">{error}</p>}
       <div className="board">
-        {groups.map((group) => (
-          <section key={group.id}>
-            <div className="group-head" role="heading" aria-level={2}>
-              {PICKUP_GROUP_LABEL[group.id]}
-            </div>
-            {group.orders.map((order) => {
+        {rows.map((order) => {
               const reasons = selectView && data ? attentionReasons(order, data.today) : [];
               const today = data?.today ?? "";
               return (
@@ -540,6 +521,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                       {order.origin.city}, {order.origin.state} → {order.destination.city}, {order.destination.state}
                     </div>
                     <div className="load-row-status">
+                      <span className="stage-name">{STATUS_LABEL[order.portalStatus]}</span>
                       {order.carrierBadge ? <CarrierBadge kind={order.carrierBadge} /> : null}
                       <StatusPill status={displayStatus(order, today, { needsAttention: selectView })} />
                     </div>
@@ -608,10 +590,8 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                     </div>
                   ) : null}
                 </article>
-              );
-            })}
-          </section>
-        ))}
+        );
+        })}
         {data && rows.length === 0 ? (
           <p className="empty">
             {updatedOnly
