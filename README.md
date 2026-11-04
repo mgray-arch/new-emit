@@ -170,7 +170,7 @@ These are the only domain-shaped settings:
 
 ## Select passwords
 
-Select staff use the same sign-in form as EMIT. The account is an admin only when the email is on `SELECT_ADMIN_EMAILS`. Passwords are stored as hashes. The portal does not email them.
+Select staff use the same sign-in form as EMIT. The account is an admin only when the email is on `SELECT_ADMIN_EMAILS`. Capital letters and spaces around each address are ignored. If that address was saved earlier as an EMIT user, the next successful sign-in stores it as a Select admin. An EMIT address that is not on the list stays an EMIT user. Passwords are stored as hashes. The portal does not email them.
 
 The first Select password, before anyone can sign in as Select:
 

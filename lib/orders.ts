@@ -110,6 +110,29 @@ export function likeContains(query: string): string {
   return `%${query.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
 }
 
+function parseJsonColumn(value: unknown): unknown {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function placeFromColumn(value: unknown): { company: string; address1: string; city: string; state: string; postalCode: string; country: string } {
+  const parsed = parseJsonColumn(value);
+  const record = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+  const text = (key: string) => (typeof record[key] === "string" ? record[key] : "");
+  return {
+    company: text("company"),
+    address1: text("address1"),
+    city: text("city"),
+    state: text("state"),
+    postalCode: text("postalCode"),
+    country: text("country") || "US",
+  };
+}
+
 async function rowToOrder(ctx: PortalContext, row: LoadRow, withDocuments: boolean): Promise<CustomerOrder> {
   const order = serializeCustomerOrder({
     id: row.id,
@@ -117,9 +140,9 @@ async function rowToOrder(ctx: PortalContext, row: LoadRow, withDocuments: boole
     loadNumber: row.load_number,
     portalStatus: row.portal_status,
     trackingStage: row.tracking_stage,
-    timeline: JSON.parse(row.timeline_json),
-    origin: JSON.parse(row.origin_json),
-    destination: JSON.parse(row.destination_json),
+    timeline: parseJsonColumn(row.timeline_json) ?? [],
+    origin: placeFromColumn(row.origin_json),
+    destination: placeFromColumn(row.destination_json),
     stops: parseStops(row),
     truckType: row.truck_type,
     transit: row.transit,
@@ -170,7 +193,7 @@ function parseStops(row: LoadRow): Stop[] {
     }
   }
   return resolvedRoute({
-    stops: legacyStops(JSON.parse(row.origin_json), JSON.parse(row.destination_json)),
+    stops: legacyStops(placeFromColumn(row.origin_json), placeFromColumn(row.destination_json)),
   }).stops;
 }
 
@@ -311,7 +334,7 @@ function buildWhere(filter: OrderFilter, today: string): { sql: string; params: 
 
 /** Newest orders first. Created time is the default order on the loads page. */
 function listOrderSql(): string {
-  return `ORDER BY created_at DESC, sales_order_number ASC`;
+  return `ORDER BY loads.created_at DESC, loads.sales_order_number ASC`;
 }
 
 export async function listOrders(ctx: PortalContext, filter: OrderFilter = {}): Promise<OrderPage> {
