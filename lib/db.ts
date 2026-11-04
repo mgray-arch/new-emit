@@ -426,21 +426,42 @@ function migrationError(error: unknown): string {
  * ADD COLUMN is not idempotent in SQLite: a second server that cannot yet see
  * the new column tries the same ALTER and gets "duplicate column name".
  * That used to reject the process cache and every later request on that instance failed.
+ * PRAGMA table_info names have also been wrong on some Turso rows, so a missing
+ * column looked present and the ALTER was skipped. A real SELECT is the check.
  */
+async function columnReadable(db: SqlDatabase, table: string, column: string): Promise<boolean> {
+  try {
+    await db.prepare(`SELECT "${column}" FROM "${table}" LIMIT 0`).get();
+    return true;
+  } catch (error) {
+    if (/no such column|no such table|has no column/i.test(migrationError(error))) return false;
+    throw error;
+  }
+}
+
 async function ensureColumn(db: SqlDatabase, table: string, column: string, definition: string): Promise<void> {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(table) || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(column)) {
     throw new Error("Unsafe migration identifier");
   }
-  const columns = await columnNames(db, table);
-  if (columns.includes(column)) return;
+  if (await columnReadable(db, table, column)) return;
   try {
     await db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   } catch (error) {
+    if (await columnReadable(db, table, column)) return;
     if (/duplicate column/i.test(migrationError(error))) return;
-    const again = await columnNames(db, table);
-    if (again.includes(column)) return;
     throw error;
   }
+}
+
+/** Columns and the per-user seen table the loads list reads. Safe to call on every request. */
+export async function ensureLoadListColumns(db: SqlDatabase): Promise<void> {
+  await migrateLoadStatus(db);
+  await db.exec(`CREATE TABLE IF NOT EXISTS order_seen (
+    user_id TEXT NOT NULL,
+    load_id TEXT NOT NULL,
+    seen_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, load_id)
+  )`);
 }
 
 async function tableSql(db: SqlDatabase, table: string): Promise<string | null> {

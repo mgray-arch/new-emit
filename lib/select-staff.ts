@@ -5,8 +5,10 @@ import { PortalError } from "@/lib/http";
 import {
   findUser,
   findUserById,
+  findUsersByEmail,
   generateTemporaryPassword,
   hashPassword,
+  promoteToSelectAdmin,
   setPasswordHash,
   type UserRow,
 } from "@/lib/passwords";
@@ -156,13 +158,16 @@ export async function claimSelectPassword(
   if (!isListedSelectAdmin(email)) {
     throw new PortalError("That email is not on SELECT_ADMIN_EMAILS. Add it there before setting a password.");
   }
-  const existing = await findUser(ctx, email);
-  if (existing && existing.role !== "admin") {
-    throw new PortalError("That email is an EMIT account.");
-  }
+  const matches = await findUsersByEmail(ctx, email);
+  const existing = matches.find((row) => row.role === "admin") ?? matches[0] ?? null;
   if (!existing) {
     const created = await createSelectStaff(ctx, { name: displayName(input.name, email), email, password: input.password });
     return { email: created.user.email, created: true };
+  }
+  if (existing.role !== "admin") await promoteToSelectAdmin(ctx, existing.id);
+  if (existing.email !== email) {
+    const clash = await ctx.db.prepare(`SELECT id FROM users WHERE email = ? AND id <> ?`).get(email, existing.id);
+    if (!clash) await ctx.db.prepare(`UPDATE users SET email = ? WHERE id = ?`).run(email, existing.id);
   }
   if (input.name?.trim()) {
     const name = displayName(input.name, email);

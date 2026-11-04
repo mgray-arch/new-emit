@@ -1,5 +1,6 @@
 import { badgeForOrder, carrierEvents, seenMap, unseenLoadIds } from "@/lib/carrier-seen";
 import { presentCustomerOrder } from "@/lib/customer-view";
+import { ensureLoadListColumns } from "@/lib/db";
 import { errorResponse, json } from "@/lib/http";
 import { isSession, requireSession } from "@/lib/guard";
 import { LOAD_TABS, type LoadTab } from "@/lib/load-list";
@@ -17,6 +18,7 @@ export async function GET(req: Request) {
     const session = await requireSession(req);
     if (!isSession(session)) return session;
     const ctx = await readyPortal();
+    await ensureLoadListColumns(ctx.db);
     const url = new URL(req.url);
     const status = url.searchParams.get("status");
     const tabParam = url.searchParams.get("tab");
