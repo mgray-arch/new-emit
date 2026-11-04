@@ -1102,8 +1102,13 @@ html[data-theme="light"] .carrier-badge { background: #e5f6ec; color: #0f5c32; }
 html[data-theme="light"] .carrier-badge[data-kind="changed"] { background: #fbf3df; color: #6a4e08; }
 .load-row-status { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
 .stage-name { font-weight: 750; font-size: 13px; }
-.stage-field { max-width: 320px; }
+.stage-field { max-width: 420px; }
 .stage-field select, .stage-field strong { font-size: 16px; }
+.stage-field select { min-height: 48px; width: 100%; }
+.ready-confirm .btn { min-height: 48px; width: 100%; }
+.carrier-badge[data-kind="tracking"] { background: #1c3048; color: #c5ddf5; }
+html[data-theme="light"] .carrier-badge[data-kind="tracking"] { background: #e4eef8; color: #1a3f66; }
+.tracking-callout .track-btn { margin-top: 8px; }
 .carrier-callout {
   border: 1px solid var(--line);
   border-left: 4px solid var(--green);

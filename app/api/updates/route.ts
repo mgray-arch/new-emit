@@ -6,7 +6,7 @@ import { readyPortal } from "@/lib/portal";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** How many loads have a carrier update this person has not opened. */
+/** How many loads have a carrier update or a new tracking link this person has not opened. */
 export async function GET(req: Request) {
   try {
     const session = await requireSession(req);

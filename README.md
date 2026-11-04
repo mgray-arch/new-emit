@@ -351,7 +351,9 @@ Creating a load posts an **Order received - Being Prepared** note. That note doe
 
 The Load Builder bot, or any bot with the secret, records the SAM number and the carrier on `POST /api/integrations/sam-load`. Send `Authorization: Bearer` with `LOAD_BUILDER_SECRET` or `LOAD_STATUS_WEBHOOK_SECRET`. The secret is at least 16 characters and compared in constant time. A missing, short, or wrong secret is 401. A session cookie is not accepted. The path is limited to 60 requests a minute per IP.
 
-Name the load with `orderId` or `salesOrderNumber` (`sales_order_number` too). `loadNumber` (`load_number` too) is the SAM number, such as `458934-1`. The same number again is a no-op. A different number on a load that already has one is 409. A missing match is 404. More than one sales order match is 409.
+Name the load with `orderId` (the portal id) or `salesOrderNumber` (`sales_order_number` too). The sales order match ignores capital letters and surrounding spaces, so SAM can send the SO in all capitals. `loadNumber` (`load_number` too) is the SAM number, such as `458934-1`. The same number again is a no-op. A different number on a load that already has one is 409. A missing match is 404. More than one sales order match is 409. The same call can be load number only, then a later call can add the carrier, the tracking link, or both.
+
+`tracking_url` (`trackingUrl` too) is optional. It must be `https` and the host and path must be `customer.goselect.com/tracking/` (for example `https://customer.goselect.com/tracking/abc`). Anything else is 400 and nothing from that request is written. The same URL again does not add another History line. A new URL is stored on the order, History says Tracking started (or Tracking link updated), and the load shows Track shipment.
 
 `carrierName` (`carrier_name` too) and `mcNumber` (`mc_number` or `mc` too) are the assigned carrier. The portal stores that name and MC so it can tell a first assignment from a change. It does not store carrier pay. A blank name or MC leaves the stored value as it is. `MC 445566` and `445566` are the same MC.
 
@@ -362,7 +364,7 @@ Each person sees a **Carrier assigned** or **Carrier changed** badge on that ord
 A rate, pay, cost, price, or rate-confirmation field anywhere in the JSON, including inside a stop, is 400. Nothing is written. The response without a carrier change is `{ orderId, salesOrderNumber, loadNumber }`. A carrier call also includes `notice`: `assigned`, `changed`, or `unchanged`.
 
 ```json
-{ "salesOrderNumber": "SO4429", "loadNumber": "458934-1", "carrierName": "Northline Freight", "mcNumber": "445566" }
+{ "salesOrderNumber": "SO4429", "loadNumber": "458934-1", "carrierName": "Northline Freight", "mcNumber": "445566", "tracking_url": "https://customer.goselect.com/tracking/abc" }
 ```
 
 Select still sees a SAM link on the load when `SAM_LOAD_URL_TEMPLATE` is set. EMIT does not see that link. EMIT does see the load number and the read-only build status.

@@ -13,6 +13,7 @@ import TrackLink from "@/components/track-link";
 import TrackingLinkField from "@/components/tracking-link-field";
 import { formatDay } from "@/lib/dates";
 import { deleteConfirmText } from "@/lib/delete-confirm";
+import { readyToShipConfirmText, stageBecomesReadyToShip } from "@/lib/load-stage";
 import { formatEnteredBy } from "@/lib/entered-by";
 import {
   LOAD_TAB_LABEL,
@@ -111,6 +112,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmReady, setConfirmReady] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const updatedRef = useRef(updatedOnly);
 
@@ -235,19 +237,27 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     }
   }
 
-  async function save() {
+  async function save(forceReady = false) {
     if (readOnly) {
       setFormError("View-as is read-only. Switch back to Select view to change anything.");
       return;
     }
     if (!draft.stops.some((stop) => stop.kind === "pickup") || !draft.stops.some((stop) => stop.kind === "drop")) {
+      setConfirmReady(false);
       setFormError("Add at least one pickup and one drop.");
       return;
     }
     if (draft.stops.some((stop) => stop.duplicateOf && !stop.saveAsNew)) {
+      setConfirmReady(false);
       setFormError("This looks like a duplicate. Use the existing location, or save it as new.");
       return;
     }
+    if (stageBecomesReadyToShip(editing?.portalStatus, draft.portalStatus) && !forceReady) {
+      setConfirmReady(true);
+      setFormError("");
+      return;
+    }
+    setConfirmReady(false);
     setSaving(true);
     setFormError("");
     try {
@@ -523,6 +533,11 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                     <div className="load-row-status">
                       <span className="stage-name">{STATUS_LABEL[order.portalStatus]}</span>
                       {order.carrierBadge ? <CarrierBadge kind={order.carrierBadge} /> : null}
+                      {order.trackingBadge ? (
+                        <span className="carrier-badge" data-kind="tracking">
+                          Tracking started
+                        </span>
+                      ) : null}
                       <StatusPill status={displayStatus(order, today, { needsAttention: selectView })} />
                     </div>
                   </div>
@@ -554,7 +569,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                   ) : null}
                   {order.comments ? <Note text={order.comments} /> : null}
                   <div className="load-row-actions">
-                    <TrackLink href={order.trackingLink} />
+                    <TrackLink href={order.trackingLink} label="Track shipment" />
                     {showPricing && (
                       <span className="load-meta">
                         {order.customerCost == null ? "Cost not set" : order.customerCost.toLocaleString("en-US", { style: "currency", currency: "USD" })}
@@ -661,7 +676,18 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
               </>
             )}
             {formError && <p className="error">{formError}</p>}
-            <LoadForm draft={draft} setDraft={setDraft} order={editing} sites={sites} hideCommercial={!showPricing} />
+            <LoadForm draft={draft} setDraft={setDraft} order={editing} sites={sites} hideCommercial={!showPricing} readOnly={readOnly} />
+            {confirmReady ? (
+              <div className="confirm-box ready-confirm" role="status">
+                <p>{readyToShipConfirmText()}</p>
+                <button className="btn" type="button" disabled={saving} onClick={() => void save(true)}>
+                  {saving ? "Saving…" : "Save as Ready to Ship"}
+                </button>
+                <button className="btn secondary" type="button" onClick={() => setConfirmReady(false)}>
+                  Go back
+                </button>
+              </div>
+            ) : null}
             {editing && (
               <div className="grid-2">
                 <div className="field">
@@ -690,7 +716,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
               <button className="btn secondary" type="button" onClick={() => { setCreating(false); setEditing(null); }}>
                 Close
               </button>
-              <button className="btn" type="button" disabled={saving || readOnly} onClick={save}>
+              <button className="btn" type="button" disabled={saving || readOnly} onClick={() => void save()}>
                 {saving ? "Saving…" : editing ? "Save changes" : "Submit order"}
               </button>
             </div>

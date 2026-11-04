@@ -1,5 +1,6 @@
 import { parseOrderNotices } from "@/lib/build-status";
 import type { PortalContext } from "@/lib/db";
+import { trackingIsUnseen, trackingStartEvents } from "@/lib/tracking-link";
 import type { CustomerOrder, OrderNotice } from "@/lib/types";
 
 export type CarrierBadge = "assigned" | "changed";
@@ -68,9 +69,18 @@ export function unseenLoadIds(events: CarrierEvent[], seen: Map<string, string>)
   return events.filter((event) => badgeFor(event, seen.get(event.id) ?? null)).map((event) => event.id);
 }
 
+/** Carrier updates and tracking starts this person has not opened. */
+export async function unseenUpdateIds(ctx: PortalContext, userId: string): Promise<string[]> {
+  const [events, tracking, seen] = await Promise.all([carrierEvents(ctx), trackingStartEvents(ctx), seenMap(ctx, userId)]);
+  const ids = new Set(unseenLoadIds(events, seen));
+  for (const start of tracking) {
+    if (trackingIsUnseen(start.at, seen.get(start.id))) ids.add(start.id);
+  }
+  return [...ids];
+}
+
 export async function countUnseen(ctx: PortalContext, userId: string): Promise<number> {
-  const [events, seen] = await Promise.all([carrierEvents(ctx), seenMap(ctx, userId)]);
-  return unseenLoadIds(events, seen).length;
+  return (await unseenUpdateIds(ctx, userId)).length;
 }
 
 /** Remember that this user opened the update. An older stamp does not move the mark backward. */

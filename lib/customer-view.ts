@@ -6,6 +6,7 @@ import type {
   Place,
   PortalStatus,
   StageEvent,
+  TrackingEvent,
   PublicTracking,
   RateReason,
   Stop,
@@ -187,6 +188,8 @@ export function serializeCustomerOrder(value: unknown, options?: CustomerViewOpt
 export interface PresentOrderOptions {
   /** Unseen carrier update for the signed-in person. Omitted when they have already opened it. */
   carrierBadge?: "assigned" | "changed" | null;
+  /** Unseen tracking start for the signed-in person. */
+  trackingBadge?: boolean;
 }
 
 /** The order shape that may be sent to this viewer. EMIT admins with see pricing or full access, and Select, get EMIT's cost. Regular EMIT users never do, and neither does a view-as regular preview. Every signed-in user gets who entered the load. Nobody gets carrier pay, the review count for EMIT, or the SAM build controls. */
@@ -210,6 +213,9 @@ export function presentCustomerOrder(order: CustomerOrder, viewer: Viewer, optio
   view.notices = presentNotices(order.notices);
   const stages = presentStageEvents(order.stageEvents);
   if (stages.length) view.stageEvents = stages;
+  const tracking = presentTrackingEvents(order.trackingEvents);
+  if (tracking.length) view.trackingEvents = tracking;
+  if (options?.trackingBadge) view.trackingBadge = true;
   const callout = haulCalloutFrom(view.notices);
   if (callout) view.haulCallout = callout;
   if (options?.carrierBadge === "assigned" || options?.carrierBadge === "changed") {
@@ -237,6 +243,17 @@ function presentNotices(notices: OrderNotice[] | undefined): OrderNotice[] {
     if (company) row.company = company;
     if (mc) row.mc = mc;
     safe.push(row);
+  }
+  return safe;
+}
+
+function presentTrackingEvents(events: TrackingEvent[] | undefined): TrackingEvent[] {
+  if (!events?.length) return [];
+  const safe: TrackingEvent[] = [];
+  for (const event of events) {
+    const text = redactSensitiveText(event.text);
+    if (!text || !event.at) continue;
+    safe.push({ at: event.at, text });
   }
   return safe;
 }

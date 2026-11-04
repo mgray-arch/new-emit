@@ -1,5 +1,5 @@
 import { formatWhen } from "@/lib/dates";
-import type { OrderNotice, StageEvent } from "@/lib/types";
+import type { OrderNotice, StageEvent, TrackingEvent } from "@/lib/types";
 
 interface HistoryRow {
   at: string;
@@ -11,13 +11,16 @@ interface HistoryRow {
 export default function OrderHistory({
   notices,
   stages,
+  tracking,
 }: {
   notices?: OrderNotice[] | null;
   stages?: StageEvent[] | null;
+  tracking?: TrackingEvent[] | null;
 }) {
   const rows: HistoryRow[] = [
     ...(stages ?? []).map((event) => ({ at: event.at, kind: "stage", text: event.text })),
     ...(notices ?? []).map((notice) => ({ at: notice.at, kind: notice.kind, text: notice.text })),
+    ...(tracking ?? []).map((event) => ({ at: event.at, kind: "tracking", text: event.text })),
   ].sort((left, right) => left.at.localeCompare(right.at) || left.text.localeCompare(right.text));
   return (
     <section className="detail-section" aria-label="Order history">
