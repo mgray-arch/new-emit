@@ -90,7 +90,8 @@ CREATE TABLE IF NOT EXISTS loads (
   carrier_name TEXT,
   carrier_mc TEXT,
   carrier_notice_log TEXT,
-  stage_log TEXT
+  stage_log TEXT,
+  tracking_event_log TEXT
 );
 
 CREATE TABLE IF NOT EXISTS customer_documents (
@@ -233,6 +234,16 @@ CREATE TABLE IF NOT EXISTS order_seen (
   seen_at TEXT NOT NULL,
   PRIMARY KEY (user_id, load_id)
 );
+
+CREATE TABLE IF NOT EXISTS bol_prints (
+  id TEXT PRIMARY KEY,
+  load_id TEXT NOT NULL,
+  document_id TEXT NOT NULL,
+  printed_by TEXT NOT NULL,
+  printed_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS bol_prints_load ON bol_prints(load_id, printed_at);
 `;
 
 /**
@@ -244,7 +255,7 @@ export const CUSTOMER_LOAD_COLUMNS = `
   origin_json, destination_json, stops_json, truck_type, transit, ship_date, ship_time,
   must_deliver_date, truck_eta, latest_eta, tracking_token, tracking_link, customer_cost_cents,
   rate_reason, comments, created_by, entered_by_name, entered_by_email, owner, owner_needs_check, created_at, updated_at, pending_review_count,
-  sam_build_status, sam_build_error, sam_build_at, slack_notified_at, carrier_notice_log, stage_log
+  sam_build_status, sam_build_error, sam_build_at, slack_notified_at, carrier_notice_log, stage_log, tracking_event_log
 `;
 
 function coerce(value: unknown): unknown {
@@ -802,6 +813,7 @@ async function migrateDocumentUploaders(db: SqlDatabase): Promise<void> {
 async function migrateTrackingLink(db: SqlDatabase): Promise<void> {
   await ensureColumn(db, "loads", "tracking_link", "TEXT");
   await ensureColumn(db, "loads", "tracking_link_source", "TEXT");
+  await ensureColumn(db, "loads", "tracking_event_log", "TEXT");
 }
 
 /** Databases that allowed a receiver login role drop those users. */

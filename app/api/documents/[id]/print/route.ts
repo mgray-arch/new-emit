@@ -1,3 +1,4 @@
+import { recordBolPrint } from "@/lib/bol-print";
 import { documentPrintHtml } from "@/lib/document-print";
 import { readCustomerDocument } from "@/lib/documents";
 import { isSession, requireSession } from "@/lib/guard";
@@ -17,6 +18,7 @@ export async function GET(req: Request, context: { params: Promise<{ id: string 
     const ctx = await readyPortal();
     const doc = await readCustomerDocument(ctx, id);
     if (!doc || !(await getOrder(ctx, doc.loadId))) return json({ error: "Document not found" }, 404);
+    if (doc.kind === "bol") await recordBolPrint(ctx, { loadId: doc.loadId, documentId: doc.id, userId: session.userId });
     const html = documentPrintHtml({
       src: `/api/documents/${encodeURIComponent(id)}`,
       filename: doc.filename,

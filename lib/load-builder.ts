@@ -4,6 +4,7 @@ import type { PortalContext } from "@/lib/db";
 import { PortalError } from "@/lib/http";
 import { getOrder } from "@/lib/orders";
 import { assignSelectLoadNumber, parseSelectLoadNumber } from "@/lib/select-load";
+import { recordCustomerShareLink } from "@/lib/tracking-link";
 import type { CustomerOrder } from "@/lib/types";
 
 const MIN_KEY_LENGTH = 16;
@@ -74,7 +75,9 @@ async function orderIdForCallback(ctx: PortalContext, orderId: string, salesOrde
     if (!row) throw new PortalError("No portal load with that id.", 404);
     return String(row.id);
   }
-  const matches = await ctx.db.prepare(`SELECT id FROM loads WHERE sales_order_number = ?`).all(salesOrderNumber);
+  const matches = await ctx.db
+    .prepare(`SELECT id FROM loads WHERE LOWER(TRIM(sales_order_number)) = ?`)
+    .all(salesOrderNumber.trim().toLowerCase());
   if (matches.length === 0) throw new PortalError(`No load with sales order ${salesOrderNumber}.`, 404);
   if (matches.length > 1) throw new PortalError(`Sales order ${salesOrderNumber} matches more than one load.`, 409);
   return String(matches[0].id);
@@ -105,9 +108,10 @@ export async function applyLoadStatus(
     orderId?: string;
     salesOrderNumber?: string;
     loadNumber?: string;
+    trackingUrl?: string;
     carrier: CarrierUpdate | null;
   },
-): Promise<{ order: CustomerOrder; notice: CarrierNoticeResult | null }> {
+): Promise<{ order: CustomerOrder; notice: CarrierNoticeResult | null; tracking: "started" | "updated" | "unchanged" | null }> {
   const id = await orderIdForCallback(ctx, input.orderId?.trim() ?? "", input.salesOrderNumber?.trim() ?? "");
   if (input.loadNumber?.trim()) {
     await acceptBuiltLoadNumber(ctx, { orderId: id, loadNumber: input.loadNumber });
@@ -118,7 +122,8 @@ export async function applyLoadStatus(
     if (!current) throw new PortalError("Order not found", 404);
     notice = await recordCarrierAssignment(ctx, current, input.carrier);
   }
+  const tracking = input.trackingUrl ? await recordCustomerShareLink(ctx, id, input.trackingUrl) : null;
   const order = await getOrder(ctx, id);
   if (!order) throw new PortalError("Order not found", 404);
-  return { order, notice };
+  return { order, notice, tracking };
 }

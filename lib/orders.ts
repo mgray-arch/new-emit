@@ -3,6 +3,7 @@ import type { SqlArg } from "@/lib/db";
 import type { PortalContext } from "@/lib/db";
 import { CUSTOMER_LOAD_COLUMNS, withTransaction } from "@/lib/db";
 import { buildStatusLabel, parseOrderNotices, parseStageEvents, stageHistoryText } from "@/lib/build-status";
+import { parseTrackingEvents } from "@/lib/tracking-link";
 import { serializeCustomerOrder, trackingUrlFor } from "@/lib/customer-view";
 import { addDaysISO, denverDate, weekRange } from "@/lib/dates";
 import type { LoadTab, LoadTabCounts } from "@/lib/load-list";
@@ -97,6 +98,7 @@ interface LoadRow {
   slack_notified_at: string | null;
   carrier_notice_log: string | null;
   stage_log: string | null;
+  tracking_event_log: string | null;
 }
 
 const LIST_SQL_HEAD = `
@@ -179,6 +181,7 @@ async function rowToOrder(ctx: PortalContext, row: LoadRow, withDocuments: boole
     slackNotifiedAt,
     notices: parseOrderNotices(row.carrier_notice_log),
     stageEvents: parseStageEvents(row.stage_log),
+    trackingEvents: parseTrackingEvents(row.tracking_event_log),
     buildStatus: buildStatusLabel(order.loadNumber, slackNotifiedAt),
   };
 }

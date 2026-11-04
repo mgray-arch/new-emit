@@ -115,6 +115,12 @@ export interface StageEvent {
   text: string;
 }
 
+/** Tracking started or the customer link changed. The text has no pay and no carrier rate. */
+export interface TrackingEvent {
+  at: string;
+  text: string;
+}
+
 /** Current assignment shown on the load. No pay. */
 export interface HaulCallout {
   company: string;
@@ -189,6 +195,12 @@ export interface CustomerOrder {
   notices?: OrderNotice[];
   /** Stage changes for this order. Empty until one is recorded. */
   stageEvents?: StageEvent[];
+  /** Tracking-link history. Empty until a customer share link is stored. */
+  trackingEvents?: TrackingEvent[];
+  /** Set when this person has not opened the order since tracking started. */
+  trackingBadge?: boolean | null;
+  /** How many times the uploaded BOL file was printed. Detail only. */
+  bolPrintCount?: number;
   /** Current assignment, when one is stored. Omitted until then. No pay. */
   haulCallout?: HaulCallout | null;
   /** Set when this person has not opened the latest carrier update. */

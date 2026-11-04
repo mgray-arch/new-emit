@@ -1,38 +1,12 @@
-"use client";
+import { STATUS_LABEL, type CustomerOrder } from "@/lib/types";
 
-import { PORTAL_STATUSES, STATUS_LABEL, type CustomerOrder, type PortalStatus } from "@/lib/types";
-
-/** Being Prepared, Ready to Ship, Shipped, or Cancelled. View only can see the name. */
-export default function StageField({
-  order,
-  canChange,
-  busy,
-  onChange,
-}: {
-  order: CustomerOrder;
-  canChange: boolean;
-  busy?: boolean;
-  onChange: (status: PortalStatus) => void;
-}) {
+/** The stage is changed on Edit load, where Save stores it. This page only shows it. */
+export default function StageField({ order, canEdit }: { order: CustomerOrder; canEdit?: boolean }) {
   return (
-    <label className="field stage-field">
+    <div className="field stage-field">
       <span>Stage</span>
-      {canChange ? (
-        <select
-          aria-label="Stage"
-          value={order.portalStatus}
-          disabled={busy}
-          onChange={(event) => onChange(event.target.value as PortalStatus)}
-        >
-          {PORTAL_STATUSES.map((status) => (
-            <option key={status} value={status}>
-              {STATUS_LABEL[status]}
-            </option>
-          ))}
-        </select>
-      ) : (
-        <strong>{STATUS_LABEL[order.portalStatus]}</strong>
-      )}
-    </label>
+      <strong>{STATUS_LABEL[order.portalStatus]}</strong>
+      {canEdit ? <p className="mini">Change the stage from Edit load. Saving that form saves the stage.</p> : null}
+    </div>
   );
 }

@@ -333,4 +333,73 @@ describe("carrier history copy", () => {
     expect(page).not.toMatch(/pay|rate|\$/i);
     expect(readFileSync("app/orders/[id]/page.tsx", "utf8")).toContain("CarrierCallout");
   });
+
+  it("matches an all-caps sales order, accepts two calls, and stores only a customer tracking link", async () => {
+    const order = await createLoad("so-track-me");
+    const numbered = await postStatus({ salesOrderNumber: "SO-TRACK-ME", loadNumber: "459200-1" });
+    expect(numbered.status).toBe(200);
+    expect(await numbered.json()).toMatchObject({ orderId: order.id, loadNumber: "459200-1" });
+
+    const badHost = await postStatus({
+      salesOrderNumber: "SO-TRACK-ME",
+      tracking_url: "https://evil.example/tracking/abc",
+    });
+    expect(badHost.status).toBe(400);
+    const httpLink = await postStatus({
+      sales_order_number: "so-track-me",
+      trackingUrl: "http://customer.goselect.com/tracking/abc",
+    });
+    expect(httpLink.status).toBe(400);
+    const wrongPath = await postStatus({
+      orderId: order.id,
+      tracking_url: "https://customer.goselect.com/loads/abc",
+    });
+    expect(wrongPath.status).toBe(400);
+    const withPay = await postStatus({
+      salesOrderNumber: "SO-TRACK-ME",
+      tracking_url: "https://customer.goselect.com/tracking/abc",
+      carrierPay: 10,
+    });
+    expect(withPay.status).toBe(400);
+    const untouched = await ctx.db.prepare(`SELECT tracking_link, carrier_name FROM loads WHERE id = ?`).get(order.id);
+    expect(untouched?.tracking_link ?? null).toBeNull();
+    expect(untouched?.carrier_name ?? null).toBeNull();
+
+    const started = await postStatus({
+      salesOrderNumber: "SO-TRACK-ME",
+      tracking_url: "https://customer.goselect.com/tracking/abc",
+    });
+    expect(started.status).toBe(200);
+    expect(await started.json()).toMatchObject({
+      trackingLink: "https://customer.goselect.com/tracking/abc",
+      tracking: "started",
+    });
+
+    const later = await postStatus({
+      salesOrderNumber: "so-track-me",
+      carrierName: "Northline Freight",
+      mcNumber: "445566",
+      tracking_url: "https://customer.goselect.com/tracking/abc",
+    });
+    expect(later.status).toBe(200);
+    const laterBody = await later.json();
+    expect(laterBody.notice).toBe("assigned");
+    expect(laterBody.tracking).toBe("unchanged");
+    expect(laterBody.loadNumber).toBe("459200-1");
+
+    const cookie = await sessionCookie(customerSession());
+    const detail = await getOrderRoute(new Request(`http://portal.test/api/orders/${order.id}`, { headers: headers(cookie) }), {
+      params: Promise.resolve({ id: order.id }),
+    });
+    const viewed = (await detail.json()).order as CustomerOrder;
+    expect(viewed.trackingLink).toBe("https://customer.goselect.com/tracking/abc");
+    expect(viewed.trackingEvents?.map((event) => event.text)).toEqual(["Tracking started."]);
+    expect(viewed.trackingBadge).toBe(true);
+    expect(JSON.stringify(viewed.trackingEvents)).not.toMatch(/pay|rate|\$/i);
+
+    const listed = await listOrdersRoute(new Request("http://portal.test/api/orders?q=so-track-me", { headers: headers(cookie) }));
+    const row = (await listed.json()).orders.find((item: CustomerOrder) => item.id === order.id);
+    expect(row.trackingBadge).toBeUndefined();
+    expect(row.trackingLink).toBe("https://customer.goselect.com/tracking/abc");
+  });
 });
