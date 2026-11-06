@@ -4,7 +4,3 @@ import type { PortalStatus } from "@/lib/types";
 export function stageBecomesReadyToShip(current: PortalStatus | null | undefined, next: PortalStatus): boolean {
   return next === "ready_to_ship" && current !== "ready_to_ship";
 }
-
-export function readyToShipConfirmText(): string {
-  return "Saving as Ready to Ship posts this order to Slack once. Load Builder uses that post. Being Prepared does not.";
-}

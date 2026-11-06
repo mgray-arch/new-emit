@@ -27,8 +27,8 @@ interface EmitUser {
 const PERMISSIONS: Array<{ value: EmitUser["permission"]; label: string; detail: string }> = [
   { value: "view", label: "View only", detail: "Can look at loads. Cannot add loads. No pricing." },
   { value: "add", label: "Add loads", detail: "Can add and edit loads. No pricing." },
-  { value: "pricing", label: "See pricing", detail: "An EMIT admin sees the price EMIT pays Select. A regular user does not. Cannot add loads. Never carrier pay." },
-  { value: "full", label: "Full access", detail: "Can add loads. An EMIT admin also sees the price EMIT pays. A regular user does not. Never carrier pay." },
+  { value: "pricing", label: "See pricing", detail: "An EMIT admin sees the price EMIT pays Select. Sales and Loader do not. Cannot add loads. Never carrier pay." },
+  { value: "full", label: "Full access", detail: "Can add loads. An EMIT admin also sees the price EMIT pays. Sales and Loader do not. Never carrier pay." },
 ];
 
 export default function UsersPage() {
@@ -143,7 +143,7 @@ export default function UsersPage() {
     const nextPermission = patch.permission ?? user.permission;
     const nextAccess = patch.access ?? user.access;
     const label = PERMISSIONS.find((item) => item.value === nextPermission)?.label ?? nextPermission;
-    setMessage(`${user.email} is ${nextAccess === "admin" ? "an EMIT admin" : "a regular EMIT user"} with ${label}.`);
+    setMessage(`${user.email} is ${nextAccess === "admin" ? "an EMIT admin" : "Sales or Loader"} with ${label}.`);
     await load();
   }
 
@@ -315,7 +315,7 @@ export default function UsersPage() {
         ))}
         <h2>EMIT users</h2>
         <p className="lede">
-          Only Select can add someone here. An email that is not on this list cannot sign in as EMIT. Each person is an EMIT admin or a regular user, and has one permission. A regular user never sees the price EMIT pays Select. An EMIT admin with see pricing or full access does. They never show carrier pay. An EMIT admin can manage saved locations unless the permission is view only.
+          Only Select can add someone here. An email that is not on this list cannot sign in as EMIT. Each person is an EMIT admin, or Sales or Loader, and has one permission. Sales and Loader never see the price EMIT pays Select. An EMIT admin with see pricing or full access does. They never show carrier pay. An EMIT admin can manage saved locations unless the permission is view only.
         </p>
         {error && <p className="error">{error}</p>}
         {message && <p className="mini">{message}</p>}
@@ -342,7 +342,7 @@ export default function UsersPage() {
           <div className="field">
             <label htmlFor="new-access">Access</label>
             <select id="new-access" value={access} onChange={(event) => setAccess(event.target.value as EmitUser["access"])}>
-              <option value="regular">Regular EMIT user</option>
+              <option value="regular">Sales or Loader</option>
               <option value="admin">EMIT admin</option>
             </select>
           </div>
@@ -399,7 +399,7 @@ export default function UsersPage() {
                 value={user.access}
                 onChange={(event) => saveUser(user, { access: event.target.value as EmitUser["access"] })}
               >
-                <option value="regular">Regular EMIT user</option>
+                <option value="regular">Sales or Loader</option>
                 <option value="admin">EMIT admin</option>
               </select>
             </label>

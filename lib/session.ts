@@ -89,6 +89,9 @@ const LEGACY_VIEW_AS: Record<string, ViewAsPreview> = {
 };
 
 export function encodeViewAs(preview: ViewAsPreview): string {
+  if (preview.profile === "sales" || preview.profile === "loader") {
+    return `regular:view:${preview.profile}`;
+  }
   return `${preview.access}:${preview.permission}`;
 }
 
@@ -97,7 +100,12 @@ export function parseViewAs(value: string | null | undefined): ViewAsPreview | n
   if (!value) return null;
   const legacy = LEGACY_VIEW_AS[value];
   if (legacy) return legacy;
-  const [access, permission] = value.split(":");
+  if (value === "sales" || value === "loader") {
+    return { access: "regular", permission: "view", profile: value };
+  }
+  const [access, permission, profile] = value.split(":");
+  const named = profile === "sales" || profile === "loader" ? profile : null;
+  if (named) return { access: "regular", permission: "view", profile: named };
   if ((access === "admin" || access === "regular") && isEmitPermission(permission)) {
     return { access: access as EmitAccess, permission: permission as EmitPermission };
   }

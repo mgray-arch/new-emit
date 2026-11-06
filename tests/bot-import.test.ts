@@ -91,8 +91,9 @@ describe("SAM status, equipment, and sales order mapping", () => {
     expect(mapImportStatus("complete")).toEqual({ portalStatus: "shipped", trackingStage: "delivered" });
     expect(mapImportStatus("In Transit")).toEqual({ portalStatus: "shipped", trackingStage: "in_transit" });
     expect(mapImportStatus("active")).toEqual({ portalStatus: "shipped", trackingStage: "in_transit" });
-    expect(mapImportStatus("Covered")).toEqual({ portalStatus: "ready_to_ship", trackingStage: "booked" });
-    expect(mapImportStatus("Dispatched")).toEqual({ portalStatus: "ready_to_ship", trackingStage: "booked" });
+    expect(mapImportStatus("Covered")).toEqual({ portalStatus: "ready_to_ship", trackingStage: "submitted" });
+    expect(mapImportStatus("Dispatched")).toEqual({ portalStatus: "ready_to_ship", trackingStage: "submitted" });
+    expect(mapImportStatus("ready to ship")).toEqual({ portalStatus: "ready_to_ship", trackingStage: "submitted" });
     expect(mapImportStatus("Loaded")).toEqual({ portalStatus: "shipped", trackingStage: "at_pickup" });
     expect(mapImportStatus("At Shipper")).toEqual({ portalStatus: "shipped", trackingStage: "at_pickup" });
     expect(mapImportStatus("At Receiver")).toEqual({ portalStatus: "shipped", trackingStage: "in_transit" });

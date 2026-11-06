@@ -119,16 +119,26 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     router.refresh();
   }
 
-  async function setView(access: "select" | "admin" | "regular", permission?: EmitPermission) {
-    const nextPermission = permission ?? me?.viewAs?.permission ?? (access === "admin" ? "full" : "add");
+  async function setView(access: "select" | "admin" | "sales" | "loader", permission?: EmitPermission) {
+    const nextPermission = permission ?? me?.viewAs?.permission ?? "full";
     const response = await fetch("/api/view-as", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(access === "select" ? { access: null } : { access, permission: nextPermission }),
+      body: JSON.stringify(access === "select" ? { access: null } : access === "admin" ? { access, permission: nextPermission } : { access }),
     });
     if (!response.ok) return;
     window.location.href = "/";
   }
+
+  const viewChoice = me?.viewAs?.profile === "sales" || me?.viewAs?.profile === "loader" ? me.viewAs.profile : (me?.viewAs?.access ?? "select");
+  const viewAsName =
+    me?.viewAs?.profile === "sales"
+      ? "Sales"
+      : me?.viewAs?.profile === "loader"
+        ? "Loader"
+        : me?.viewAs?.access === "admin"
+          ? "an EMIT admin"
+          : "an EMIT user";
 
   const initials = (me?.name || "EM")
     .split(" ")
@@ -191,21 +201,22 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 <span>View as</span>
                 <select
                   aria-label="View as"
-                  value={me.viewAs?.access ?? "select"}
-                  onChange={(event) => void setView(event.target.value as "select" | "admin" | "regular")}
+                  value={viewChoice}
+                  onChange={(event) => void setView(event.target.value as "select" | "admin" | "sales" | "loader")}
                 >
                   <option value="select">Select view</option>
                   <option value="admin">View as EMIT admin</option>
-                  <option value="regular">View as EMIT regular user</option>
+                  <option value="sales">View as Sales</option>
+                  <option value="loader">View as Loader</option>
                 </select>
               </label>
-              {me.viewAs ? (
+              {me.viewAs?.access === "admin" && !me.viewAs.profile ? (
                 <label>
                   <span>Permission</span>
                   <select
                     aria-label="Permission to preview"
                     value={me.viewAs.permission}
-                    onChange={(event) => void setView(me.viewAs?.access ?? "regular", event.target.value as EmitPermission)}
+                    onChange={(event) => void setView("admin", event.target.value as EmitPermission)}
                   >
                     {(Object.keys(PERMISSION_LABEL) as EmitPermission[]).map((permission) => (
                       <option key={permission} value={permission}>
@@ -260,8 +271,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         {me?.viewAs ? (
           <div className="view-as-bar" role="status">
             <span>
-              Read-only. Viewing as {me.viewAs.access === "admin" ? "an EMIT admin" : "a regular EMIT user"} with{" "}
-              {PERMISSION_LABEL[me.viewAs.permission]}. You see what that account sees. Nothing is saved. Carrier pay stays hidden.
+              Read-only. Viewing as {viewAsName}
+              {me.viewAs.profile ? ". Sales and Loader can look, and they do not see EMIT's cost." : me.viewAs.access === "admin" ? ` with ${PERMISSION_LABEL[me.viewAs.permission]}.` : "."}{" "}
+              You see what that account sees. Nothing is saved. Carrier pay stays hidden.
             </span>
             <button className="btn secondary" type="button" onClick={() => void setView("select")}>
               Back to Select view

@@ -1,5 +1,6 @@
 import type { PortalContext } from "@/lib/db";
 import { PortalError } from "@/lib/http";
+import { timelineThrough } from "@/lib/orders";
 import { sensitiveReason } from "@/lib/sensitive";
 import type { CustomerOrder } from "@/lib/types";
 
@@ -125,5 +126,15 @@ export async function recordCarrierAssignment(
   await ctx.db
     .prepare(`UPDATE loads SET carrier_name = ?, carrier_mc = ?, carrier_notice_log = ?, updated_at = ? WHERE id = ?`)
     .run(next.name || null, next.mc || null, JSON.stringify(log), now, order.id);
+  await markBookedForCarrier(ctx, order.id, now);
   return kind;
+}
+
+/** A recorded carrier is what Booked means. Later stages stay where they are. */
+async function markBookedForCarrier(ctx: PortalContext, id: string, at: string): Promise<void> {
+  const row = await ctx.db.prepare(`SELECT tracking_stage FROM loads WHERE id = ?`).get(id);
+  if (String(row?.tracking_stage ?? "") !== "submitted") return;
+  await ctx.db
+    .prepare(`UPDATE loads SET tracking_stage = 'booked', timeline_json = ? WHERE id = ?`)
+    .run(JSON.stringify(timelineThrough("booked", at)), id);
 }
