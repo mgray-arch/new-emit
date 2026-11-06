@@ -60,6 +60,8 @@ describe("load lists", () => {
       bolCount: 0,
     };
     expect(displayStatus(base, today)).toBe("booked");
+    expect(displayStatus({ ...base, trackingStage: "submitted", portalStatus: "ready_to_ship" }, today)).toBe("pending");
+    expect(displayStatus({ ...base, trackingStage: "submitted", portalStatus: "being_prepared" }, today)).toBe("pending");
     expect(displayStatus({ ...base, trackingStage: "in_transit", portalStatus: "shipped" }, today)).toBe("in_transit");
     expect(displayStatus({ ...base, trackingStage: "delivered", portalStatus: "shipped" }, today)).toBe("delivered");
     expect(displayStatus({ ...base, trackingStage: "submitted", portalStatus: "being_prepared", loadNumber: null }, today)).toBe("attention");

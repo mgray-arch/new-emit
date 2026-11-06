@@ -329,8 +329,8 @@ Status is the SAM transit status:
 | SAM status | Portal status | Tracking stage |
 | --- | --- | --- |
 | Open, and the words pending, submitted, being prepared | Being Prepared | Submitted |
-| Covered, and the words booked, ready to ship | Ready to Ship | Booked |
-| Dispatched | Ready to Ship | Booked |
+| Covered, and the words booked, ready to ship | Ready to Ship | Submitted |
+| Dispatched | Ready to Ship | Submitted |
 | At Shipper, At Pickup, Loaded | Shipped | At Pickup |
 | In Transit, and the word active | Shipped | In Transit |
 | At Receiver, Out for Delivery | Shipped | In Transit |

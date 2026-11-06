@@ -3,7 +3,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { POST as samCallback } from "@/app/api/integrations/sam-load/route";
-import { GET as getOrderRoute } from "@/app/api/orders/[id]/route";
+import { GET as getOrderRoute, PATCH as patchOrderRoute } from "@/app/api/orders/[id]/route";
 import { GET as listOrdersRoute, POST as createOrderRoute } from "@/app/api/orders/route";
 import BuildStatus from "@/components/build-status";
 import CarrierBadge from "@/components/carrier-badge";
@@ -12,11 +12,11 @@ import OrderHistory from "@/components/order-history";
 import UpdateBanner from "@/components/update-banner";
 import { GET as updatesRoute } from "@/app/api/updates/route";
 import { buildStatusLabel } from "@/lib/build-status";
-import { attentionReasons } from "@/lib/load-list";
+import { attentionReasons, displayStatus, simpleStepIndex } from "@/lib/load-list";
 import { findRateField, historyText, sameCarrier } from "@/lib/carrier-notice";
 import { carrierBadgeLabel, updateBannerText } from "@/lib/carrier-seen";
 import { documentPrintHtml } from "@/lib/document-print";
-import type { PortalContext } from "@/lib/db";
+import { migrateUnassignedBooked, type PortalContext } from "@/lib/db";
 import type { CustomerOrder } from "@/lib/types";
 import { adminSession, customerSession, expectNoSecrets, seededPortal, sessionCookie } from "./helpers";
 
@@ -169,6 +169,44 @@ describe("carrier assignment in the portal", () => {
     expect(row?.carrier_mc ?? null).toBeNull();
     expect(row?.carrier_notice_log ?? null).toBeNull();
     expect(row?.customer_cost_cents ?? null).toBeNull();
+  });
+
+  it("keeps Ready to Ship ordered until a carrier is assigned", async () => {
+    const order = await createLoad("SO-NOT-BOOKED");
+    const cookie = await sessionCookie(customerSession());
+    const moved = await patchOrderRoute(
+      new Request(`http://portal.test/api/orders/${order.id}`, {
+        method: "PATCH",
+        headers: headers(cookie),
+        body: JSON.stringify({ portalStatus: "ready_to_ship" }),
+      }),
+      { params: Promise.resolve({ id: order.id }) },
+    );
+    expect(moved.status).toBe(200);
+    const ready = (await moved.json()).order as CustomerOrder;
+    expect(ready.portalStatus).toBe("ready_to_ship");
+    expect(ready.trackingStage).toBe("submitted");
+    expect(simpleStepIndex(ready.trackingStage)).toBe(0);
+    expect(displayStatus(ready, "2026-10-14", { needsAttention: false })).toBe("pending");
+    expect(displayStatus(ready, "2026-10-14")).not.toBe("booked");
+
+    const assigned = await postStatus({ orderId: order.id, carrierName: "Northline Freight", mcNumber: "445566" });
+    expect(assigned.status).toBe(200);
+    const detail = await getOrderRoute(new Request(`http://portal.test/api/orders/${order.id}`, { headers: headers(cookie) }), {
+      params: Promise.resolve({ id: order.id }),
+    });
+    const booked = (await detail.json()).order as CustomerOrder;
+    expect(booked.trackingStage).toBe("booked");
+    expect(simpleStepIndex(booked.trackingStage)).toBe(1);
+    expect(displayStatus(booked, "2026-10-14", { needsAttention: false })).toBe("booked");
+    expect(booked.haulCallout?.company).toBe("Northline Freight");
+
+    await ctx.db.prepare(`UPDATE loads SET tracking_stage = 'booked', carrier_name = NULL, carrier_mc = NULL, carrier_notice_log = NULL WHERE id = ?`).run(order.id);
+    const kept = await createLoad("SO-HAS-TRUCK");
+    await ctx.db.prepare(`UPDATE loads SET tracking_stage = 'booked', carrier_name = 'Northline Freight' WHERE id = ?`).run(kept.id);
+    await migrateUnassignedBooked(ctx.db);
+    expect((await ctx.db.prepare(`SELECT tracking_stage FROM loads WHERE id = ?`).get(order.id))?.tracking_stage).toBe("submitted");
+    expect((await ctx.db.prepare(`SELECT tracking_stage FROM loads WHERE id = ?`).get(kept.id))?.tracking_stage).toBe("booked");
   });
 
   it("shows a written-back SAM number on the board instead of Pending", async () => {

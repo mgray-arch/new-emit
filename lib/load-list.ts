@@ -92,7 +92,7 @@ export function displayStatus(
   if (order.trackingStage === "in_transit" || order.trackingStage === "at_pickup" || order.portalStatus === "shipped") {
     return "in_transit";
   }
-  if (order.trackingStage === "booked" || order.portalStatus === "ready_to_ship") return "booked";
+  if (order.trackingStage === "booked") return "booked";
   return "pending";
 }
 

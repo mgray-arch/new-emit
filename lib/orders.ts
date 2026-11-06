@@ -492,11 +492,14 @@ export function timelineThrough(stage: TrackingStage, at: string): TimelineEvent
   }));
 }
 
+/**
+ * Portal stage is not a truck booking. Ready to Ship stays Ordered until a carrier
+ * is recorded. Shipped still means the load is on the road.
+ */
 function advanceStage(current: TrackingStage, portalStatus: PortalStatus): TrackingStage {
   if (portalStatus === "cancelled") return current;
   const order = TRACKING_STAGES;
-  const minimum: TrackingStage =
-    portalStatus === "being_prepared" ? "submitted" : portalStatus === "ready_to_ship" ? "booked" : "in_transit";
+  const minimum: TrackingStage = portalStatus === "shipped" ? "in_transit" : "submitted";
   return order.indexOf(minimum) > order.indexOf(current) ? minimum : current;
 }
 

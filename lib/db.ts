@@ -418,8 +418,35 @@ export async function openDatabase(file?: string): Promise<SqlDatabase> {
   await migrateLoadSource(db);
   await migrateChatEnabled(db);
   await migrateLoadStatus(db);
+  await migrateUnassignedBooked(db);
   await db.exec(`DROP TABLE IF EXISTS outbox`);
   return db;
+}
+
+/**
+ * Booked means a carrier is stored. Older saves stamped Ready to Ship as booked
+ * with no carrier. Those loads go back to Ordered.
+ */
+export async function migrateUnassignedBooked(db: SqlDatabase): Promise<void> {
+  if (!(await columnReadable(db, "loads", "tracking_stage"))) return;
+  if (!(await columnReadable(db, "loads", "carrier_name"))) return;
+  const rows = await db
+    .prepare(
+      `SELECT id, created_at FROM loads
+       WHERE tracking_stage = 'booked'
+         AND (carrier_name IS NULL OR trim(carrier_name) = '')
+         AND (carrier_mc IS NULL OR trim(carrier_mc) = '')
+         AND (carrier_notice_log IS NULL OR (
+           carrier_notice_log NOT LIKE '%"kind":"assigned"%'
+           AND carrier_notice_log NOT LIKE '%"kind":"changed"%'
+         ))`,
+    )
+    .all();
+  for (const row of rows) {
+    const at = typeof row.created_at === "string" && row.created_at ? row.created_at : new Date().toISOString();
+    const timeline = JSON.stringify([{ stage: "submitted", at, label: "Submitted" }]);
+    await db.prepare(`UPDATE loads SET tracking_stage = 'submitted', timeline_json = ? WHERE id = ?`).run(timeline, String(row.id));
+  }
 }
 
 async function columnNames(db: SqlDatabase, table: string): Promise<string[]> {
