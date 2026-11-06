@@ -493,7 +493,7 @@ export function timelineThrough(stage: TrackingStage, at: string): TimelineEvent
 }
 
 /**
- * Portal stage is not a truck booking. Ready to Ship stays Ordered until a carrier
+ * Portal stage is not a truck booking. Ready to Ship stays Confirmed until a carrier
  * is recorded. Shipped still means the load is on the road.
  */
 function advanceStage(current: TrackingStage, portalStatus: PortalStatus): TrackingStage {

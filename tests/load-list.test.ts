@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { GET as exportOrders } from "@/app/api/orders/export/route";
 import { GET as listOrdersRoute } from "@/app/api/orders/route";
-import { attentionReasons, displayStatus, emptyListMessage, fileSummary, loadsToCsv, pickupGroup, simpleStepIndex, tripCaption } from "@/lib/load-list";
+import { DISPLAY_STATUS_LABEL, SIMPLE_STEPS, attentionReasons, displayStatus, emptyListMessage, fileSummary, loadsToCsv, pickupGroup, simpleStepIndex, tripCaption } from "@/lib/load-list";
 import { listBoard, listOrders } from "@/lib/orders";
 import type { PortalContext } from "@/lib/db";
 import type { CustomerOrder } from "@/lib/types";
@@ -61,6 +61,7 @@ describe("load lists", () => {
     };
     expect(displayStatus(base, today)).toBe("booked");
     expect(displayStatus({ ...base, trackingStage: "submitted", portalStatus: "ready_to_ship" }, today)).toBe("pending");
+    expect(DISPLAY_STATUS_LABEL.pending).toBe("Confirmed");
     expect(displayStatus({ ...base, trackingStage: "submitted", portalStatus: "being_prepared" }, today)).toBe("pending");
     expect(displayStatus({ ...base, trackingStage: "in_transit", portalStatus: "shipped" }, today)).toBe("in_transit");
     expect(displayStatus({ ...base, trackingStage: "delivered", portalStatus: "shipped" }, today)).toBe("delivered");
@@ -73,6 +74,9 @@ describe("load lists", () => {
     expect(fileSummary({ ...base, attachmentCount: 1, bolCount: 1, pendingReviewCount: 1 })).toBe("2 files, 1 awaiting review");
     expect(fileSummary({ ...base, attachmentCount: 0, bolCount: 0, pendingReviewCount: 0 })).toBe("No files yet");
     expect(fileSummary({ ...base, attachmentCount: 0, bolCount: 0, pendingReviewCount: 1 })).toBe("1 awaiting review");
+    expect(SIMPLE_STEPS[0]).toBe("Confirmed");
+    expect(tripCaption("submitted", false)).toBe("Confirmed. Select has this load. A truck is not booked yet.");
+    expect(tripCaption("booked", false)).toBe("Booked. A truck is booked and has not arrived at the dock yet.");
     expect(simpleStepIndex("submitted")).toBe(0);
     expect(simpleStepIndex("booked")).toBe(1);
     expect(simpleStepIndex("at_pickup")).toBe(2);

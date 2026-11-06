@@ -425,7 +425,7 @@ export async function openDatabase(file?: string): Promise<SqlDatabase> {
 
 /**
  * Booked means a carrier is stored. Older saves stamped Ready to Ship as booked
- * with no carrier. Those loads go back to Ordered.
+ * with no carrier. Those loads go back to Confirmed.
  */
 export async function migrateUnassignedBooked(db: SqlDatabase): Promise<void> {
   if (!(await columnReadable(db, "loads", "tracking_stage"))) return;
@@ -444,7 +444,7 @@ export async function migrateUnassignedBooked(db: SqlDatabase): Promise<void> {
     .all();
   for (const row of rows) {
     const at = typeof row.created_at === "string" && row.created_at ? row.created_at : new Date().toISOString();
-    const timeline = JSON.stringify([{ stage: "submitted", at, label: "Submitted" }]);
+    const timeline = JSON.stringify([{ stage: "submitted", at, label: "Confirmed" }]);
     await db.prepare(`UPDATE loads SET tracking_stage = 'submitted', timeline_json = ? WHERE id = ?`).run(timeline, String(row.id));
   }
 }

@@ -235,7 +235,7 @@ A drop is linked to a receiver when the company name matches, so the receiver pa
 
 Select staff see four lists: **Needs Attention** (no Select load number, files in review, an in-transit load with no tracking link, or a past-due delivery), **Active**, **Delivered** for the last 7 days, and **History**. A delivered historical import is not flagged Missing tracking or Past due. An import that is still in transit can be. EMIT admins, regular EMIT users, and Select **View as** do not get that list, its count, or the Needs Attention badge. Those loads stay on Active or Delivered, so nothing is hidden from them. A delivered load moves to History on its own after those 7 days. Cancelled loads are in History too.
 
-Each load is a card: the lane in bold, pickup and delivery dates, a colored status, and Track when there is a link. **Entered by** is on the card and the load page for Select and every EMIT user: the name and email, the email alone when the name is missing, or Unknown on older loads. That line is only the person. It is not carrier pay, and view only or add loads still do not see EMIT's cost. Long notes stay on two lines until you expand them. Open a card for the four-step timeline (Ordered, Booked, Picked up, Delivered) and the stops, documents, tracking, and notes. A PDF opens with **View PDF**, and a PNG or JPEG opens with **View**, both in a new tab. **Download** saves the file. Anything else only downloads. Light mode is in the header. EMIT users see a short tip the first time.
+Each load is a card: the lane in bold, pickup and delivery dates, a colored status, and Track when there is a link. **Entered by** is on the card and the load page for Select and every EMIT user: the name and email, the email alone when the name is missing, or Unknown on older loads. That line is only the person. It is not carrier pay, and view only or add loads still do not see EMIT's cost. Long notes stay on two lines until you expand them. Open a card for the four-step timeline (Confirmed, Booked, Picked up, Delivered) and the stops, documents, tracking, and notes. A PDF opens with **View PDF**, and a PNG or JPEG opens with **View**, both in a new tab. **Download** saves the file. Anything else only downloads. Light mode is in the header. EMIT users see a short tip the first time.
 
 One search box looks through every list for a Select load number, an EMIT order number, a city, or a receiver. Date range, pickup site, receiver, and status narrow whichever list you are in. Loads are grouped by pickup date. The page loads 25 at a time.
 
@@ -328,14 +328,14 @@ Status is the SAM transit status:
 
 | SAM status | Portal status | Tracking stage |
 | --- | --- | --- |
-| Open, and the words pending, submitted, being prepared | Being Prepared | Submitted |
-| Covered, and the words booked, ready to ship | Ready to Ship | Submitted |
-| Dispatched | Ready to Ship | Submitted |
+| Open, and the words pending, submitted, being prepared | Being Prepared | Confirmed |
+| Covered, and the words booked, ready to ship | Ready to Ship | Confirmed |
+| Dispatched | Ready to Ship | Confirmed |
 | At Shipper, At Pickup, Loaded | Shipped | At Pickup |
 | In Transit, and the word active | Shipped | In Transit |
 | At Receiver, Out for Delivery | Shipped | In Transit |
 | Delivered, Completed | Shipped | Delivered |
-| Cancelled, voided | Cancelled | Submitted |
+| Cancelled, voided | Cancelled | Confirmed |
 
 Delivered and Completed land on Delivered in the list, then History after 7 days. They are not Missing tracking and they are not Past due, even with no share link and an old delivery date. In Transit with no link is still Missing tracking. A delivery date before today on a load that is not delivered is still Past due.
 

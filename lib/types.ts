@@ -53,7 +53,7 @@ export const STATUS_LABEL: Record<PortalStatus, string> = {
 };
 
 export const STAGE_LABEL: Record<TrackingStage, string> = {
-  submitted: "Submitted",
+  submitted: "Confirmed",
   booked: "Booked",
   at_pickup: "At Pickup",
   in_transit: "In Transit",

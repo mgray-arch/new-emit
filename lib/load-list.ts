@@ -71,7 +71,7 @@ export const DISPLAY_STATUSES = ["pending", "booked", "in_transit", "delivered",
 export type DisplayStatus = (typeof DISPLAY_STATUSES)[number];
 
 export const DISPLAY_STATUS_LABEL: Record<DisplayStatus, string> = {
-  pending: "Pending",
+  pending: "Confirmed",
   booked: "Booked",
   in_transit: "In Transit",
   delivered: "Delivered",
@@ -105,7 +105,7 @@ export function fileSummary(order: Pick<CustomerOrder, "attachmentCount" | "bolC
   return filePart ? `${filePart}, ${review}` : review.charAt(0).toUpperCase() + review.slice(1);
 }
 
-export const SIMPLE_STEPS = ["Ordered", "Booked", "Picked up", "Delivered"] as const;
+export const SIMPLE_STEPS = ["Confirmed", "Booked", "Picked up", "Delivered"] as const;
 
 export function simpleStepIndex(stage: TrackingStage): number {
   if (stage === "submitted") return 0;
@@ -116,8 +116,8 @@ export function simpleStepIndex(stage: TrackingStage): number {
 
 export function tripCaption(stage: TrackingStage, cancelled: boolean): string {
   if (cancelled) return "This load was cancelled.";
-  if (stage === "submitted") return "Ordered. Select has not booked a truck yet.";
-  if (stage === "booked") return "Booked. The truck has not arrived at the dock.";
+  if (stage === "submitted") return "Confirmed. Select has this load. A truck is not booked yet.";
+  if (stage === "booked") return "Booked. A truck is booked and has not arrived at the dock yet.";
   if (stage === "at_pickup") return "The driver is at the pickup.";
   if (stage === "in_transit") return "Picked up. The truck is on the road.";
   return "Delivered.";
