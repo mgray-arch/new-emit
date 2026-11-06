@@ -195,19 +195,42 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
         setData(body);
         setRows((current) => {
           if (page === 1) return body.orders;
-          const seen = new Set(current.map((order) => order.id));
-          return [...current, ...body.orders.filter((order) => !seen.has(order.id))];
+          const incoming = new Map(body.orders.map((order) => [order.id, order]));
+          const merged = current.map((order) => incoming.get(order.id) ?? order);
+          const seen = new Set(merged.map((order) => order.id));
+          return [...merged, ...body.orders.filter((order) => !seen.has(order.id))];
         });
         setError("");
       })
       .catch(() => setError("We couldn't load your loads. Refresh the page and try again."));
   }, [listReady, tab, status, query, shipFrom, shipTo, pickup, receiver, page, reload, updatedOnly]);
 
+  useEffect(() => {
+    let armed = false;
+    const arm = window.setTimeout(() => {
+      armed = true;
+    }, 500);
+    function refreshIfShown() {
+      if (!armed || document.visibilityState === "hidden") return;
+      setReload((value) => value + 1);
+    }
+    window.addEventListener("focus", refreshIfShown);
+    window.addEventListener("pageshow", refreshIfShown);
+    document.addEventListener("visibilitychange", refreshIfShown);
+    return () => {
+      window.clearTimeout(arm);
+      window.removeEventListener("focus", refreshIfShown);
+      window.removeEventListener("pageshow", refreshIfShown);
+      document.removeEventListener("visibilitychange", refreshIfShown);
+    };
+  }, []);
+
   async function openEdit(id: string) {
     const response = await fetch(`/api/orders/${id}`);
     if (!response.ok) return;
     const body = await response.json();
     setEditing(body.order);
+    replaceOrder(body.order);
     setDraft(draftFromOrder(body.order));
     setSubmitted(null);
     setFormError("");
@@ -663,6 +686,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                   canCorrect
                   onUpdated={(order) => {
                     setEditing(order);
+                    replaceOrder(order);
                     setSubmitted((current) => (current?.id === order.id ? order : current));
                   }}
                 />
@@ -671,6 +695,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                   trackingLink={editing.trackingLink}
                   onUpdated={(order) => {
                     setEditing(order);
+                    replaceOrder(order);
                     setSubmitted((current) => (current?.id === order.id ? order : current));
                   }}
                 />

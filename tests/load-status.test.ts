@@ -12,6 +12,7 @@ import OrderHistory from "@/components/order-history";
 import UpdateBanner from "@/components/update-banner";
 import { GET as updatesRoute } from "@/app/api/updates/route";
 import { buildStatusLabel } from "@/lib/build-status";
+import { attentionReasons } from "@/lib/load-list";
 import { findRateField, historyText, sameCarrier } from "@/lib/carrier-notice";
 import { carrierBadgeLabel, updateBannerText } from "@/lib/carrier-seen";
 import { documentPrintHtml } from "@/lib/document-print";
@@ -168,6 +169,39 @@ describe("carrier assignment in the portal", () => {
     expect(row?.carrier_mc ?? null).toBeNull();
     expect(row?.carrier_notice_log ?? null).toBeNull();
     expect(row?.customer_cost_cents ?? null).toBeNull();
+  });
+
+  it("shows a written-back SAM number on the board instead of Pending", async () => {
+    const order = await createLoad("TEST TEST TEST");
+    await ctx.db.prepare(`UPDATE loads SET must_deliver_date = ? WHERE id = ?`).run("2026-10-01", order.id);
+    const posted = await postStatus({ salesOrderNumber: "TEST TEST TEST", loadNumber: "466318-1" });
+    expect(posted.status).toBe(200);
+    expect(await posted.json()).toMatchObject({
+      orderId: order.id,
+      salesOrderNumber: "TEST TEST TEST",
+      loadNumber: "466318-1",
+    });
+
+    const cookie = await sessionCookie(adminSession());
+    const listed = await listOrdersRoute(
+      new Request("http://portal.test/api/orders?q=TEST%20TEST%20TEST&pageSize=20", { headers: headers(cookie) }),
+    );
+    expect(listed.status).toBe(200);
+    const body = await listed.json();
+    const row = body.orders.find((item: CustomerOrder) => item.id === order.id);
+    expect(row.salesOrderNumber).toBe("TEST TEST TEST");
+    expect(row.loadNumber).toBe("466318-1");
+    expect(row.buildStatus).toBe("Built in SAM: 466318-1");
+    expect(attentionReasons(row, body.today)).not.toContain("Pending Select load number");
+    expect(attentionReasons(row, body.today)).toContain("Past due");
+
+    const detail = await getOrderRoute(new Request(`http://portal.test/api/orders/${order.id}`, { headers: headers(cookie) }), {
+      params: Promise.resolve({ id: order.id }),
+    });
+    const detailOrder = (await detail.json()).order as CustomerOrder;
+    expect(detailOrder.loadNumber).toBe("466318-1");
+    expect(detailOrder.salesOrderNumber).toBe("TEST TEST TEST");
+    expect(detailOrder.buildStatus).toBe("Built in SAM: 466318-1");
   });
 
   it("stores the carrier with no mail configuration and does not call a mail API", async () => {

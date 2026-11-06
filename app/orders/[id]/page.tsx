@@ -54,24 +54,46 @@ export default function OrderPage() {
 
   useEffect(() => {
     if (!params.id) return;
-    fetch(`/api/orders/${params.id}`)
-      .then(async (response) => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const response = await fetch(`/api/orders/${params.id}`);
+        if (cancelled) return;
         if (response.status === 404) {
           setProblem("We couldn't find that load. It may have been removed, or the link is wrong.");
-          return null;
+          return;
         }
         if (!response.ok) {
           setProblem("We couldn't open this load. Refresh the page and try again.");
-          return null;
+          return;
         }
-        return response.json();
-      })
-      .then((body) => {
-        if (!body) return;
+        const body = await response.json();
+        if (cancelled) return;
         setOrder(body.order);
         setProblem("");
-      })
-      .catch(() => setProblem("We couldn't open this load. Refresh the page and try again."));
+      } catch {
+        if (!cancelled) setProblem("We couldn't open this load. Refresh the page and try again.");
+      }
+    }
+    void load();
+    let armed = false;
+    const arm = window.setTimeout(() => {
+      armed = true;
+    }, 500);
+    function refreshIfShown() {
+      if (!armed || document.visibilityState === "hidden") return;
+      void load();
+    }
+    window.addEventListener("focus", refreshIfShown);
+    window.addEventListener("pageshow", refreshIfShown);
+    document.addEventListener("visibilitychange", refreshIfShown);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(arm);
+      window.removeEventListener("focus", refreshIfShown);
+      window.removeEventListener("pageshow", refreshIfShown);
+      document.removeEventListener("visibilitychange", refreshIfShown);
+    };
   }, [params.id]);
 
   const today = denverDate(new Date());
