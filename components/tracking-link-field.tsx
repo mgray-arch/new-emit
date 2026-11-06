@@ -16,9 +16,12 @@ export default function TrackingLinkField({
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
   const [pending, setPending] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const stored = trackingLink?.trim() ?? "";
 
   useEffect(() => {
     setValue(trackingLink ?? "");
+    setEditing(false);
   }, [trackingLink, orderId]);
 
   async function save() {
@@ -34,6 +37,7 @@ export default function TrackingLinkField({
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Could not save the tracking link");
       setSaved(body.order.trackingLink ? "Saved the tracking link." : "Cleared the tracking link.");
+      setEditing(false);
       onUpdated(body.order);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save the tracking link");
@@ -42,8 +46,36 @@ export default function TrackingLinkField({
     }
   }
 
+  if (!editing && stored) {
+    return (
+      <div className="sam-status" data-sam="link">
+        <div className="sam-copy">
+          <span className="k">Tracking link</span>
+          <a className="sam-link" href={stored}>
+            {stored}
+          </a>
+          {saved && <p className="mini">{saved}</p>}
+        </div>
+        <button className="text-link" type="button" onClick={() => { setError(""); setSaved(""); setEditing(true); }}>
+          Change
+        </button>
+      </div>
+    );
+  }
+
+  if (!editing) {
+    return (
+      <div>
+        <p className="empty">No live tracking link yet. Select adds one when the truck is on the way.</p>
+        <button className="text-link" type="button" onClick={() => setEditing(true)}>
+          Add tracking link
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div className="field">
+    <div className="field sam-edit">
       <label htmlFor={`tracking-link-${orderId}`}>Tracking link</label>
       <div className="inline-field">
         <input
@@ -53,13 +85,23 @@ export default function TrackingLinkField({
           placeholder="https://"
           onChange={(event) => setValue(event.target.value)}
         />
-        <button className="btn" type="button" onClick={save} disabled={pending}>
-          {pending ? "Saving…" : "Save tracking link"}
+        <button className="btn secondary" type="button" onClick={save} disabled={pending}>
+          {pending ? "Saving…" : "Save"}
         </button>
       </div>
-      <p className="mini">Paste the public SAM or MacroPoint share link. EMIT and receivers see it as Track.</p>
+      <button
+        className="text-link"
+        type="button"
+        onClick={() => {
+          setValue(stored);
+          setError("");
+          setEditing(false);
+        }}
+      >
+        Cancel
+      </button>
+      <p className="mini">Public SAM or MacroPoint link. EMIT and receivers see it as Track.</p>
       {error && <p className="error">{error}</p>}
-      {saved && <p className="mini">{saved}</p>}
     </div>
   );
 }

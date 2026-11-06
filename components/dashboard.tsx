@@ -660,6 +660,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                 <SelectLoadField
                   orderId={editing.id}
                   loadNumber={editing.loadNumber}
+                  canCorrect
                   onUpdated={(order) => {
                     setEditing(order);
                     setSubmitted((current) => (current?.id === order.id ? order : current));

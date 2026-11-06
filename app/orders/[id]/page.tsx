@@ -203,31 +203,30 @@ export default function OrderPage() {
 
             <section className="detail-section">
               <h2>Tracking</h2>
-              {canUpload && (
-                <>
-                  <SelectLoadField
-                    orderId={order.id}
-                    loadNumber={order.loadNumber}
-                    onUpdated={(next) => {
-                      setOrder(next);
-                      toast("Select load number saved.");
-                    }}
-                  />
-                  <TrackingLinkField
-                    orderId={order.id}
-                    trackingLink={order.trackingLink}
-                    onUpdated={(next) => {
-                      setOrder(next);
-                      toast("Tracking link saved.");
-                    }}
-                  />
-                </>
-              )}
-              {order.trackingLink ? (
+              <SelectLoadField
+                orderId={order.id}
+                loadNumber={order.loadNumber}
+                canCorrect={canUpload}
+                onUpdated={(next) => {
+                  setOrder(next);
+                  toast("Select load number saved.");
+                }}
+              />
+              {canUpload ? (
+                <TrackingLinkField
+                  orderId={order.id}
+                  trackingLink={order.trackingLink}
+                  onUpdated={(next) => {
+                    setOrder(next);
+                    toast("Tracking link saved.");
+                  }}
+                />
+              ) : order.trackingLink ? (
                 <p className="mini">Live tracking is the Track button above.</p>
               ) : (
                 <p className="empty">No live tracking link yet. Select adds one when the truck is on the way.</p>
               )}
+              {canUpload && order.trackingLink ? <p className="mini">Live tracking is the Track button above.</p> : null}
               <p>
                 <a className="track-link" href={order.trackingUrl} title="Shareable status page">
                   Shareable status page
