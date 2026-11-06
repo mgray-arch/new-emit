@@ -1,7 +1,7 @@
 import { jwtVerify, SignJWT } from "jose";
 import { safeNextPath } from "@/lib/paths";
 import { requestOrigin } from "@/lib/public-url";
-import { isEmitPermission, type EmitAccess, type EmitPermission, type Session, type ViewAsPreview } from "@/lib/types";
+import { isEmitPermission, isEmitProfile, type EmitAccess, type EmitPermission, type Session, type ViewAsPreview } from "@/lib/types";
 
 export { safeNextPath };
 
@@ -104,10 +104,14 @@ export function parseViewAs(value: string | null | undefined): ViewAsPreview | n
     return { access: "regular", permission: "view", profile: value };
   }
   const [access, permission, profile] = value.split(":");
-  const named = profile === "sales" || profile === "loader" ? profile : null;
-  if (named) return { access: "regular", permission: "view", profile: named };
+  if (profile === "sales" || profile === "loader") {
+    return { access: "regular", permission: "view", profile };
+  }
   if ((access === "admin" || access === "regular") && isEmitPermission(permission)) {
-    return { access: access as EmitAccess, permission: permission as EmitPermission };
+    if (profile && !isEmitProfile(profile)) return null;
+    const preview: ViewAsPreview = { access, permission };
+    if (isEmitProfile(profile)) preview.profile = profile;
+    return preview;
   }
   return null;
 }

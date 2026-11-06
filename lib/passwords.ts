@@ -3,7 +3,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import type { PortalContext } from "@/lib/db";
 import { PortalError } from "@/lib/http";
 import { adminEmails } from "@/lib/auth-policy";
-import { isEmitPermission, permissionFromRole, type EmitPermission, type PortalRole, type Session } from "@/lib/types";
+import { isEmitPermission, isEmitProfile, permissionFromRole, type EmitPermission, type EmitProfile, type PortalRole, type Session } from "@/lib/types";
 
 /** Failed attempts against one email before that email is locked. */
 export const LOGIN_EMAIL_LIMIT = 5;
@@ -26,6 +26,7 @@ export interface UserRow {
   name: string;
   role: PortalRole;
   permission?: EmitPermission | null;
+  profile?: EmitProfile | null;
   password_hash: string | null;
   active: number;
   password_changed_at: string | null;
@@ -68,7 +69,7 @@ export function clientIp(req: Request): string {
   return ip.slice(0, 80) || "unknown";
 }
 
-const USER_COLUMNS = `id, email, name, role, permission, password_hash, active, password_changed_at, password_epoch, chat_enabled`;
+const USER_COLUMNS = `id, email, name, role, permission, profile, password_hash, active, password_changed_at, password_epoch, chat_enabled`;
 
 /**
  * Email match ignores capital letters and surrounding spaces.
@@ -94,9 +95,7 @@ export async function findUser(ctx: PortalContext, email: string): Promise<UserR
 }
 
 export async function findUserById(ctx: PortalContext, id: string): Promise<UserRow | null> {
-  const row = (await ctx.db
-    .prepare(`SELECT ${USER_COLUMNS} FROM users WHERE id = ?`)
-    .get(id)) as UserRow | undefined;
+  const row = (await ctx.db.prepare(`SELECT ${USER_COLUMNS} FROM users WHERE id = ?`).get(id)) as UserRow | undefined;
   return row ?? null;
 }
 
@@ -206,6 +205,7 @@ export function sessionFromUser(user: UserRow): Session {
     name: user.name,
     role: user.role,
     permission: storedPermission(user.role, user.permission),
+    profile: isEmitProfile(user.profile) ? user.profile : null,
     passwordEpoch: Number(user.password_epoch ?? 0),
   };
 }
@@ -257,7 +257,14 @@ export async function upsertExternalUser(
     await ctx.db
       .prepare(`UPDATE users SET name = ?, role = ? WHERE id = ?`)
       .run(input.name || existing.name, role, existing.id);
-    return { userId: existing.id, email, name: input.name || existing.name, role, permission: storedPermission(role, existing.permission) };
+    return {
+      userId: existing.id,
+      email,
+      name: input.name || existing.name,
+      role,
+      permission: storedPermission(role, existing.permission),
+      profile: isEmitProfile(existing.profile) ? existing.profile : null,
+    };
   }
   const id = randomUUID();
   const permission = input.role === "admin" ? null : storedPermission(input.role, null);

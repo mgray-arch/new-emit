@@ -5,7 +5,7 @@ import { LOAD_TABS, loadsToCsv, type LoadTab } from "@/lib/load-list";
 import { listOrders } from "@/lib/orders";
 import { readyPortal } from "@/lib/portal";
 import type { PortalStatus } from "@/lib/types";
-import { PORTAL_STATUSES, canSeePricing, resolveAccess } from "@/lib/types";
+import { PORTAL_STATUSES, canSeeCarrierIdentity, canSeePricing, resolveAccess } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,6 +39,7 @@ export async function GET(req: Request) {
     const csv = loadsToCsv(
       page.orders.map((order) => presentCustomerOrder(order, session)),
       includePricing,
+      canSeeCarrierIdentity(session),
     );
     return new Response(csv, {
       headers: {

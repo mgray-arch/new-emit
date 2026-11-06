@@ -12,6 +12,7 @@ interface Me {
   email: string;
   role: "customer" | "emit_viewer" | "emit_admin" | "admin";
   actorRole?: "customer" | "emit_viewer" | "emit_admin" | "admin";
+  profile?: "sales" | "loader" | null;
   viewAs?: ViewAsPreview | null;
   readOnly?: boolean;
   chatEnabled?: boolean;
@@ -160,7 +161,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         ]
       : []),
     { href: "/ask", label: "Ask", on: pathname === "/ask", title: "Ask about an order" },
-    ...(me?.role === "admin" || me?.role === "emit_admin"
+    ...((me?.role === "admin" || me?.role === "emit_admin") && (me.viewAs?.profile ?? me.profile) !== "sales" && (me.viewAs?.profile ?? me.profile) !== "loader"
       ? [{ href: "/locations", label: "Locations", on: pathname === "/locations" }]
       : []),
     ...(me?.role === "admin"
@@ -218,7 +219,12 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                     value={me.viewAs.permission}
                     onChange={(event) => void setView("admin", event.target.value as EmitPermission)}
                   >
-                    {(Object.keys(PERMISSION_LABEL) as EmitPermission[]).map((permission) => (
+                    {(Object.keys(PERMISSION_LABEL) as EmitPermission[])
+                      .filter((permission) => {
+                        if (me.viewAs?.profile === "loader" || me.viewAs?.profile === "sales") return permission === "view";
+                        return true;
+                      })
+                      .map((permission) => (
                       <option key={permission} value={permission}>
                         {PERMISSION_LABEL[permission]}
                       </option>

@@ -1,3 +1,10 @@
+import {
+  SALES_ORDER_MATCH_SQL,
+  parseLegacySalesOrders,
+  resolveSalesOrders,
+  salesOrderMatchArgs,
+  salesOrdersForStop,
+} from "@/lib/sales-orders";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { recordCarrierAssignment, type CarrierNoticeResult, type CarrierUpdate } from "@/lib/carrier-notice";
 import type { PortalContext } from "@/lib/db";
@@ -5,6 +12,8 @@ import { PortalError } from "@/lib/http";
 import { getOrder } from "@/lib/orders";
 import { assignSelectLoadNumber, parseSelectLoadNumber } from "@/lib/select-load";
 import { recordCustomerShareLink } from "@/lib/tracking-link";
+import { assignLoadOwner, type LoadOwner } from "@/lib/load-owner";
+import { slackUserIdForOwner } from "@/lib/slack-new-load";
 import type { CustomerOrder } from "@/lib/types";
 
 const MIN_KEY_LENGTH = 16;
@@ -47,6 +56,82 @@ export function loadBuilderSecretMatches(req: Request): boolean {
   return matched;
 }
 
+export function loadBuilderConfigured(): boolean {
+  const url = process.env.LOAD_BUILDER_WEBHOOK_URL?.trim() ?? "";
+  return url.startsWith("https://") || url.startsWith("http://");
+}
+
+/** Drew's Slack member id, used when SLACK_USER_ID_DREW is not set. */
+export const DREW_SLACK_USER_ID = "U0AGS6MDBL1";
+
+export interface LoadBuilderOwner {
+  name: LoadOwner;
+  /** Slack member id to tag, or null when unknown (tag by name in plain text). */
+  slackUserId: string | null;
+}
+
+/**
+ * The same owner the portal assigns and shows: the stored owner, or the
+ * load-owner rule from equipment and final delivery state for older loads.
+ */
+export function loadBuilderOwner(
+  order: CustomerOrder,
+  env: Record<string, string | undefined> = process.env,
+): LoadBuilderOwner {
+  const lastStop = order.stops[order.stops.length - 1];
+  const name: LoadOwner =
+    order.owner ??
+    assignLoadOwner({
+      destinationState: lastStop?.place.state,
+      destinationCity: lastStop?.place.city,
+      equipment: order.truckType,
+    }).owner;
+  const fromEnv = slackUserIdForOwner(name, env);
+  return { name, slackUserId: fromEnv ?? (name === "Drew" ? DREW_SLACK_USER_ID : null) };
+}
+
+/**
+ * What the Load Builder bot receives. An allowlist, so carrier pay cannot ride along
+ * even if it is later added to the stored order.
+ */
+export function loadBuilderPayload(order: CustomerOrder): Record<string, unknown> {
+  const salesOrderLines = order.salesOrders?.length
+    ? order.salesOrders
+    : resolveSalesOrders(parseLegacySalesOrders(order.salesOrderNumber).map((number) => ({ number, stopId: null })), order.stops);
+  return {
+    orderId: order.id,
+    salesOrderNumber: order.salesOrderNumber,
+    salesOrders: salesOrderLines.map((line) => ({
+      number: line.number,
+      stopSequence: line.stopId ? order.stops.findIndex((stop) => stop.id === line.stopId) + 1 || null : null,
+    })),
+    portalStatus: order.portalStatus,
+    stops: order.stops.map((stop, index) => ({
+      sequence: index + 1,
+      kind: stop.kind,
+      salesOrders: stop.kind === "drop" ? salesOrdersForStop(salesOrderLines, stop.id) : [],
+      company: stop.place.company,
+      address1: stop.place.address1,
+      address2: stop.place.address2 ?? "",
+      city: stop.place.city,
+      state: stop.place.state,
+      postalCode: stop.place.postalCode,
+      country: stop.place.country,
+    })),
+    truckType: order.truckType,
+    transit: order.transit,
+    shipDate: order.shipDate,
+    shipTime: order.shipTime,
+    mustDeliverDate: order.mustDeliverDate,
+    truckEta: order.truckEta,
+    customerCost: order.customerCost ?? null,
+    rateReason: order.rateReason ?? null,
+    comments: order.comments,
+    createdBy: order.createdBy,
+    owner: loadBuilderOwner(order),
+  };
+}
+
 async function markBuild(ctx: PortalContext, orderId: string): Promise<void> {
   await ctx.db
     .prepare(`UPDATE loads SET sam_build_status = NULL, sam_build_error = NULL, sam_build_at = NULL, updated_at = ? WHERE id = ?`)
@@ -76,8 +161,10 @@ async function orderIdForCallback(ctx: PortalContext, orderId: string, salesOrde
     return String(row.id);
   }
   const matches = await ctx.db
-    .prepare(`SELECT id FROM loads WHERE LOWER(TRIM(sales_order_number)) = ?`)
-    .all(salesOrderNumber.trim().toLowerCase());
+    .prepare(
+      `SELECT id FROM loads WHERE LOWER(TRIM(sales_order_number)) = LOWER(TRIM(?)) OR ${SALES_ORDER_MATCH_SQL}`,
+    )
+    .all(salesOrderNumber, ...salesOrderMatchArgs(salesOrderNumber));
   if (matches.length === 0) throw new PortalError(`No load with sales order ${salesOrderNumber}.`, 404);
   if (matches.length > 1) throw new PortalError(`Sales order ${salesOrderNumber} matches more than one load.`, 409);
   return String(matches[0].id);

@@ -16,6 +16,7 @@ export async function GET(req: Request) {
       email: session.email,
       role: session.role,
       permission: session.permission ?? null,
+      profile: session.profile ?? null,
       actorRole: session.actorRole ?? session.role,
       viewAs: session.viewAs ?? null,
       readOnly: Boolean(session.viewAs),

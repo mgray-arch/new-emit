@@ -1,7 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import { z } from "zod";
-import { isSession, requireAdmin } from "@/lib/guard";
-import { errorResponse, json, PortalError, unauthorized } from "@/lib/http";
+import { isSession, rejectIfViewingAs, requireSession } from "@/lib/guard";
+import { errorResponse, forbidden, json, PortalError, unauthorized } from "@/lib/http";
+import { canUploadPhotos } from "@/lib/types";
 import { ingestCarrierPhoto, type IngestPhotoInput } from "@/lib/photos";
 import { readyPortal } from "@/lib/portal";
 
@@ -36,8 +37,11 @@ async function authorize(req: Request): Promise<Response | null> {
     if (expected.length >= 16 && tokenMatches(presented, expected)) return null;
     return unauthorized();
   }
-  const session = await requireAdmin(req);
+  const session = await requireSession(req);
   if (!isSession(session)) return session;
+  const readonly = rejectIfViewingAs(session);
+  if (readonly) return readonly;
+  if (!canUploadPhotos(session)) return forbidden();
   return null;
 }
 

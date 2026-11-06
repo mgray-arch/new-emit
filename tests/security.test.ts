@@ -39,9 +39,13 @@ const ADVERSARIAL = [
 ];
 
 describe("carrier pay never reaches EMIT", () => {
-  it("keeps carrier columns out of the customer SQL", () => {
-    expect(CUSTOMER_LOAD_COLUMNS.toLowerCase()).not.toMatch(/carrier_pay|carrier_name|carrier_mc|carrier_cost|carrier_rate|staff_notes/);
-    expect(CUSTOMER_LOAD_COLUMNS.toLowerCase()).toContain("carrier_notice_log");
+  it("keeps carrier pay out of the customer SQL and keeps identity plus the in-portal history", () => {
+    const columns = CUSTOMER_LOAD_COLUMNS.toLowerCase();
+    expect(columns).not.toMatch(/carrier_pay|staff_notes|carrier_cost|carrier_rate/);
+    expect(columns).toContain("carrier_name");
+    expect(columns).toContain("carrier_mc");
+    expect(columns).toContain("driver_name");
+    expect(columns).toContain("carrier_notice_log");
     expect(CUSTOMER_DOCUMENT_READ_SQL.toLowerCase()).not.toContain("internal_documents");
   });
 
@@ -120,7 +124,9 @@ describe("carrier pay never reaches EMIT", () => {
       for (const column of columns) {
         const name = column.name.toLowerCase();
         expect(name).not.toMatch(/carrier_pay|staff_notes|carrier_cost|carrier_rate/);
-        if (name === "carrier_name" || name === "carrier_mc") expect(table.name).toBe("loads");
+        if (name === "carrier_name" || name === "carrier_mc" || name === "driver_name") {
+          expect(["loads", "bol_prints"]).toContain(table.name);
+        }
       }
       expect((table.sql || "").toLowerCase()).not.toMatch(/carrier_pay|staff_notes|carrier_cost|carrier_rate/);
       if (table.name === "customer_documents" || table.name === "internal_documents" || table.name === "carrier_photos") {
@@ -140,7 +146,11 @@ describe("carrier pay never reaches EMIT", () => {
     ]
       .map((file) => readFileSync(file, "utf8"))
       .join("\n");
-    expect(sources).not.toMatch(/carrier_pay_cents|carrier_name|carrier_mc|staff_notes|carrierPayCents|staffNotes/);
+    expect(sources).not.toMatch(/carrier_pay_cents|staff_notes|carrierPayCents|staffNotes|carrier_cost|carrier_rate/);
+    const noSamIdentity = ["lib/sam.ts", "lib/seed.ts", "lib/messages.ts", "lib/message-notify.ts", "lib/message-types.ts"]
+      .map((file) => readFileSync(file, "utf8"))
+      .join("\n");
+    expect(noSamIdentity).not.toMatch(/carrier_name|carrier_mc/);
     const orders = await listAllOrders(ctx);
     expect(orders.length).toBeGreaterThan(20);
     expectNoSecrets(orders);
@@ -158,7 +168,7 @@ describe("carrier pay never reaches EMIT", () => {
     };
     walk(orders);
     for (const key of keys) {
-      expect(key.toLowerCase()).not.toMatch(/carrierpay|carrier_pay|carriername|carrier_name|carriermc|staffnotes|staff_notes/);
+      expect(key.toLowerCase()).not.toMatch(/carrierpay|carrier_pay|staffnotes|staff_notes|carrierrate|carriercost/);
     }
   });
 

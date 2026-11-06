@@ -10,6 +10,7 @@ export const dynamic = "force-dynamic";
 const bodySchema = z.object({
   access: z.enum(["admin", "regular", "sales", "loader"]).nullable().optional(),
   permission: z.enum(["view", "add", "pricing", "full"]).optional(),
+  profile: z.enum(["sales", "loader"]).nullable().optional(),
   /** Older clients sent a role name. Still accepted. */
   role: z.enum(["emit_admin", "customer", "emit_viewer"]).nullable().optional(),
 });
@@ -20,8 +21,11 @@ export async function POST(req: Request) {
     if (!isSession(actor)) return actor;
     const body = bodySchema.parse(await req.json());
     let viewAs: ViewAsPreview | null = null;
-    if (body.access === "sales" || body.access === "loader") {
-      viewAs = { access: "regular", permission: "view", profile: body.access };
+    if (body.access === "sales" || body.access === "loader" || body.profile === "sales" || body.profile === "loader") {
+      const profile = body.access === "sales" || body.access === "loader" ? body.access : body.profile;
+      if (profile === "sales" || profile === "loader") {
+        viewAs = { access: "regular", permission: "view", profile };
+      }
     } else if (body.access) {
       const permission: EmitPermission = body.permission ?? (body.access === "admin" ? "full" : "view");
       viewAs = { access: body.access, permission };

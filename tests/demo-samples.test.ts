@@ -64,8 +64,8 @@ describe("demo sample documents and tracking links", () => {
 
     for (const doc of DEMO_SAMPLE_DOCS) {
       const page = await listOrders(ctx, { tab: doc.tab, q: doc.salesOrderNumber, pageSize: 10 });
-      expect(page.orders.map((order) => order.salesOrderNumber)).toContain(doc.salesOrderNumber);
-      const order = page.orders.find((item) => item.salesOrderNumber === doc.salesOrderNumber)!;
+      expect(page.orders.map((order) => order.salesOrderNumber)).toContain(doc.salesOrderNumber.toUpperCase());
+      const order = page.orders.find((item) => item.salesOrderNumber === doc.salesOrderNumber.toUpperCase())!;
       const files = await listCustomerDocuments(ctx, order.id);
       expect(files.map((file) => file.filename)).toContain(doc.filename);
       const stored = files.find((file) => file.filename === doc.filename)!;
