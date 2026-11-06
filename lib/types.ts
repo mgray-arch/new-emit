@@ -238,6 +238,9 @@ export type EmitPermission = "view" | "add" | "pricing" | "full";
 
 export type EmitAccess = "admin" | "regular";
 
+/** Preview-only. Sales and Loader are not stored user roles yet. Both hide EMIT's cost. */
+export type EmitProfile = "sales" | "loader";
+
 export const EMIT_PERMISSIONS = ["view", "add", "pricing", "full"] as const;
 
 export const PERMISSION_LABEL: Record<EmitPermission, string> = {
@@ -251,6 +254,8 @@ export const PERMISSION_LABEL: Record<EmitPermission, string> = {
 export interface ViewAsPreview {
   access: EmitAccess;
   permission: EmitPermission;
+  /** Set when Select is previewing Sales or Loader. Both use view-only rules. */
+  profile?: EmitProfile | null;
 }
 
 export type Viewer =

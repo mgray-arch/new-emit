@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { POST as login } from "@/app/api/auth/login/route";
 import { POST as logout } from "@/app/api/auth/logout/route";
@@ -205,6 +206,33 @@ describe("EMIT permissions and view-as", () => {
     );
     expect(switched.status).toBe(200);
     expect(switched.headers.get("set-cookie")).toMatch(/portal_view_as=regular%3Aview/);
+
+    for (const access of ["sales", "loader"] as const) {
+      const preview = await setViewAs(
+        new Request("http://portal.test/api/view-as", {
+          method: "POST",
+          headers: headers(admin),
+          body: JSON.stringify({ access }),
+        }),
+      );
+      expect(preview.status).toBe(200);
+      expect(await preview.json()).toEqual({ viewAs: { access: "regular", permission: "view", profile: access } });
+      expect(preview.headers.get("set-cookie")).toContain(`regular%3Aview%3A${access}`);
+      const listed = await listOrdersRoute(
+        new Request("http://portal.test/api/orders?q=SO2196", { headers: { cookie: await cookieFor(adminSession(), `regular:view:${access}`) } }),
+      );
+      const seen = (await listed.json()).orders[0];
+      expect("customerCost" in seen).toBe(false);
+      expect((await createLoad(`SO-AS-${access.toUpperCase()}`, await cookieFor(adminSession(), `regular:view:${access}`))).status).toBe(403);
+    }
+    const shell = readFileSync("components/shell.tsx", "utf8");
+    const usersPage = readFileSync("app/admin/users/page.tsx", "utf8");
+    expect(shell).toContain("View as EMIT admin");
+    expect(shell).toContain("View as Sales");
+    expect(shell).toContain("View as Loader");
+    expect(shell).not.toMatch(/regular user/i);
+    expect(usersPage).toContain("Sales or Loader");
+    expect(usersPage).not.toMatch(/regular user/i);
 
     const users = await listUsers(new Request("http://portal.test/api/admin/users", { headers: { cookie: asFull } }));
     expect(users.status).toBe(403);

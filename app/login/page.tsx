@@ -103,9 +103,9 @@ function LoginForm() {
         {demoHint && (
           <div className="demo-hint">
             <strong>Test sign-in</strong>
-            <p>EMIT regular, add loads: {demoHint.emit}</p>
-            {demoHint.emitViewer ? <p>EMIT regular, view only: {demoHint.emitViewer}</p> : null}
-            {demoHint.emitPricing ? <p>EMIT regular, see pricing: {demoHint.emitPricing}</p> : null}
+            <p>Sales or Loader, add loads: {demoHint.emit}</p>
+            {demoHint.emitViewer ? <p>Sales or Loader, view only: {demoHint.emitViewer}</p> : null}
+            {demoHint.emitPricing ? <p>Sales or Loader, see pricing: {demoHint.emitPricing}</p> : null}
             {demoHint.emitFull ? <p>EMIT admin, full access: {demoHint.emitFull}</p> : null}
             <p>Select: {demoHint.select.join(", ")}</p>
             <p>Password for every test account: {demoHint.password}</p>
@@ -129,7 +129,7 @@ function LoginForm() {
         <section className="login-section login-emit" aria-labelledby="sign-in-form">
           <h2 id="sign-in-form">Email and password</h2>
           <p className="lede">
-            EMIT admins, regular EMIT users, and Select staff all sign in here. Use the email on your account. EMIT IT is not involved.
+            EMIT admins, Sales, Loader, and Select staff all sign in here. Use the email on your account. EMIT IT is not involved.
           </p>
           <div className="field">
             <label htmlFor="email">Email</label>
