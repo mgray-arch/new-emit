@@ -1,8 +1,8 @@
+import { readFileSync } from "node:fs";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { POST as login } from "@/app/api/auth/login/route";
 import { POST as logout } from "@/app/api/auth/logout/route";
 import { GET as microsoftCallback } from "@/app/api/auth/microsoft/callback/route";
-import { POST as buildLoad } from "@/app/api/admin/orders/[id]/build/route";
 import { PATCH as patchUser, } from "@/app/api/admin/users/[id]/route";
 import { GET as listUsers, POST as createUser } from "@/app/api/admin/users/route";
 import { POST as samCallback } from "@/app/api/integrations/sam-load/route";
@@ -13,28 +13,26 @@ import { POST as changePassword } from "@/app/api/me/password/route";
 import { POST as setViewAs } from "@/app/api/view-as/route";
 import { presentCustomerOrder } from "@/lib/customer-view";
 import type { PortalContext } from "@/lib/db";
-import { loadBuilderPayload } from "@/lib/load-builder";
 import { samLoadUrl } from "@/lib/sam-link";
 import type { CustomerOrder, Session } from "@/lib/types";
 import { adminSession, customerSession, expectNoSecrets, seededPortal, sessionCookie } from "./helpers";
 
 const SECRET = "builder-secret-0123456789";
-const WEBHOOK = "https://builder.test/hooks/load";
 
 let ctx: PortalContext;
 const savedEnv: Record<string, string | undefined> = {};
 
 beforeAll(async () => {
   ctx = await seededPortal();
-  for (const key of ["LOAD_BUILDER_WEBHOOK_URL", "LOAD_BUILDER_SECRET", "SAM_LOAD_URL_TEMPLATE", "AZURE_AD_TENANT_ID", "AZURE_AD_CLIENT_ID", "AZURE_AD_CLIENT_SECRET"]) {
+  for (const key of ["LOAD_BUILDER_SECRET", "LOAD_STATUS_WEBHOOK_SECRET", "SAM_LOAD_URL_TEMPLATE", "AZURE_AD_TENANT_ID", "AZURE_AD_CLIENT_ID", "AZURE_AD_CLIENT_SECRET"]) {
     savedEnv[key] = process.env[key];
   }
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  process.env.LOAD_BUILDER_WEBHOOK_URL = WEBHOOK;
   process.env.LOAD_BUILDER_SECRET = SECRET;
+  delete process.env.LOAD_STATUS_WEBHOOK_SECRET;
   process.env.SAM_LOAD_URL_TEMPLATE = "https://sam.example/loads/{loadNumber}";
 });
 
@@ -209,6 +207,33 @@ describe("EMIT permissions and view-as", () => {
     expect(switched.status).toBe(200);
     expect(switched.headers.get("set-cookie")).toMatch(/portal_view_as=regular%3Aview/);
 
+    for (const access of ["sales", "loader"] as const) {
+      const preview = await setViewAs(
+        new Request("http://portal.test/api/view-as", {
+          method: "POST",
+          headers: headers(admin),
+          body: JSON.stringify({ access }),
+        }),
+      );
+      expect(preview.status).toBe(200);
+      expect(await preview.json()).toEqual({ viewAs: { access: "regular", permission: "view", profile: access } });
+      expect(preview.headers.get("set-cookie")).toContain(`regular%3Aview%3A${access}`);
+      const listed = await listOrdersRoute(
+        new Request("http://portal.test/api/orders?q=SO2196", { headers: { cookie: await cookieFor(adminSession(), `regular:view:${access}`) } }),
+      );
+      const seen = (await listed.json()).orders[0];
+      expect("customerCost" in seen).toBe(false);
+      expect((await createLoad(`SO-AS-${access.toUpperCase()}`, await cookieFor(adminSession(), `regular:view:${access}`))).status).toBe(403);
+    }
+    const shell = readFileSync("components/shell.tsx", "utf8");
+    const usersPage = readFileSync("app/admin/users/page.tsx", "utf8");
+    expect(shell).toContain("View as EMIT admin");
+    expect(shell).toContain("View as Sales");
+    expect(shell).toContain("View as Loader");
+    expect(shell).not.toMatch(/regular user/i);
+    expect(usersPage).toContain("Sales or Loader");
+    expect(usersPage).not.toMatch(/regular user/i);
+
     const users = await listUsers(new Request("http://portal.test/api/admin/users", { headers: { cookie: asFull } }));
     expect(users.status).toBe(403);
   });
@@ -375,57 +400,13 @@ describe("EMIT permissions and view-as", () => {
   });
 });
 
-describe("build load in SAM", () => {
-  it("posts an allowlisted payload and stores the number the bot sends back", async () => {
-    delete process.env.LOAD_BUILDER_WEBHOOK_URL;
+describe("SAM load number callback", () => {
+  it("stores the number the bot sends back and shows it as built", async () => {
     const admin = await cookieFor(adminSession());
     const pending = await createLoad("SO-NO-HOOK", admin);
-    const missing = await buildLoad(
-      new Request(`http://portal.test/api/admin/orders/${pending.order.id}/build`, { method: "POST", headers: headers(admin) }),
-      { params: Promise.resolve({ id: pending.order.id }) },
-    );
-    expect(missing.status).toBe(503);
-    const untouched = await ctx.db.prepare(`SELECT sam_build_status FROM loads WHERE id = ?`).get(pending.order.id);
-    expect(untouched?.sam_build_status).toBeNull();
-
-    process.env.LOAD_BUILDER_WEBHOOK_URL = WEBHOOK;
-    process.env.LOAD_BUILDER_SECRET = "short";
-    const shortKey = await buildLoad(
-      new Request(`http://portal.test/api/admin/orders/${pending.order.id}/build`, { method: "POST", headers: headers(admin) }),
-      { params: Promise.resolve({ id: pending.order.id }) },
-    );
-    expect(shortKey.status).toBe(503);
-
-    process.env.LOAD_BUILDER_SECRET = SECRET;
-    let payload: Record<string, unknown> | null = null;
-    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
-      payload = JSON.parse(String(init?.body));
-      expect(url).toBe(WEBHOOK);
-      expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${SECRET}`);
-      return new Response("accepted", { status: 202 });
-    });
-    const started = await buildLoad(
-      new Request(`http://portal.test/api/admin/orders/${pending.order.id}/build`, { method: "POST", headers: headers(admin) }),
-      { params: Promise.resolve({ id: pending.order.id }) },
-    );
-    expect(started.status).toBe(200);
-    expect((await started.json()).order.samBuildStatus).toBe("building");
-    expect(payload).toMatchObject({ salesOrderNumber: "SO-NO-HOOK", customerCost: 1750, owner: { name: pending.order.owner } });
-    expect(JSON.stringify(payload)).not.toMatch(/carrierPay|carrierCost|carrier_name|staffNotes/);
-    expect(JSON.stringify(loadBuilderPayload({ ...pending.order, carrierPay: 8765.43 } as CustomerOrder))).not.toMatch(/carrierPay|8765/);
-
-    const again = await buildLoad(
-      new Request(`http://portal.test/api/admin/orders/${pending.order.id}/build`, { method: "POST", headers: headers(admin) }),
-      { params: Promise.resolve({ id: pending.order.id }) },
-    );
-    expect(again.status).toBe(409);
-
-    const asCustomer = await cookieFor(adminSession(), "customer");
-    const hiddenBuild = await buildLoad(
-      new Request(`http://portal.test/api/admin/orders/${pending.order.id}/build`, { method: "POST", headers: headers(asCustomer) }),
-      { params: Promise.resolve({ id: pending.order.id }) },
-    );
-    expect(hiddenBuild.status).toBe(403);
+    expect(pending.order.buildStatus).toBeNull();
+    const untouched = await ctx.db.prepare(`SELECT sam_build_status, slack_notified_at FROM loads WHERE id = ?`).get(pending.order.id);
+    expect(untouched?.sam_build_status ?? null).toBeNull();
 
     const refused = await samCallback(
       new Request("http://portal.test/api/integrations/sam-load", {
@@ -476,6 +457,7 @@ describe("build load in SAM", () => {
     });
     const emitOrder = (await emitView.json()).order;
     expect(emitOrder.loadNumber).toBe("458940-1");
+    expect(emitOrder.buildStatus).toBe("Built in SAM: 458940-1");
     expect("samUrl" in emitOrder).toBe(false);
     expect("customerCost" in emitOrder).toBe(false);
     expectNoSecrets(emitOrder);
@@ -487,31 +469,10 @@ describe("build load in SAM", () => {
     expect(samLoadUrl("458940-1")).toBe("https://sam.example/loads/458940-1");
     delete process.env.SAM_LOAD_URL_TEMPLATE;
     expect(samLoadUrl("458940-1")).toBeNull();
-  });
 
-  it("records a bot failure and does not invent a load number", async () => {
-    const admin = await cookieFor(adminSession());
-    const pending = await createLoad("SO-BOT-FAIL", admin);
-    vi.stubGlobal("fetch", async () => new Response("no", { status: 500 }));
-    const failed = await buildLoad(
-      new Request(`http://portal.test/api/admin/orders/${pending.order.id}/build`, { method: "POST", headers: headers(admin) }),
-      { params: Promise.resolve({ id: pending.order.id }) },
-    );
-    expect(failed.status).toBe(502);
-    const body = await failed.json();
-    expect(body.order.samBuildStatus).toBe("failed");
-    expect(body.order.loadNumber).toBeNull();
-    expect(body.order.samBuildError).toMatch(/500/);
-
-    vi.stubGlobal("fetch", async () => {
-      throw new Error("down");
-    });
-    const retry = await buildLoad(
-      new Request(`http://portal.test/api/admin/orders/${pending.order.id}/build`, { method: "POST", headers: headers(admin) }),
-      { params: Promise.resolve({ id: pending.order.id }) },
-    );
-    expect(retry.status).toBe(502);
-    expect((await retry.json()).order.samBuildError).toMatch(/did not answer/);
+    const listed = await listOrdersRoute(new Request("http://portal.test/api/orders?q=SO-NO-HOOK", { headers: { cookie: viewer } }));
+    const listedOrder = (await listed.json()).orders.find((order: CustomerOrder) => order.id === pending.order.id);
+    expect(listedOrder.buildStatus).toBe("Built in SAM: 458940-1");
   });
 });
 

@@ -4,8 +4,12 @@ import type {
   BolPrintSummary,
   CustomerDocument,
   CustomerOrder,
+  HaulCallout,
+  OrderNotice,
   Place,
   PortalStatus,
+  StageEvent,
+  TrackingEvent,
   PublicTracking,
   RateReason,
   Stop,
@@ -21,8 +25,9 @@ import {
   TRANSIT_OPTIONS,
   TRUCK_TYPES,
 } from "@/lib/types";
+import { buildStatusLabel } from "@/lib/build-status";
 import { portalPublicUrl } from "@/lib/public-url";
-import { redactSensitiveText } from "@/lib/sensitive";
+import { redactSensitiveText, sensitiveReason } from "@/lib/sensitive";
 import { samLoadUrl } from "@/lib/sam-link";
 import { sanitizeSchedule } from "@/lib/stop-schedule";
 import { canSeeCarrierIdentity, canSeePricing, resolveAccess, type Viewer } from "@/lib/types";
@@ -232,8 +237,15 @@ function serializeBolPrint(value: unknown): BolPrintSummary | null {
   return { ...record, reprint: row.reprint === true, reasons, bolRemoved: row.bolRemoved === true };
 }
 
-/** The order shape that may be sent to this viewer. EMIT admins with see pricing or full access, and Select, get EMIT's cost. Regular EMIT users never do, and neither does a view-as regular preview. Every signed-in user gets who entered the load. Nobody at EMIT gets carrier pay, the review count, or the SAM build controls. */
-export function presentCustomerOrder(order: CustomerOrder, viewer: Viewer): CustomerOrder {
+export interface PresentOrderOptions {
+  /** Unseen carrier update for the signed-in person. Omitted when they have already opened it. */
+  carrierBadge?: "assigned" | "changed" | null;
+  /** Unseen tracking start for the signed-in person. */
+  trackingBadge?: boolean;
+}
+
+/** The order shape that may be sent to this viewer. EMIT admins with see pricing or full access, and Select, get EMIT's cost. Regular EMIT users never do, and neither does a view-as regular preview. Every signed-in user gets who entered the load. Nobody gets carrier pay, the review count for EMIT, or the SAM build controls. Sales and Loader never see cost. */
+export function presentCustomerOrder(order: CustomerOrder, viewer: Viewer, options?: PresentOrderOptions): CustomerOrder {
   const access = resolveAccess(viewer);
   const seeCarrier = canSeeCarrierIdentity(access);
   const view = serializeCustomerOrder(order, {
@@ -252,7 +264,75 @@ export function presentCustomerOrder(order: CustomerOrder, viewer: Viewer): Cust
     const url = samLoadUrl(view.loadNumber);
     if (url) view.samUrl = url;
   }
+  view.buildStatus = buildStatusLabel(view.loadNumber, order.slackNotifiedAt);
+  view.notices = presentNotices(order.notices);
+  const stages = presentStageEvents(order.stageEvents);
+  if (stages.length) view.stageEvents = stages;
+  const tracking = presentTrackingEvents(order.trackingEvents);
+  if (tracking.length) view.trackingEvents = tracking;
+  if (options?.trackingBadge) view.trackingBadge = true;
+  const callout = haulCalloutFrom(view.notices);
+  if (callout) view.haulCallout = callout;
+  if (options?.carrierBadge === "assigned" || options?.carrierBadge === "changed") {
+    view.carrierBadge = options.carrierBadge;
+  }
   return view;
+}
+
+function cleanLabel(value: string | undefined): string {
+  const text = value?.trim() ?? "";
+  if (!text || sensitiveReason(text)) return "";
+  return text;
+}
+
+function presentNotices(notices: OrderNotice[] | undefined): OrderNotice[] {
+  if (!notices?.length) return [];
+  const safe: OrderNotice[] = [];
+  for (const notice of notices) {
+    if (notice.kind !== "assigned" && notice.kind !== "changed") continue;
+    const text = redactSensitiveText(notice.text);
+    if (!text) continue;
+    const company = cleanLabel(notice.company);
+    const mc = cleanLabel(notice.mc);
+    const row: OrderNotice = { at: notice.at, kind: notice.kind, text };
+    if (company) row.company = company;
+    if (mc) row.mc = mc;
+    safe.push(row);
+  }
+  return safe;
+}
+
+function presentTrackingEvents(events: TrackingEvent[] | undefined): TrackingEvent[] {
+  if (!events?.length) return [];
+  const safe: TrackingEvent[] = [];
+  for (const event of events) {
+    const text = redactSensitiveText(event.text);
+    if (!text || !event.at) continue;
+    safe.push({ at: event.at, text });
+  }
+  return safe;
+}
+
+function presentStageEvents(events: StageEvent[] | undefined): StageEvent[] {
+  if (!events?.length) return [];
+  const safe: StageEvent[] = [];
+  for (const event of events) {
+    if (!(PORTAL_STATUSES as readonly string[]).includes(event.to)) continue;
+    const text = redactSensitiveText(event.text);
+    if (!text) continue;
+    const from = event.from && (PORTAL_STATUSES as readonly string[]).includes(event.from) ? event.from : null;
+    safe.push({ at: event.at, from, to: event.to as PortalStatus, text });
+  }
+  return safe;
+}
+
+function haulCalloutFrom(notices: OrderNotice[] | undefined): HaulCallout | null {
+  if (!notices?.length) return null;
+  const latest = notices[notices.length - 1];
+  const company = latest.company?.trim() ?? "";
+  const mc = latest.mc?.trim() ?? "";
+  if (!company && !mc) return null;
+  return { company, mc, at: latest.at, kind: latest.kind };
 }
 
 function truckLabel(value: unknown): string | null {

@@ -39,12 +39,13 @@ const ADVERSARIAL = [
 ];
 
 describe("carrier pay never reaches EMIT", () => {
-  it("keeps carrier pay out of the customer SQL and allows carrier identity columns", () => {
+  it("keeps carrier pay out of the customer SQL and keeps identity plus the in-portal history", () => {
     const columns = CUSTOMER_LOAD_COLUMNS.toLowerCase();
     expect(columns).not.toMatch(/carrier_pay|staff_notes|carrier_cost|carrier_rate/);
     expect(columns).toContain("carrier_name");
     expect(columns).toContain("carrier_mc");
     expect(columns).toContain("driver_name");
+    expect(columns).toContain("carrier_notice_log");
     expect(CUSTOMER_DOCUMENT_READ_SQL.toLowerCase()).not.toContain("internal_documents");
   });
 

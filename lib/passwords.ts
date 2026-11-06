@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { PortalContext } from "@/lib/db";
 import { PortalError } from "@/lib/http";
+import { adminEmails } from "@/lib/auth-policy";
 import { isEmitPermission, isEmitProfile, permissionFromRole, type EmitPermission, type EmitProfile, type PortalRole, type Session } from "@/lib/types";
 
 /** Failed attempts against one email before that email is locked. */
@@ -68,21 +69,33 @@ export function clientIp(req: Request): string {
   return ip.slice(0, 80) || "unknown";
 }
 
-export async function findUser(ctx: PortalContext, email: string): Promise<UserRow | null> {
-  const row = (await ctx.db
+const USER_COLUMNS = `id, email, name, role, permission, profile, password_hash, active, password_changed_at, password_epoch, chat_enabled`;
+
+/**
+ * Email match ignores capital letters and surrounding spaces.
+ * When two rows differ only by that, the Select admin row wins.
+ * SQLite's UNIQUE index is case-sensitive, so both rows can exist.
+ */
+export async function findUsersByEmail(ctx: PortalContext, email: string): Promise<UserRow[]> {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return [];
+  const rows = (await ctx.db
     .prepare(
-      `SELECT id, email, name, role, permission, profile, password_hash, active, password_changed_at, password_epoch, chat_enabled FROM users WHERE email = ?`,
+      `SELECT ${USER_COLUMNS} FROM users
+       WHERE LOWER(TRIM(email)) = ?
+       ORDER BY CASE WHEN role = 'admin' THEN 0 ELSE 1 END, rowid`,
     )
-    .get(email.trim().toLowerCase())) as UserRow | undefined;
-  return row ?? null;
+    .all(normalized)) as unknown as UserRow[];
+  return rows;
+}
+
+export async function findUser(ctx: PortalContext, email: string): Promise<UserRow | null> {
+  const rows = await findUsersByEmail(ctx, email);
+  return rows[0] ?? null;
 }
 
 export async function findUserById(ctx: PortalContext, id: string): Promise<UserRow | null> {
-  const row = (await ctx.db
-    .prepare(
-      `SELECT id, email, name, role, permission, profile, password_hash, active, password_changed_at, password_epoch, chat_enabled FROM users WHERE id = ?`,
-    )
-    .get(id)) as UserRow | undefined;
+  const row = (await ctx.db.prepare(`SELECT ${USER_COLUMNS} FROM users WHERE id = ?`).get(id)) as UserRow | undefined;
   return row ?? null;
 }
 
@@ -108,6 +121,15 @@ export async function loginLockStatus(
   return { locked, retryAfterSeconds: locked ? Math.ceil(LOGIN_WINDOW_MS / 1000) : 0 };
 }
 
+export async function noteFailedLogin(
+  ctx: PortalContext,
+  email: string,
+  ip: string,
+): Promise<{ locked: boolean; retryAfterSeconds: number }> {
+  await recordFailure(ctx, email, ip);
+  return loginLockStatus(ctx, email, ip);
+}
+
 async function recordFailure(ctx: PortalContext, email: string, ip: string): Promise<void> {
   const now = ctx.now().toISOString();
   const insert = ctx.db.prepare(`INSERT INTO login_attempts (id, bucket, created_at) VALUES (?, ?, ?)`);
@@ -120,6 +142,23 @@ async function clearEmailFailures(ctx: PortalContext, email: string): Promise<vo
   await ctx.db.prepare(`DELETE FROM login_attempts WHERE bucket = ?`).run(`email:${email}`);
 }
 
+function listedSelectAdmin(email: string): boolean {
+  return adminEmails().includes(email.trim().toLowerCase());
+}
+
+/** A listed Select address is an admin. An older EMIT role on that address is corrected. */
+export async function promoteToSelectAdmin(ctx: PortalContext, userId: string): Promise<void> {
+  await ctx.db.prepare(`UPDATE users SET role = 'admin', permission = NULL WHERE id = ? AND role != 'admin'`).run(userId);
+}
+
+async function canonicalizeEmail(ctx: PortalContext, user: UserRow, normalized: string): Promise<UserRow> {
+  if (user.email === normalized) return user;
+  const clash = await ctx.db.prepare(`SELECT id FROM users WHERE email = ? AND id <> ?`).get(normalized, user.id);
+  if (clash) return user;
+  await ctx.db.prepare(`UPDATE users SET email = ? WHERE id = ?`).run(normalized, user.id);
+  return { ...user, email: normalized };
+}
+
 export async function loginWithPassword(
   ctx: PortalContext,
   email: string,
@@ -129,19 +168,33 @@ export async function loginWithPassword(
   const normalized = email.trim().toLowerCase();
   const locked = await loginLockStatus(ctx, normalized, ip);
   if (locked.locked) return { ok: false, reason: "locked", retryAfterSeconds: locked.retryAfterSeconds };
-  const user = await findUser(ctx, normalized);
-  const ok = bcrypt.compareSync(password, user?.password_hash || dummy());
-  if (!user?.password_hash || !ok) {
+  const matches = await findUsersByEmail(ctx, normalized);
+  const listed = listedSelectAdmin(normalized);
+  const admins = matches.filter((row) => row.role === "admin");
+  const others = matches.filter((row) => row.role !== "admin");
+  // A listed address that already has an admin row must not fall through to an EMIT row.
+  // An address that is not listed keeps the EMIT row and never receives admin.
+  const candidates = listed ? (admins.length > 0 ? admins : others) : others.length > 0 ? others : admins;
+  const user = candidates.find((row) => row.password_hash && bcrypt.compareSync(password, row.password_hash));
+  if (!user) {
+    bcrypt.compareSync(password, dummy());
     await recordFailure(ctx, normalized, ip);
     const after = await loginLockStatus(ctx, normalized, ip);
     if (after.locked) return { ok: false, reason: "locked", retryAfterSeconds: after.retryAfterSeconds };
     return { ok: false, reason: "invalid" };
   }
   if (Number(user.active) === 0) return { ok: false, reason: "inactive" };
+  if (user.role === "admin" && !listed) return { ok: false, reason: "invalid" };
+  let account = user;
+  if (listed && account.role !== "admin") {
+    await promoteToSelectAdmin(ctx, account.id);
+    account = { ...account, role: "admin", permission: null };
+  }
+  account = await canonicalizeEmail(ctx, account, normalized);
   await clearEmailFailures(ctx, normalized);
   return {
     ok: true,
-    session: sessionFromUser(user),
+    session: sessionFromUser(account),
   };
 }
 
@@ -245,7 +298,7 @@ export async function changeOwnPassword(
   const user = await findUserById(ctx, session.userId);
   if (!user) throw new PortalError("User not found", 404);
   if (Number(user.active) === 0) throw new PortalError("This account is deactivated.", 403);
-  if (!user.password_hash) throw new PortalError("This account signs in with Google. There is no password to change.");
+  if (!user.password_hash) throw new PortalError("This account has no password yet.");
   if (!bcrypt.compareSync(currentPassword, user.password_hash)) {
     throw new PortalError("Current password is wrong.");
   }

@@ -39,7 +39,7 @@ export function mapTransitToTracking(transitStatus: string): TrackingStage {
   switch (transitStatus) {
     case "Covered":
     case "Dispatched":
-      return "booked";
+      return "submitted";
     case "At Shipper":
     case "Loaded":
       return "at_pickup";

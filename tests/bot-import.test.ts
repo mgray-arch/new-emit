@@ -91,8 +91,9 @@ describe("SAM status, equipment, and sales order mapping", () => {
     expect(mapImportStatus("complete")).toEqual({ portalStatus: "shipped", trackingStage: "delivered" });
     expect(mapImportStatus("In Transit")).toEqual({ portalStatus: "shipped", trackingStage: "in_transit" });
     expect(mapImportStatus("active")).toEqual({ portalStatus: "shipped", trackingStage: "in_transit" });
-    expect(mapImportStatus("Covered")).toEqual({ portalStatus: "ready_to_ship", trackingStage: "booked" });
-    expect(mapImportStatus("Dispatched")).toEqual({ portalStatus: "ready_to_ship", trackingStage: "booked" });
+    expect(mapImportStatus("Covered")).toEqual({ portalStatus: "ready_to_ship", trackingStage: "submitted" });
+    expect(mapImportStatus("Dispatched")).toEqual({ portalStatus: "ready_to_ship", trackingStage: "submitted" });
+    expect(mapImportStatus("ready to ship")).toEqual({ portalStatus: "ready_to_ship", trackingStage: "submitted" });
     expect(mapImportStatus("Loaded")).toEqual({ portalStatus: "shipped", trackingStage: "at_pickup" });
     expect(mapImportStatus("At Shipper")).toEqual({ portalStatus: "shipped", trackingStage: "at_pickup" });
     expect(mapImportStatus("At Receiver")).toEqual({ portalStatus: "shipped", trackingStage: "in_transit" });
@@ -389,9 +390,11 @@ describe("POST /api/integrations/loads/import", () => {
     expect(body.results[0].action).toBe("created");
     expectNoSecrets(body);
     const stored = await ctx.db.prepare(`SELECT * FROM loads WHERE load_number = ?`).get("470200-1");
-    expectNoSecrets(stored);
     expect(stored?.customer_cost_cents).toBe(150000);
     expect(stored?.comments).toBe("");
+    expect(stored?.carrier_name ?? null).toBeNull();
+    expect(stored?.carrier_mc ?? null).toBeNull();
+    expect(stored?.carrier_pay_cents).toBeUndefined();
     expect(JSON.stringify(stored)).not.toMatch(/carrierPay|carrierName|mcNumber|rateConfirmation|rate_con|998877|BLACKHAWK|RATECON|8765/);
     const tables = await ctx.db.prepare(`SELECT name, sql FROM sqlite_master WHERE type = 'table'`).all();
     for (const table of tables) {

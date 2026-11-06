@@ -108,7 +108,7 @@ export async function notifySelectOfEmitMessage(
   const email = messageNotifyEmails(env).length > 0 ? "skipped_no_provider" : "unset";
   if (email === "skipped_no_provider" && !emailSkipWarned) {
     emailSkipWarned = true;
-    console.warn("MESSAGE_NOTIFY_EMAILS is set, but this portal has no email provider, so no message email was sent.");
+    console.warn("MESSAGE_NOTIFY_EMAILS is set, but message notes are not emailed.");
   }
   return { slack, email };
 }

@@ -289,12 +289,13 @@ export async function listCustomerDocuments(ctx: PortalContext, loadId: string):
 export async function readCustomerDocument(
   ctx: PortalContext,
   id: string,
-): Promise<{ id: string; loadId: string; filename: string; mediaType: string; bytes: Uint8Array } | null> {
+): Promise<{ id: string; loadId: string; kind: "bol" | "attachment"; filename: string; mediaType: string; bytes: Uint8Array } | null> {
   const row = await ctx.db.prepare(CUSTOMER_DOCUMENT_READ_SQL).get(id);
   if (!row) return null;
   return {
     id: String(row.id),
     loadId: String(row.load_id),
+    kind: row.kind === "bol" ? "bol" : "attachment",
     filename: String(row.filename),
     mediaType: allowedMedia(String(row.media_type)),
     bytes: await readStoredBytes(String(row.storage_key)),

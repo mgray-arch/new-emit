@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import CarrierBadge from "@/components/carrier-badge";
 import DocumentLinks from "@/components/document-links";
 import LoadForm, { draftFromCopy, draftFromOrder, draftSalesOrderErrors, emptyDraft, payloadFromDraft, useSites, type Draft } from "@/components/load-form";
-import SamBuildButton from "@/components/sam-build-button";
+import BuildStatus from "@/components/build-status";
 import PhotoGallery from "@/components/photo-gallery";
 import SelectLoadField from "@/components/select-load-field";
 import StatusPill from "@/components/status-pill";
@@ -14,19 +15,17 @@ import { carrierIdentityLabel } from "@/lib/carrier";
 import { formatDay, formatWhenBoise } from "@/lib/dates";
 import { reprintMessage } from "@/lib/reprint";
 import { deleteConfirmText } from "@/lib/delete-confirm";
+import { stageBecomesReadyToShip } from "@/lib/load-stage";
 import { formatEnteredBy } from "@/lib/entered-by";
 import {
   LOAD_TAB_LABEL,
-  PICKUP_GROUP_LABEL,
   attentionReasons,
   displayStatus,
   emptyListMessage,
   fileSummary,
-  pickupGroup,
   visibleLoadTabs,
   type LoadTab,
   type LoadTabCounts,
-  type PickupGroup,
 } from "@/lib/load-list";
 import { toast } from "@/lib/toast";
 import {
@@ -92,6 +91,8 @@ function Note({ text }: { text: string }) {
 
 export default function Dashboard({ startNew = false }: { startNew?: boolean }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const updatedOnly = searchParams.get("updated") === "1";
   const sites = useSites();
   const [tab, setTab] = useState<LoadTab>("active");
   const [listReady, setListReady] = useState(false);
@@ -117,7 +118,16 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   const [formError, setFormError] = useState("");
   const [soWarning, setSoWarning] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmReady, setConfirmReady] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const updatedRef = useRef(updatedOnly);
+
+  useEffect(() => {
+    if (updatedRef.current === updatedOnly) return;
+    updatedRef.current = updatedOnly;
+    setPage(1);
+    setRows([]);
+  }, [updatedOnly]);
 
   useEffect(() => {
     const handle = setTimeout(() => setQuery(q), 250);
@@ -184,6 +194,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     if (shipTo) params.set("shipTo", shipTo);
     if (pickup) params.set("pickup", pickup);
     if (receiver) params.set("receiver", receiver);
+    if (updatedOnly) params.set("updated", "1");
     params.set("page", String(page));
     params.set("pageSize", String(PAGE_SIZE));
     fetch(`/api/orders?${params}`)
@@ -195,13 +206,35 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
         setData(body);
         setRows((current) => {
           if (page === 1) return body.orders;
-          const seen = new Set(current.map((order) => order.id));
-          return [...current, ...body.orders.filter((order) => !seen.has(order.id))];
+          const incoming = new Map(body.orders.map((order) => [order.id, order]));
+          const merged = current.map((order) => incoming.get(order.id) ?? order);
+          const seen = new Set(merged.map((order) => order.id));
+          return [...merged, ...body.orders.filter((order) => !seen.has(order.id))];
         });
         setError("");
       })
       .catch(() => setError("We couldn't load your loads. Refresh the page and try again."));
-  }, [listReady, tab, status, query, shipFrom, shipTo, pickup, receiver, page, reload]);
+  }, [listReady, tab, status, query, shipFrom, shipTo, pickup, receiver, page, reload, updatedOnly]);
+
+  useEffect(() => {
+    let armed = false;
+    const arm = window.setTimeout(() => {
+      armed = true;
+    }, 500);
+    function refreshIfShown() {
+      if (!armed || document.visibilityState === "hidden") return;
+      setReload((value) => value + 1);
+    }
+    window.addEventListener("focus", refreshIfShown);
+    window.addEventListener("pageshow", refreshIfShown);
+    document.addEventListener("visibilitychange", refreshIfShown);
+    return () => {
+      window.clearTimeout(arm);
+      window.removeEventListener("focus", refreshIfShown);
+      window.removeEventListener("pageshow", refreshIfShown);
+      document.removeEventListener("visibilitychange", refreshIfShown);
+    };
+  }, []);
 
   async function openCopy(id: string) {
     const response = await fetch(`/api/orders/${id}/copy-draft`);
@@ -223,6 +256,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     if (!response.ok) return;
     const body = await response.json();
     setEditing(body.order);
+    replaceOrder(body.order);
     setDraft(draftFromOrder(body.order));
     setSubmitted(null);
     setFormError("");
@@ -253,16 +287,18 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     }
   }
 
-  async function save() {
+  async function save(forceReady = false) {
     if (readOnly) {
       setFormError("View-as is read-only. Switch back to Select view to change anything.");
       return;
     }
     if (!draft.stops.some((stop) => stop.kind === "pickup") || !draft.stops.some((stop) => stop.kind === "drop")) {
+      setConfirmReady(false);
       setFormError("Add at least one pickup and one drop.");
       return;
     }
     if (draft.stops.some((stop) => stop.duplicateOf && !stop.saveAsNew)) {
+      setConfirmReady(false);
       setFormError("This looks like a duplicate. Use the existing location, or save it as new.");
       return;
     }
@@ -271,6 +307,12 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       setFormError(soErrors[0]);
       return;
     }
+    if (stageBecomesReadyToShip(editing?.portalStatus, draft.portalStatus) && !forceReady) {
+      setConfirmReady(true);
+      setFormError("");
+      return;
+    }
+    setConfirmReady(false);
     setSaving(true);
     setFormError("");
     try {
@@ -370,17 +412,6 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   }
 
   const counts: LoadTabCounts = data?.counts ?? { active: 0, delivered: 0, history: 0 };
-  const groups = useMemo(() => {
-    if (!data) return [];
-    const blocks: Array<{ id: PickupGroup; orders: CustomerOrder[] }> = [];
-    for (const order of rows) {
-      const id = pickupGroup(order.shipDate, data.today, data.tomorrow, data.weekEnd);
-      const last = blocks[blocks.length - 1];
-      if (!last || last.id !== id) blocks.push({ id, orders: [order] });
-      else last.orders.push(order);
-    }
-    return blocks;
-  }, [rows, data]);
 
   function exportHistory() {
     const params = new URLSearchParams();
@@ -451,6 +482,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
               onClick={() => {
                 setTab(item);
                 setPage(1);
+                if (updatedOnly) router.replace("/");
               }}
             >
               <strong>{counts[item] ?? 0}</strong>
@@ -527,15 +559,18 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
           </button>
         )}
       </div>
-      {data?.scope === "all" && query.trim() ? <p className="mini">Showing matches from every tab.</p> : null}
+      {updatedOnly ? (
+        <p className="mini update-filter">
+          Showing orders with a carrier update.{" "}
+          <button className="text-btn" type="button" onClick={() => router.push("/")}>
+            Show all loads
+          </button>
+        </p>
+      ) : null}
+      {data?.scope === "all" && query.trim() && !updatedOnly ? <p className="mini">Showing matches from every tab.</p> : null}
       {error && <p className="error">{error}</p>}
       <div className="board">
-        {groups.map((group) => (
-          <section key={group.id}>
-            <div className="group-head" role="heading" aria-level={2}>
-              {PICKUP_GROUP_LABEL[group.id]}
-            </div>
-            {group.orders.map((order) => {
+        {rows.map((order) => {
               const reasons = selectView && data ? attentionReasons(order, data.today) : [];
               const today = data?.today ?? "";
               return (
@@ -557,7 +592,16 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                     <div className="lane">
                       {order.origin.city}, {order.origin.state} → {order.destination.city}, {order.destination.state}
                     </div>
-                    <StatusPill status={displayStatus(order, today, { needsAttention: selectView })} />
+                    <div className="load-row-status">
+                      <span className="stage-name">{STATUS_LABEL[order.portalStatus]}</span>
+                      {order.carrierBadge ? <CarrierBadge kind={order.carrierBadge} /> : null}
+                      {order.trackingBadge ? (
+                        <span className="carrier-badge" data-kind="tracking">
+                          Tracking started
+                        </span>
+                      ) : null}
+                      <StatusPill status={displayStatus(order, today, { needsAttention: selectView })} />
+                    </div>
                   </div>
                   <div className="date-grid">
                     <div className="date-pair">
@@ -574,6 +618,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                     {order.stops.length > 2 ? ` · ${order.stops.length} stops` : ""} · {fileSummary({ ...order, pendingReviewCount: 0 })}
                   </div>
                   <div className="load-meta">Entered by: {formatEnteredBy(order.enteredByName, order.enteredByEmail)}</div>
+                  <BuildStatus status={order.buildStatus} />
                   {showCarrier ? <div className="load-meta">{carrierIdentityLabel(order)}</div> : null}
                   {order.bolPrint?.reprint ? (
                     <div className="reprint-banner" role="status">
@@ -600,8 +645,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                   ) : null}
                   {order.comments ? <Note text={order.comments} /> : null}
                   <div className="load-row-actions">
-                    {selectView ? <SamBuildButton order={order} onUpdated={replaceOrder} /> : null}
-                    <TrackLink href={order.trackingLink} />
+                    <TrackLink href={order.trackingLink} label="Track shipment" />
                     {showPricing && (
                       <span className="load-meta">
                         {order.customerCost == null ? "Cost not set" : order.customerCost.toLocaleString("en-US", { style: "currency", currency: "USD" })}
@@ -642,13 +686,13 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                     </div>
                   ) : null}
                 </article>
-              );
-            })}
-          </section>
-        ))}
+        );
+        })}
         {data && rows.length === 0 ? (
           <p className="empty">
-            {emptyListMessage(tab, Boolean(query.trim() || status || shipFrom || shipTo || pickup || receiver))}
+            {updatedOnly
+              ? "No carrier updates are waiting for you."
+              : emptyListMessage(tab, Boolean(query.trim() || status || shipFrom || shipTo || pickup || receiver))}
           </p>
         ) : null}
       </div>
@@ -693,18 +737,20 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                   <b>Select load {formatLoadNumber(submitted.loadNumber)}</b>
                 </div>
                 <p className="mini">
-                  This screen is the confirmation. No email is sent. The Select load number stays pending until a Select admin enters the number from SAM.
+                  This screen is the confirmation. Submitting an order does not send email. The Select load number stays pending until it is stored from SAM.
                 </p>
               </div>
             )}
             {selectView && editing && (
               <>
-                <SamBuildButton order={editing} onUpdated={replaceOrder} />
+                <BuildStatus status={editing.buildStatus} />
                 <SelectLoadField
                   orderId={editing.id}
                   loadNumber={editing.loadNumber}
+                  canCorrect
                   onUpdated={(order) => {
                     setEditing(order);
+                    replaceOrder(order);
                     setSubmitted((current) => (current?.id === order.id ? order : current));
                   }}
                 />
@@ -713,6 +759,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                   trackingLink={editing.trackingLink}
                   onUpdated={(order) => {
                     setEditing(order);
+                    replaceOrder(order);
                     setSubmitted((current) => (current?.id === order.id ? order : current));
                   }}
                 />
@@ -720,17 +767,33 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
             )}
             {formError && <p className="error">{formError}</p>}
             {soWarning && <p className="warn">{soWarning}</p>}
-            <LoadForm draft={draft} setDraft={setDraft} order={editing} sites={sites} hideCommercial={!showPricing} />
+            <LoadForm draft={draft} setDraft={setDraft} order={editing} sites={sites} hideCommercial={!showPricing} readOnly={readOnly} />
+            {confirmReady ? (
+              <div className="confirm-box ready-confirm" role="status">
+                <button className="btn" type="button" disabled={saving} onClick={() => void save(true)}>
+                  {saving ? "Saving…" : "Save as Ready to Ship"}
+                </button>
+                <button className="btn secondary" type="button" onClick={() => setConfirmReady(false)}>
+                  Go back
+                </button>
+              </div>
+            ) : null}
             {editing && (
               <div className="grid-2">
                 <div className="field">
                   <label>Attachments</label>
-                  <input aria-label="Upload attachment" type="file" onChange={(event) => event.target.files?.[0] && upload("attachment", event.target.files[0])} />
+                  <label className="btn secondary file-btn">
+                    Upload attachment
+                    <input aria-label="Upload attachment" type="file" onChange={(event) => event.target.files?.[0] && upload("attachment", event.target.files[0])} />
+                  </label>
                   <FileList docs={editing.documents.filter((doc) => doc.kind === "attachment")} />
                 </div>
                 <div className="field">
                   <label>BOL</label>
-                  <input aria-label="Upload BOL" type="file" onChange={(event) => event.target.files?.[0] && upload("bol", event.target.files[0])} />
+                  <label className="btn secondary file-btn">
+                    Upload BOL
+                    <input aria-label="Upload BOL" type="file" onChange={(event) => event.target.files?.[0] && upload("bol", event.target.files[0])} />
+                  </label>
                   <FileList
                     docs={editing.documents.filter((doc) => doc.kind === "bol")}
                     order={editing}
@@ -748,7 +811,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
               <button className="btn secondary" type="button" onClick={() => { setCreating(false); setEditing(null); }}>
                 Close
               </button>
-              <button className="btn" type="button" disabled={saving || readOnly} onClick={save}>
+              <button className="btn" type="button" disabled={saving || readOnly} onClick={() => void save()}>
                 {saving ? "Saving…" : editing ? "Save changes" : "Submit order"}
               </button>
             </div>
@@ -763,42 +826,13 @@ function FileList({
   docs,
   order,
   canPrint,
-  onPrinted,
 }: {
   docs: CustomerDocument[];
   order?: CustomerOrder;
   canPrint?: boolean;
   onPrinted?: (order: CustomerOrder) => void;
 }) {
-  const [printing, setPrinting] = useState<string | null>(null);
-  const [printError, setPrintError] = useState("");
   if (!docs.length) return <div className="mini">None yet</div>;
-
-  async function printBol(documentId: string) {
-    if (!order) return;
-    setPrinting(documentId);
-    setPrintError("");
-    try {
-      const response = await fetch(`/api/orders/${order.id}/bol/print`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ documentId }),
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || "Could not record that print");
-      window.open(body.documentUrl || `/api/documents/${documentId}`, "_blank", "noopener");
-      const refreshed = await fetch(`/api/orders/${order.id}`);
-      if (refreshed.ok) {
-        const next = await refreshed.json();
-        onPrinted?.(next.order);
-      }
-    } catch (err) {
-      setPrintError(err instanceof Error ? err.message : "Could not record that print");
-    } finally {
-      setPrinting(null);
-    }
-  }
-
   return (
     <div className="refs">
       {order?.bolPrint && docs.some((doc) => doc.kind === "bol") ? (
@@ -808,19 +842,18 @@ function FileList({
           {order.bolPrint.carrierMc ? ` (MC ${order.bolPrint.carrierMc})` : ""}
         </p>
       ) : null}
-      {printError ? <p className="error">{printError}</p> : null}
       {docs.map((doc) => (
         <div key={doc.id} className={doc.kind === "bol" && order?.bolPrint?.reprint ? "bol-reprint" : undefined}>
           <DocumentLinks doc={doc} />
-          {canPrint && doc.kind === "bol" ? (
-            <button className="btn secondary" type="button" disabled={printing === doc.id} onClick={() => void printBol(doc.id)}>
-              {printing === doc.id ? "Printing…" : "Print BOL"}
-            </button>
-          ) : null}
         </div>
       ))}
+      {canPrint && order && docs.some((doc) => doc.kind === "bol") ? (
+        <a className="btn secondary" href={`/api/orders/${order.id}/bol/print`} target="_blank" rel="noopener noreferrer">
+          Print BOL
+        </a>
+      ) : null}
       {docs.some((doc) => doc.kind === "bol") ? (
-        <p className="mini">Print BOL records the version. View, Download, and the browser print dialog are not recorded.</p>
+        <p className="mini">Print opens the uploaded BOL. View and Download are not recorded.</p>
       ) : null}
     </div>
   );

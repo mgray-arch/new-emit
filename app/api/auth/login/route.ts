@@ -2,7 +2,7 @@ import { errorResponse, json } from "@/lib/http";
 import { clientIp, loginWithPassword } from "@/lib/passwords";
 import { readyPortal } from "@/lib/portal";
 import { blockingSetupError, emptyAccountMessage, setupFailureMessage } from "@/lib/runtime-config";
-import { sameOrigin, sessionCookie, signSession } from "@/lib/session";
+import { clearViewAsCookie, sameOrigin, sessionCookie, signSession } from "@/lib/session";
 import { z } from "zod";
 
 const bodySchema = z.object({
@@ -39,11 +39,11 @@ export async function POST(req: Request) {
       return json({ error: "Invalid email or password" }, 401);
     }
     const token = await signSession(result.session);
-    return json(
-      { name: result.session.name, email: result.session.email, role: result.session.role },
-      200,
-      { "set-cookie": sessionCookie(token) },
-    );
+    const headers = new Headers();
+    headers.append("set-cookie", sessionCookie(token));
+    // A preview cookie from an earlier visit would rewrite this admin into an EMIT role.
+    headers.append("set-cookie", clearViewAsCookie());
+    return json({ name: result.session.name, email: result.session.email, role: result.session.role }, 200, headers);
   } catch (error) {
     const setup = setupFailureMessage(error);
     if (setup) return json({ error: setup }, 503);

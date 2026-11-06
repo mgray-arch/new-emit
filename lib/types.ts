@@ -54,7 +54,7 @@ export const STATUS_LABEL: Record<PortalStatus, string> = {
 };
 
 export const STAGE_LABEL: Record<TrackingStage, string> = {
-  submitted: "Submitted",
+  submitted: "Confirmed",
   booked: "Booked",
   at_pickup: "At Pickup",
   in_transit: "In Transit",
@@ -95,6 +95,39 @@ export interface TimelineEvent {
   stage: TrackingStage;
   at: string;
   label: string;
+}
+
+/** A carrier update recorded on the load. The text names the company and MC. It has no pay. */
+export interface OrderNotice {
+  at: string;
+  kind: "assigned" | "changed";
+  text: string;
+  /** Company on the update. Omitted when an older line could not be parsed. */
+  company?: string;
+  /** MC number without a prefix. Empty when it was not provided. */
+  mc?: string;
+}
+
+/** A portal stage change. The text is the stage names only. It has no pay. */
+export interface StageEvent {
+  at: string;
+  from: PortalStatus | null;
+  to: PortalStatus;
+  text: string;
+}
+
+/** Tracking started or the customer link changed. The text has no pay and no carrier rate. */
+export interface TrackingEvent {
+  at: string;
+  text: string;
+}
+
+/** Current assignment shown on the load. No pay. */
+export interface HaulCallout {
+  company: string;
+  mc: string;
+  at: string;
+  kind: "assigned" | "changed";
 }
 
 export interface CustomerDocument {
@@ -171,6 +204,24 @@ export interface CustomerOrder {
   bolPrint?: BolPrintSummary | null;
   /** Older prints, newest first. Present on the load detail, omitted from the list. */
   bolPrints?: BolPrintRecord[];
+  /** Read-only. "Sent to Slack", or "Built in SAM: <load number>". Null until one of those is true. */
+  buildStatus?: string | null;
+  /** Carrier updates for this order. Empty until one is recorded. */
+  notices?: OrderNotice[];
+  /** Stage changes for this order. Empty until one is recorded. */
+  stageEvents?: StageEvent[];
+  /** Tracking-link history. Empty until a customer share link is stored. */
+  trackingEvents?: TrackingEvent[];
+  /** Set when this person has not opened the order since tracking started. */
+  trackingBadge?: boolean | null;
+  /** How many times the uploaded BOL file was printed. Detail only. */
+  bolPrintCount?: number;
+  /** Current assignment, when one is stored. Omitted until then. No pay. */
+  haulCallout?: HaulCallout | null;
+  /** Set when this person has not opened the latest carrier update. */
+  carrierBadge?: "assigned" | "changed" | null;
+  /** Internal. When the Slack new-load note was accepted. Omitted from portal responses. */
+  slackNotifiedAt?: string | null;
 }
 
 export interface BolPrintRecord {
@@ -227,14 +278,14 @@ export const PERMISSION_LABEL: Record<EmitPermission, string> = {
   full: "Full access",
 };
 
-/** Sales and Loader are EMIT profiles. Null is a standard EMIT user. */
+/** Stored EMIT profiles and view-as previews. Both hide EMIT's cost and cannot add loads. */
 export type EmitProfile = "sales" | "loader";
 
 /** Select is previewing one EMIT access plus one permission. The preview cannot write. */
 export interface ViewAsPreview {
   access: EmitAccess;
   permission: EmitPermission;
-  /** Set when Select is previewing Sales or Loader. */
+  /** Set when Select is previewing Sales or Loader. Both use view-only rules. */
   profile?: EmitProfile | null;
 }
 

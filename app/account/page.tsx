@@ -47,7 +47,7 @@ export default function AccountPage() {
     <Shell>
       <main className="page">
         <h1>PASSWORD</h1>
-        <p className="lede">Change the password for this EMIT account. Select admins who use Google do not have a password here.</p>
+        <p className="lede">Change the password for this account. Use at least 10 characters.</p>
         {readOnly ? <p className="error">View-as is read-only. This preview cannot change a password.</p> : null}
         <form onSubmit={submit} style={{ maxWidth: 420 }}>
           {error && <p className="error">{error}</p>}

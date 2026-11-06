@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { GET as exportOrders } from "@/app/api/orders/export/route";
 import { GET as listOrdersRoute } from "@/app/api/orders/route";
-import { attentionReasons, displayStatus, emptyListMessage, fileSummary, loadsToCsv, pickupGroup, simpleStepIndex, tripCaption } from "@/lib/load-list";
+import { DISPLAY_STATUS_LABEL, SIMPLE_STEPS, attentionReasons, displayStatus, emptyListMessage, fileSummary, loadsToCsv, pickupGroup, simpleStepIndex, tripCaption } from "@/lib/load-list";
 import { listBoard, listOrders } from "@/lib/orders";
 import type { PortalContext } from "@/lib/db";
 import type { CustomerOrder } from "@/lib/types";
@@ -60,6 +60,9 @@ describe("load lists", () => {
       bolCount: 0,
     };
     expect(displayStatus(base, today)).toBe("booked");
+    expect(displayStatus({ ...base, trackingStage: "submitted", portalStatus: "ready_to_ship" }, today)).toBe("pending");
+    expect(DISPLAY_STATUS_LABEL.pending).toBe("Confirmed");
+    expect(displayStatus({ ...base, trackingStage: "submitted", portalStatus: "being_prepared" }, today)).toBe("pending");
     expect(displayStatus({ ...base, trackingStage: "in_transit", portalStatus: "shipped" }, today)).toBe("in_transit");
     expect(displayStatus({ ...base, trackingStage: "delivered", portalStatus: "shipped" }, today)).toBe("delivered");
     expect(displayStatus({ ...base, trackingStage: "submitted", portalStatus: "being_prepared", loadNumber: null }, today)).toBe("attention");
@@ -71,6 +74,9 @@ describe("load lists", () => {
     expect(fileSummary({ ...base, attachmentCount: 1, bolCount: 1, pendingReviewCount: 1 })).toBe("2 files, 1 awaiting review");
     expect(fileSummary({ ...base, attachmentCount: 0, bolCount: 0, pendingReviewCount: 0 })).toBe("No files yet");
     expect(fileSummary({ ...base, attachmentCount: 0, bolCount: 0, pendingReviewCount: 1 })).toBe("1 awaiting review");
+    expect(SIMPLE_STEPS[0]).toBe("Confirmed");
+    expect(tripCaption("submitted", false)).toBe("Confirmed. Select has this load. A truck is not booked yet.");
+    expect(tripCaption("booked", false)).toBe("Booked. A truck is booked and has not arrived at the dock yet.");
     expect(simpleStepIndex("submitted")).toBe(0);
     expect(simpleStepIndex("booked")).toBe(1);
     expect(simpleStepIndex("at_pickup")).toBe(2);
@@ -294,5 +300,21 @@ describe("load lists", () => {
     expect(adminCsv).toContain("1320.00");
     expect(adminCsv).not.toMatch(/carrierPay|carrier_pay/);
     expectNoSecrets(adminCsv);
+  });
+
+  it("lists loads newest first by created time", async () => {
+    const older = "SO-SORT-OLD";
+    const newer = "SO-SORT-NEW";
+    await ctx.db
+      .prepare(
+        `UPDATE loads SET created_at = '2026-01-01T00:00:00.000Z' WHERE id = (SELECT id FROM loads ORDER BY created_at LIMIT 1)`,
+      )
+      .run();
+    const first = await ctx.db.prepare(`SELECT id FROM loads ORDER BY created_at LIMIT 1`).get();
+    const second = await ctx.db.prepare(`SELECT id FROM loads WHERE id != ? LIMIT 1`).get(String(first?.id));
+    await ctx.db.prepare(`UPDATE loads SET sales_order_number = ?, created_at = ? WHERE id = ?`).run(older, "2026-01-02T00:00:00.000Z", String(first?.id));
+    await ctx.db.prepare(`UPDATE loads SET sales_order_number = ?, created_at = ? WHERE id = ?`).run(newer, "2026-12-01T00:00:00.000Z", String(second?.id));
+    const board = await listBoard(ctx, { q: "SO-SORT-", pageSize: 10 });
+    expect(board.orders.map((order) => order.salesOrderNumber)).toEqual([newer, older]);
   });
 });

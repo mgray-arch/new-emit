@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { listBolPages } from "@/lib/bol-print";
 import type { PortalContext } from "@/lib/db";
 import { withTransaction } from "@/lib/db";
 import { PortalError } from "@/lib/http";
@@ -72,21 +73,18 @@ function toRecord(row: PrintRow): BolPrintRecord {
   };
 }
 
+/** The same first page the print view opens, so a reprint banner matches that file. */
 async function newestBol(ctx: PortalContext, loadId: string): Promise<{ id: string; fingerprint: string } | null> {
-  const row = await ctx.db
-    .prepare(
-      `SELECT id, storage_key FROM customer_documents
-       WHERE load_id = ? AND kind = 'bol'
-       ORDER BY created_at DESC, rowid DESC
-       LIMIT 1`,
-    )
-    .get(loadId);
-  if (!row) return null;
+  const pages = await listBolPages(ctx, loadId);
+  const page = pages[0];
+  if (!page) return null;
+  const row = await ctx.db.prepare(`SELECT storage_key FROM customer_documents WHERE id = ?`).get(page.id);
+  if (!row) return { id: page.id, fingerprint: `${page.id}:unread` };
   try {
     const bytes = await readStoredBytes(String(row.storage_key));
-    return { id: String(row.id), fingerprint: fingerprint(String(row.id), bytes) };
+    return { id: page.id, fingerprint: fingerprint(page.id, bytes) };
   } catch {
-    return null;
+    return { id: page.id, fingerprint: `${page.id}:unread` };
   }
 }
 
@@ -136,13 +134,13 @@ export async function recordBolPrint(
   if (!doc || String(doc.load_id) !== input.loadId || doc.kind !== "bol") {
     throw new PortalError("That BOL is not on this load.", 404);
   }
-  let bytes: Uint8Array;
+  let printFingerprint = `${input.documentId}:unread`;
   try {
-    bytes = await readStoredBytes(String(doc.storage_key));
+    const bytes = await readStoredBytes(String(doc.storage_key));
+    printFingerprint = fingerprint(input.documentId, bytes);
   } catch {
-    throw new PortalError("That BOL file is no longer available.", 404);
+    /* The print page can still open. A later readable file is treated as a new BOL. */
   }
-  const printFingerprint = fingerprint(input.documentId, bytes);
   const before = await bolPrintState(ctx, input.loadId, input.carrier);
   let version = 0;
   for (let attempt = 0; attempt < 8; attempt++) {
@@ -153,9 +151,9 @@ export async function recordBolPrint(
         await ctx.db
           .prepare(
             `INSERT INTO bol_prints (
-               id, load_id, document_id, version, printed_at, printed_by_id, printed_by_name,
+               id, load_id, document_id, version, printed_at, printed_by, printed_by_id, printed_by_name,
                carrier_name, carrier_mc, driver_name, bol_fingerprint
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             randomUUID(),
@@ -163,6 +161,7 @@ export async function recordBolPrint(
             input.documentId,
             next,
             ctx.now().toISOString(),
+            input.printedById,
             input.printedById,
             input.printedByName.trim() || "Unknown",
             input.carrier.carrierName,

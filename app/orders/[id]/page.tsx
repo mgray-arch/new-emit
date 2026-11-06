@@ -3,10 +3,14 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import CarrierCallout from "@/components/carrier-callout";
 import DocumentLinks from "@/components/document-links";
 import LoadOwnerField from "@/components/load-owner-field";
 import PhotoGallery from "@/components/photo-gallery";
-import SamBuildButton from "@/components/sam-build-button";
+import BuildStatus from "@/components/build-status";
+import OrderHistory from "@/components/order-history";
+import StageField from "@/components/stage-field";
+import TrackingCallout from "@/components/tracking-callout";
 import SelectLoadField from "@/components/select-load-field";
 import Shell from "@/components/shell";
 import StatusPill from "@/components/status-pill";
@@ -49,8 +53,6 @@ export default function OrderPage() {
   const [order, setOrder] = useState<CustomerOrder | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const [problem, setProblem] = useState("");
-  const [printing, setPrinting] = useState<string | null>(null);
-  const [printError, setPrintError] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [carrierDraft, setCarrierDraft] = useState({ carrierName: "", carrierMc: "", driverName: "" });
   const [carrierError, setCarrierError] = useState("");
@@ -72,28 +74,6 @@ export default function OrderPage() {
   const allowPrint = canPrintBol(me) && !readOnly;
   const allowDocs = canUploadDocs(me) && !readOnly;
   const allowPhotos = canUploadPhotos(me) && !readOnly;
-
-  async function printBol(documentId: string) {
-    if (!order) return;
-    setPrinting(documentId);
-    setPrintError("");
-    try {
-      const response = await fetch(`/api/orders/${order.id}/bol/print`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ documentId }),
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || "Could not record that print");
-      window.open(body.documentUrl || `/api/documents/${documentId}`, "_blank", "noopener");
-      const refreshed = await fetch(`/api/orders/${order.id}`);
-      if (refreshed.ok) setOrder((await refreshed.json()).order);
-    } catch (err) {
-      setPrintError(err instanceof Error ? err.message : "Could not record that print");
-    } finally {
-      setPrinting(null);
-    }
-  }
 
   async function uploadFile(slot: "attachment" | "bol", file: File) {
     if (!order) return;
@@ -132,20 +112,21 @@ export default function OrderPage() {
 
   useEffect(() => {
     if (!params.id) return;
-    fetch(`/api/orders/${params.id}`)
-      .then(async (response) => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const response = await fetch(`/api/orders/${params.id}`);
+        if (cancelled) return;
         if (response.status === 404) {
           setProblem("We couldn't find that load. It may have been removed, or the link is wrong.");
-          return null;
+          return;
         }
         if (!response.ok) {
           setProblem("We couldn't open this load. Refresh the page and try again.");
-          return null;
+          return;
         }
-        return response.json();
-      })
-      .then((body) => {
-        if (!body) return;
+        const body = await response.json();
+        if (cancelled) return;
         setOrder(body.order);
         setCarrierDraft({
           carrierName: body.order.carrierName ?? "",
@@ -153,11 +134,34 @@ export default function OrderPage() {
           driverName: body.order.driverName ?? "",
         });
         setProblem("");
-      })
-      .catch(() => setProblem("We couldn't open this load. Refresh the page and try again."));
+      } catch {
+        if (!cancelled) setProblem("We couldn't open this load. Refresh the page and try again.");
+      }
+    }
+    void load();
+    let armed = false;
+    const arm = window.setTimeout(() => {
+      armed = true;
+    }, 500);
+    function refreshIfShown() {
+      if (!armed || document.visibilityState === "hidden") return;
+      void load();
+    }
+    window.addEventListener("focus", refreshIfShown);
+    window.addEventListener("pageshow", refreshIfShown);
+    document.addEventListener("visibilitychange", refreshIfShown);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(arm);
+      window.removeEventListener("focus", refreshIfShown);
+      window.removeEventListener("pageshow", refreshIfShown);
+      document.removeEventListener("visibilitychange", refreshIfShown);
+    };
   }, [params.id]);
 
   const today = denverDate(new Date());
+  const bolAttached = Boolean(order?.documents.some((doc) => doc.kind === "bol"));
+  const trackingStarted = order?.trackingEvents?.at(-1);
 
   return (
     <Shell>
@@ -180,7 +184,10 @@ export default function OrderPage() {
             <p className="lede">
               {order.salesOrderNumber} · Select load {formatLoadNumber(order.loadNumber)}
             </p>
+            <StageField order={order} canEdit={allowLoads && !readOnly} />
+            <BuildStatus status={order.buildStatus} />
             {showCarrier ? <p className="load-meta">{carrierIdentityLabel(order)}</p> : null}
+            {order.haulCallout ? <CarrierCallout haul={order.haulCallout} badge={order.carrierBadge} /> : null}
             {order.bolPrint?.reprint ? (
               <div className="reprint-banner" role="status">
                 {reprintMessage({
@@ -193,6 +200,9 @@ export default function OrderPage() {
                   currentCarrierMc: order.carrierMc ?? null,
                 })}
               </div>
+            ) : null}
+            {order.trackingLink && trackingStarted ? (
+              <TrackingCallout at={trackingStarted.at} href={order.trackingLink} fresh={Boolean(order.trackingBadge)} />
             ) : null}
             {me?.chatEnabled ? (
               <p>
@@ -212,18 +222,20 @@ export default function OrderPage() {
               </div>
             </div>
             {!order.loadNumber && (
-              <p className="mini">Select has not entered the load number yet. This page is the confirmation. No email is sent.</p>
+              <p className="mini">The SAM load number is not stored yet. This page is the confirmation. Submitting an order does not send email.</p>
             )}
             <div className="load-row-actions">
-              {selectView ? (
-                <SamBuildButton
-                  order={order}
-                  onUpdated={(next) => {
-                    setOrder(next);
-                  }}
-                />
+              <TrackLink href={order.trackingLink} label="Track shipment" />
+              {allowPrint && bolAttached ? (
+                <a className="btn secondary" href={`/api/orders/${order.id}/bol/print`} target="_blank" rel="noopener noreferrer">
+                  Print
+                </a>
+              ) : allowPrint ? (
+                <button className="btn secondary" type="button" disabled>
+                  BOL not uploaded yet
+                </button>
               ) : null}
-              <TrackLink href={order.trackingLink} />
+              {order.bolPrintCount ? <p className="mini">BOL printed {order.bolPrintCount === 1 ? "1 time" : `${order.bolPrintCount} times`}.</p> : null}
               {allowLoads ? (
                 readOnly ? (
                   <button className="btn secondary" type="button" disabled title="Read-only preview">
@@ -247,6 +259,8 @@ export default function OrderPage() {
               <Timeline order={order} />
               <p className="mini">Latest ETA: {order.latestEta ? formatWhen(order.latestEta) : "Not posted yet"}</p>
             </section>
+
+            <OrderHistory notices={order.notices} stages={order.stageEvents} tracking={order.trackingEvents} />
 
             <section className="detail-section">
               <h2>Stops</h2>
@@ -290,15 +304,9 @@ export default function OrderPage() {
                       {order.bolPrint.bolRemoved ? " · BOL removed" : ""}
                     </p>
                   ) : null}
-                  {printError ? <p className="error">{printError}</p> : null}
                   {order.documents.map((doc) => (
                     <div key={doc.id} className={doc.kind === "bol" && order.bolPrint?.reprint ? "bol-reprint" : undefined}>
                       <DocumentLinks doc={doc} label={`${doc.kind === "bol" ? "BOL" : "File"} · ${doc.filename}`} />
-                      {allowPrint && doc.kind === "bol" ? (
-                        <button className="btn secondary" type="button" disabled={printing === doc.id} onClick={() => void printBol(doc.id)}>
-                          {printing === doc.id ? "Printing…" : "Print BOL"}
-                        </button>
-                      ) : null}
                     </div>
                   ))}
                   {order.documents.some((doc) => doc.kind === "bol") ? (
@@ -341,31 +349,30 @@ export default function OrderPage() {
 
             <section className="detail-section">
               <h2>Tracking</h2>
-              {canUpload && (
-                <>
-                  <SelectLoadField
-                    orderId={order.id}
-                    loadNumber={order.loadNumber}
-                    onUpdated={(next) => {
-                      setOrder(next);
-                      toast("Select load number saved.");
-                    }}
-                  />
-                  <TrackingLinkField
-                    orderId={order.id}
-                    trackingLink={order.trackingLink}
-                    onUpdated={(next) => {
-                      setOrder(next);
-                      toast("Tracking link saved.");
-                    }}
-                  />
-                </>
-              )}
-              {order.trackingLink ? (
+              <SelectLoadField
+                orderId={order.id}
+                loadNumber={order.loadNumber}
+                canCorrect={canUpload}
+                onUpdated={(next) => {
+                  setOrder(next);
+                  toast("Select load number saved.");
+                }}
+              />
+              {canUpload ? (
+                <TrackingLinkField
+                  orderId={order.id}
+                  trackingLink={order.trackingLink}
+                  onUpdated={(next) => {
+                    setOrder(next);
+                    toast("Tracking link saved.");
+                  }}
+                />
+              ) : order.trackingLink ? (
                 <p className="mini">Live tracking is the Track button above.</p>
               ) : (
                 <p className="empty">No live tracking link yet. Select adds one when the truck is on the way.</p>
               )}
+              {canUpload && order.trackingLink ? <p className="mini">Live tracking is the Track button above.</p> : null}
               <p>
                 <a className="track-link" href={order.trackingUrl} title="Shareable status page">
                   Shareable status page

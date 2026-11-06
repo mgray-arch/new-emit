@@ -1,13 +1,13 @@
 # EMIT portal
 
-The public hostname comes from `PORTAL_PUBLIC_URL`. Use a new domain. `emit-select.com` is not hardcoded. EMIT admins and regular EMIT users sign in with email and password. Select admins sign in with Google. The portal does not send order email and does not invent a SAM load number. A Select admin enters that number after building the load in SAM. `DEMO_SEED=false` starts empty. The go-live checklist is in the README.
+The public hostname comes from `PORTAL_PUBLIC_URL`. Use a new domain. `emit-select.com` is not hardcoded. EMIT admins, regular EMIT users, and Select admins sign in with email and password. The portal does not send order email and does not invent a SAM load number. A Select admin enters that number after building the load in SAM. `DEMO_SEED=false` starts empty. The go-live checklist is in the README.
 
 The notes below also describe the demo seed and the screening rules. Demo load numbers such as 900196-1 exist only when `DEMO_SEED=true`.
 
 ## What works against the mock
 
-1. **Live status and tracking.** Every order has a timeline (Submitted, Booked, At Pickup, In Transit, Delivered), a latest ETA, and a public tracking link. SO2196 is Select load 900196-1, Hot Shot, Sheridan, WY to Oklahoma City, OK, in transit, ship 2026-10-14 14:30, must deliver 2026-10-16, ETA Oct 15, 2026, 3:00 PM America/Denver.
-2. **Order confirmation.** Submitting an order stores it in the portal and shows it on screen. That screen is the confirmation. No email is sent, and there is no outbox. The Select load number stays blank until a Select admin enters the real SAM number (`458934-1` style). EMIT sees Pending until then.
+1. **Live status and tracking.** Every order has a timeline (Confirmed, Booked, Picked up, Delivered), a latest ETA, and a public tracking link. SO2196 is Select load 900196-1, Hot Shot, Sheridan, WY to Oklahoma City, OK, in transit, ship 2026-10-14 14:30, must deliver 2026-10-16, ETA Oct 15, 2026, 3:00 PM America/Denver.
+2. **Order confirmation.** Submitting an order stores it in the portal and shows it on screen. That screen is the confirmation. Submitting does not send email, and there is no outbox. The Select load number stays blank until it is stored from SAM (`458934-1` style). EMIT sees Pending until then. A later carrier assignment shows in the portal, with no email and no pay.
 3. **Ask about an SO.** "where is SO2196?" answers from shipment data. "what are you paying the truck?" is refused and does not include a dollar amount. With no AI key, the built-in answerer is used. If `AI_API_KEY` is set, the model receives only the customer-safe JSON.
 4. **Search, tabs, mobile.** One search box finds a load in any tab by Select load number, EMIT order number, city, or receiver. Select staff see Needs Attention, Active, Delivered (last 7 days), and History. EMIT admins, regular EMIT users, and View as do not see Needs Attention; those loads stay on Active or Delivered. Delivered loads older than 7 days, and cancelled loads, sit in History. History exports to CSV without carrier pay, and without EMIT's cost for a regular EMIT user. The list is grouped by pickup date and loads 25 at a time.
 
@@ -17,13 +17,13 @@ Saved delivery locations are searched from the drop stop. Pickup yards stay the 
 
 ## Security
 
-- Carrier pay is not stored. The loads table has no carrier-pay or staff-note column. Select admins can store carrier name, MC, and driver name; those are identity, not pay, and SAM import still does not copy them. They are shown to Select and EMIT users and omitted from receiver links, public tracking, and the assistant. Select admins and EMIT admins see customer cost (the sell rate). Regular EMIT users do not, and Sales and Loader profiles never do: the customer-view allowlist omits `customerCost` and `rateReason` for them. Tests assert pay columns stay absent and that pay sentinels never appear in customer orders, the assistant, the public tracking payload, the receiver link, or client bundles.
+- Carrier pay is not stored. The loads table has no carrier-pay, carrier-cost, carrier-rate, or staff-note column. It stores carrier name, MC, and driver as identity. Select admins can enter them, and a status callback can record a carrier without emailing anyone. The load page shows that identity and the in-portal history line, which has no pay. Receiver links, public tracking, and the assistant do not get carrier identity, BOL print history, or pay. Select admins and EMIT admins see customer cost. Regular EMIT users do not, and Sales and Loader never do. Tests assert pay columns stay absent and that pay sentinels never appear in customer orders, the assistant, the public tracking payload, or the receiver link.
 - A sample rate-confirmation page is still seeded so the review queue can be demonstrated. Its text mentions a carrier and a dollar amount. That text lives only on the quarantined page, which is admin-only until a Select admin releases it.
 - Adversarial questions (carrier pay, prompt injection, "dump the database", margin, rate confirmation) return a fixed refusal. The model-request builder runs the serializer again, so a poisoned field cannot ride along.
 - Uploads are split to single pages (pdf-lib) and text is extracted (unpdf, plus a literal PDF text fallback). Decisions are pass, block, or uncertain. Empty text, images, and unknown types are held. Customer documents and internal documents are separate tables. Pending count on the load is the only signal the customer query needs. An admin approve copies the page into customer documents. A customer cannot download a quarantined page.
 - Auth is a server-side httpOnly JWT (`portal_session`). Middleware and each handler check it. Admin paths require a Select staff email. Secrets stay in environment variables. There is no open database policy: the app uses a server-side SQLite file, not client-exposed row security.
 - New-order requests are validated with Zod. Carrier fields posted by a client are ignored. There is nowhere to write them.
-- Unauthenticated routes are the per-load tracking page, the per-receiver private link, and the machine ingest paths (carrier photos, `POST /api/integrations/documents`, `POST /api/integrations/tracking-link`, and `POST /api/integrations/loads/import`). The bot paths check `BOT_UPLOAD_KEY` in constant time, rate-limit by IP, and cannot list or delete. They are not an open order API. The load import stores an allowlist and drops carrier pay, carrier name, MC, and rate confirmations.
+- Unauthenticated routes are the per-load tracking page, the per-receiver private link, and the machine ingest paths (carrier photos, `POST /api/integrations/documents`, `POST /api/integrations/tracking-link`, `POST /api/integrations/loads/import`, and `POST /api/integrations/sam-load`). The document, tracking, and import paths check `BOT_UPLOAD_KEY` in constant time. The SAM status path checks `LOAD_BUILDER_SECRET` or `LOAD_STATUS_WEBHOOK_SECRET`. They rate-limit by IP and cannot list or delete. They are not an open order API. The load import stores an allowlist and drops carrier pay, carrier name, MC, and rate confirmations. The status callback is the only path that stores a carrier name and MC, and it refuses rate fields.
 
 Staff can still read the text excerpt of a quarantined page and download it from the Select-only quarantine list. A page or photo the screener flagged as a rate confirmation cannot be released to EMIT. Approve is rejected. Delete removes the file. An unclear read can be approved, which records the admin email and the time, or deleted.
 
@@ -128,7 +128,7 @@ Tracking ingest is JSON: `{ "loadNumber": "458934-1", "trackingLink": "https://.
 
 ## Data layer and SAM
 
-`lib/orders.ts` is the store the app uses today: list, get, submit, update, stats, all returning the customer-safe shape. Submit writes the order with a null Select load number. `lib/select-load.ts` is where an admin, or a future SAM sync, fills that number in. There is no email step. A new load posts to Slack only when `SLACK_NEW_LOADS_WEBHOOK_URL` is set. That note names the owner and who entered the load. It does not include carrier pay, and it is not sent to SAM.
+`lib/orders.ts` is the store the app uses today: list, get, submit, update, stats, all returning the customer-safe shape. Submit writes the order with a null Select load number. `lib/select-load.ts` is where an admin, or the status callback, fills that number in. Submitting does not send email. A new load posts a Being Prepared request to Slack only when `SLACK_NEW_LOADS_WEBHOOK_URL` is set. Moving the load to Ready to Ship posts the note Load Builder should build from. Neither note includes carrier pay, and neither is sent to SAM. A carrier assignment is a later callback. It is shown in the portal and it is not emailed.
 
 `lib/sam.ts` is the drop-in HTTP client. `pickCustomerRate` reads `customerRate` or `customerCharges.lineHaul` / `customerCharges.customerTotal` and never falls back to `carrierCost`. `toSamCreatePayload` does not include carrier fields. The paths (`/v1/customers/{id}/orders`) are a placeholder. The client is unit-tested with a fixture that includes carrier cost 8765.43 and customer rate 1500. It is not called by the running routes. Wiring it is the change to make when Mike's credentials and the real paths arrive. Until then, orders "in SAM" means rows in the portal database.
 
@@ -155,23 +155,15 @@ The page lists only loads with a drop at that company (any drop, not only the la
 
 ## Auth
 
-EMIT uses email and password. Select admins use Google. Receivers do not sign in. Microsoft is optional code and is not required for go-live.
+EMIT and Select use email and password. Receivers do not sign in. Microsoft is optional code and is not required for go-live.
 
 - **Password** is how EMIT staff sign in. A Select admin creates them under Users, sets or generates a temporary password, and can deactivate them. The person changes that password under Password. Five failures on one email, or thirty from one IP, lock sign-in for 15 minutes. A password change or an admin reset invalidates older cookies. There is no self-service signup and no password email.
-- **Google** is for Select staff. The Workspace hosted domain is `goselect.com`. The only admins are `mgray@goselect.com` (Mike Gray) and `dmartin@goselect.com` (Drew Martin), from `SELECT_ADMIN_EMAILS`. Any other Google account is rejected. EMIT addresses are rejected and told to use email and password. An EMIT admin is a portal access Select sets on Users. It is not a Google or Microsoft role. The first production sign-in has to be one of these Google accounts. That creates the admin who can then add EMIT users.
-- **Microsoft (Entra ID)** can stay unset. If it is configured later, an EMIT domain (`EMIT_EMAIL_DOMAINS`) or an address in `EMIT_ALLOWED_EMAILS` can sign in as EMIT staff. A Select address is rejected and told to use Google. A deactivated user is rejected here too.
+- **Select staff** sign in with email and password. The admin addresses are `SELECT_ADMIN_EMAILS` (by default `mgray@goselect.com` and `dmartin@goselect.com`). Add any other Select admin to that list before creating the account. Capital letters and spaces around an address do not matter. A listed address that was stored as an EMIT user becomes a Select admin on the next successful sign-in. An address that is not on the list cannot become a Select admin. An EMIT admin is a portal access Select sets on Users. It is not a Microsoft role. The first production Select password is set with `SELECT_SETUP_KEY`, then that key is removed. After that, a signed-in Select admin sets the other passwords on Users.
+- **Microsoft (Entra ID)** can stay unset. If it is configured later, an EMIT domain (`EMIT_EMAIL_DOMAINS`) or an address in `EMIT_ALLOWED_EMAILS` can sign in as EMIT staff. A Select address is rejected and told to use email and password. A deactivated user is rejected here too.
 
 ### What Mike needs to create
 
-Google sign-in, in Select's Google Cloud project, OAuth consent screen set to **Internal** (goselect.com only). This client is only for staff login.
-
-- OAuth client type: Web application.
-- Authorized redirect URI: `{PORTAL_PUBLIC_URL}/api/auth/google/callback`
-- Authorized JavaScript origin: `{PORTAL_PUBLIC_URL}`
-- Scopes: `openid`, `email`, `profile`
-- Client id and secret go in `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. `GOOGLE_HOSTED_DOMAIN` stays `goselect.com`.
-
-The portal also sends `hd=goselect.com` so the Google screen prefers the Select Workspace.
+The first Select password uses `SELECT_SETUP_KEY` on the sign-in page. The steps are in the README. Google sign-in is not used.
 
 Microsoft is not part of go-live. If EMIT asks for it later: app registration, type Web, single tenant, redirect URI `{PORTAL_PUBLIC_URL}/api/auth/microsoft/callback`, scopes `openid`, `profile`, `email`, and the three `AZURE_AD_*` values. Leave them blank until then.
 
@@ -202,7 +194,7 @@ docker run --rm -p 3000:3000 \
   emit-portal
 ```
 
-Set `DEMO_SEED=false` before any real EMIT user can sign in. With that set, a new database has no users and no demo password. `AUTH_SECRET` shorter than 16 characters throws on startup in production. Leave `NEXT_PUBLIC_DEMO_HINT` unset or `false` in production. The demo password is not included in the page unless the server is actually seeding the demo. Set `PORTAL_PUBLIC_URL` to the new origin so tracking links, receiver links, and the Google callback use that hostname. If it is blank in production, links use `VERCEL_PROJECT_PRODUCTION_URL` rather than the per-deployment `VERCEL_URL`.
+Set `DEMO_SEED=false` before any real EMIT user can sign in. With that set, a new database has no users and no demo password. `AUTH_SECRET` shorter than 16 characters throws on startup in production. Leave `NEXT_PUBLIC_DEMO_HINT` unset or `false` in production. The demo password is not included in the page unless the server is actually seeding the demo. Set `PORTAL_PUBLIC_URL` to the new origin so tracking links and receiver links use that hostname. If it is blank in production, links use `VERCEL_PROJECT_PRODUCTION_URL` rather than the per-deployment `VERCEL_URL`.
 
 There is no public test URL in this environment.
 
@@ -215,12 +207,11 @@ There is no public test URL in this environment.
 | `TURSO_DATABASE_URL` | Turso, the `libsql://` URL | Hosted database on Vercel. Leave unset locally. |
 | `TURSO_AUTH_TOKEN` | Turso, full-access token | Auth for that database. Leave unset locally. |
 | `BLOB_READ_WRITE_TOKEN` | Vercel, added when the Blob store is connected | Private document and photo bytes. Leave unset locally. |
-| `PORTAL_PUBLIC_URL` | `https://` plus the new hostname | Tracking links, receiver links, and the Google callback. |
+| `PORTAL_PUBLIC_URL` | `https://` plus the new hostname | Tracking links and receiver links. |
 | `AZURE_AD_TENANT_ID`, `AZURE_AD_CLIENT_ID`, `AZURE_AD_CLIENT_SECRET` | Leave blank | Optional Microsoft sign-in. Not required. |
 | `SELECT_ADMIN_EMAILS` | Defaults to `mgray@goselect.com,dmartin@goselect.com`. Change only if those addresses change. | |
 | `EMIT_EMAIL_DOMAINS` or `EMIT_ALLOWED_EMAILS` | Mike | Which addresses a Select admin may create as EMIT password users. |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Select Google Cloud, internal OAuth client | Select admin sign-in. |
-| `GOOGLE_HOSTED_DOMAIN` | Default `goselect.com` | Workspace domain check. |
+| `SELECT_SETUP_KEY` | A random string, at least 16 characters, Production only | Lets the first Select password be set. Remove it after that password is saved. |
 | `AI_API_KEY`, optional `AI_BASE_URL`, `AI_MODEL` | Select | OpenAI-compatible chat. Blank uses the built-in answerer. |
 | `CARRIER_PHOTO_INGEST_TOKEN` | Select | Bearer token for the photo ingest API. At least 16 characters. |
 | `BOT_UPLOAD_KEY` | Select | Bearer token for `POST /api/integrations/documents`, `POST /api/integrations/tracking-link`, and `POST /api/integrations/loads/import`. At least 16 characters. One key for all three. |
@@ -247,7 +238,7 @@ There is no public test URL in this environment.
 
 ## Open questions
 
-Answered and in this build: a rate confirmation cannot be released to EMIT. Select can approve an unclear file or delete it. An EMIT admin with see pricing or full access sees the price EMIT pays. A regular EMIT user does not, at any permission. Carrier pay is not stored and is hidden from every EMIT role, every permission, and from Select while viewing as EMIT. The portal is the confirmation. No order email is sent. EMIT signs in with a password a Select admin sets. Select admins sign in with Google and can mark an EMIT user as an EMIT admin or a regular user. View-as is read-only. Microsoft is optional. Receiver companies and contact emails are edited in admin. Receivers use a private link and do not sign in. A Select admin can paste a public tracking link on each load. The public hostname is `PORTAL_PUBLIC_URL`, not a name baked into the code. Vercel hosting uses Turso for the database and Vercel Blob for document and photo bytes. Local dev still uses SQLite and files.
+Answered and in this build: a rate confirmation cannot be released to EMIT. Select can approve an unclear file or delete it. An EMIT admin with see pricing or full access sees the price EMIT pays. A regular EMIT user does not, at any permission. Carrier pay is not stored and is hidden from every EMIT role, every permission, and from Select while viewing as EMIT. The portal is the confirmation. No order email is sent. EMIT signs in with a password a Select admin sets. Select admins sign in with email and password and can mark an EMIT user as an EMIT admin or a regular user. View-as is read-only. Microsoft is optional. Receiver companies and contact emails are edited in admin. Receivers use a private link and do not sign in. A Select admin can paste a public tracking link on each load. The public hostname is `PORTAL_PUBLIC_URL`, not a name baked into the code. Vercel hosting uses Turso for the database and Vercel Blob for document and photo bytes. Local dev still uses SQLite and files.
 
 Still open:
 

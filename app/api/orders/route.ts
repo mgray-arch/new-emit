@@ -1,10 +1,13 @@
+import { badgeForOrder, seenMap, unseenUpdateIds } from "@/lib/carrier-seen";
 import { presentCustomerOrder } from "@/lib/customer-view";
+import { ensureLoadListColumns } from "@/lib/db";
 import { errorResponse, json } from "@/lib/http";
 import { isSession, requireSession } from "@/lib/guard";
 import { LOAD_TABS, type LoadTab } from "@/lib/load-list";
 import { listBoard, submitOrder } from "@/lib/orders";
 import { readyPortal } from "@/lib/portal";
-import type { PortalStatus } from "@/lib/types";
+import { latestTrackingAt, trackingIsUnseen } from "@/lib/tracking-link";
+import type { CustomerOrder, PortalStatus, Session } from "@/lib/types";
 import { PORTAL_STATUSES, resolveAccess } from "@/lib/types";
 import { orderInputSchema } from "@/lib/validate";
 
@@ -16,6 +19,7 @@ export async function GET(req: Request) {
     const session = await requireSession(req);
     if (!isSession(session)) return session;
     const ctx = await readyPortal();
+    await ensureLoadListColumns(ctx.db);
     const url = new URL(req.url);
     const status = url.searchParams.get("status");
     const tabParam = url.searchParams.get("tab");
@@ -27,6 +31,8 @@ export async function GET(req: Request) {
         : "active";
     const page = Number(url.searchParams.get("page") || "1");
     const pageSize = Number(url.searchParams.get("pageSize") || "25");
+    const updatedOnly = url.searchParams.get("updated") === "1";
+    const [unseen, seen] = await Promise.all([unseenUpdateIds(ctx, session.userId), seenMap(ctx, session.userId)]);
     const board = await listBoard(ctx, {
       q: url.searchParams.get("q") || undefined,
       status: status && (PORTAL_STATUSES as readonly string[]).includes(status) ? (status as PortalStatus) : null,
@@ -38,14 +44,25 @@ export async function GET(req: Request) {
       includeAttention: selectStaff,
       page: Number.isFinite(page) ? page : 1,
       pageSize: Number.isFinite(pageSize) ? pageSize : 25,
+      ids: updatedOnly ? unseen : undefined,
+      acrossTabs: updatedOnly,
     });
     return json({
       ...board,
-      orders: board.orders.map((order) => presentCustomerOrder(order, session)),
+      updatedCount: unseen.length,
+      updatedOnly,
+      orders: board.orders.map((order) => presentForUser(order, session, seen)),
     });
   } catch (error) {
     return errorResponse(error);
   }
+}
+
+function presentForUser(order: CustomerOrder, session: Session, seen: Map<string, string>) {
+  return presentCustomerOrder(order, session, {
+    carrierBadge: badgeForOrder(order, seen),
+    trackingBadge: trackingIsUnseen(latestTrackingAt(order.trackingEvents), seen.get(order.id)),
+  });
 }
 
 export async function POST(req: Request) {

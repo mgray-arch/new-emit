@@ -2,27 +2,27 @@
 
 Customer portal for EMIT Technologies, a shipper of Select Transport Partners. It replaces the old Lovable app. Put it on a new domain. Do not reuse the old site's hostname unless that is the name you want.
 
-EMIT admins and regular EMIT users sign in with email and password. Select staff sign in with Google. Select adds each EMIT email on Users, marks them as an EMIT admin or a regular user, and gives them one permission: view only, add loads, see pricing, or full access. A regular EMIT user never sees the price EMIT pays Select. An EMIT admin with see pricing or full access does, and so does Select. They never show carrier pay. Carrier pay stays hidden from every EMIT user, in every role and permission, including when Select is viewing as that person. The portal is the order confirmation: it does not send email. There is no SAM API. Select can send a load to the Load Builder bot, or type the SAM load number. Until a number is stored, EMIT sees **Pending**. The portal does not invent a load number.
+EMIT admins, regular EMIT users, and Select staff sign in with email and password. Select adds each EMIT email on Users, marks them as an EMIT admin or a regular user, and gives them one permission: view only, add loads, see pricing, or full access. A regular EMIT user never sees the price EMIT pays Select. An EMIT admin with see pricing or full access does, and so does Select. They never show carrier pay. Carrier pay stays hidden from every EMIT user, in every role and permission, including when Select is viewing as that person. The portal is the order confirmation: submitting an order does not send email. There is no SAM API. The Load Builder bot builds the load from the Slack note that says Ready to Ship. A new order posts a Being Prepared request first, and that note is not the build. Select can still type the SAM load number. Until a number is stored, EMIT sees **Pending**. The portal does not invent a load number. When SAM assigns or changes a carrier, the bot records the carrier name and MC number. The portal shows that on the load, with a badge until each person opens the order. It does not send email or a push notification, and it has no carrier pay.
 
-The public hostname is not hardcoded. Set `PORTAL_PUBLIC_URL` to the domain this portal should use. `emit-select.com` in this file is only an example of a previous plan. Google's redirect URI has to match whatever domain you attach. `goselect.com` is Select's Google Workspace, not the portal's address.
+The public hostname is not hardcoded. Set `PORTAL_PUBLIC_URL` to the domain this portal should use. `emit-select.com` in this file is only an example of a previous plan. `goselect.com` is Select's email domain, not the portal's address.
 
 Orders, users, and the document review queue live in Turso. Document and photo bytes live in Vercel Blob. Locally, with those unset, the app uses a SQLite file and `data/blobs`.
 
 ## What EMIT can do
 
 - Broker dashboard with status counts, ship-date range, search, and pagination. A load can have any number of pickups and drops.
-- Submit a load. The order appears in the portal immediately. That screen is the confirmation. No email is sent.
+- Submit a load. The order appears in the portal immediately. That screen is the confirmation. Submitting does not send email.
 - See the Select load number once a Select admin has entered it. Before that, the column says Pending.
 - Open a Track button when a Select admin has pasted the SAM or MacroPoint share link.
 - Status timeline, latest ETA, and the portal's own status page.
 - Carrier photo gallery. Rate-confirmation images stay with Select admins.
 - Ask about an SO. Answers come from the customer-safe shipment view. A regular EMIT user does not get pricing in that answer. An EMIT admin with see pricing or full access does. The answer never includes carrier pay.
 
-Select staff also get the document review queue, ship-from sites, receiver companies, the EMIT user list, and **Build load in SAM**. On Users they choose EMIT admin or regular user, plus view only, add loads, see pricing, or full access. EMIT cannot open that page. A **View as** switch lets Select look at the portal as an EMIT admin or a regular EMIT user, at any of those permissions. The preview is read-only.
+Select staff also get the document review queue, ship-from sites, receiver companies, and the EMIT user list. On Users they choose EMIT admin or regular user, plus view only, add loads, see pricing, or full access. EMIT cannot open that page. A **View as** switch lets Select look at the portal as an EMIT admin or a regular EMIT user, at any of those permissions. The preview is read-only. Every role, including view only, sees a read-only build status on the list and the load page. Nobody in the portal clicks a button to build the load in SAM.
 
 ## Security boundary
 
-Customer responses are an allowlist. Carrier pay is not stored. The serializer drops a carrier-pay field if one is posted, and the assistant reads that same view. Questions about carrier pay, margins, or rate confirmations are refused before any shipment data is attached. A regular EMIT user has `customerCost` and `rateReason` removed from that allowlist, including list, detail, export, and assistant responses, whatever their permission is. An EMIT admin with see pricing or full access receives EMIT's cost, and so does Select. Those responses still have no carrier pay. A regular user cannot change a stored cost by saving a load. A Select view-as preview of a regular user uses that same allowlist, and view-as of an EMIT admin follows the admin rule. The preview cannot write. The SAM build status and SAM link are Select-only and are omitted from every EMIT response and from view-as.
+Customer responses are an allowlist. Carrier pay is not stored. The serializer drops a carrier-pay field if one is posted, and the assistant reads that same view. Questions about carrier pay, margins, or rate confirmations are refused before any shipment data is attached. A regular EMIT user has `customerCost` and `rateReason` removed from that allowlist, including list, detail, export, and assistant responses, whatever their permission is. An EMIT admin with see pricing or full access receives EMIT's cost, and so does Select. Those responses still have no carrier pay. A regular user cannot change a stored cost by saving a load. A Select view-as preview of a regular user uses that same allowlist, and view-as of an EMIT admin follows the admin rule. The preview cannot write. The old SAM build controls (building, failed, and the SAM link) stay Select-only and are omitted from every EMIT response and from view-as. The read-only build status is different: **Sent to Slack**, or **Built in SAM:** plus the load number. View only can see it and cannot change it.
 
 Every upload is split into pages and screened, including OCR of images and of PDF pages that have no text layer. A rate confirmation stays in a Select-only quarantine and cannot be released to EMIT. A file OCR could not read stays there until a Select admin approves it or deletes it.
 
@@ -43,8 +43,8 @@ For a local demo, set `DEMO_SEED=true` and `NEXT_PUBLIC_DEMO_HINT=true` in `.env
 | EMIT regular, view only | viewer@emit.example | Emit-Demo-2026 | Email and password |
 | EMIT regular, see pricing | pricing@emit.example | Emit-Demo-2026 | Email and password |
 | EMIT admin, full access | lead@emit.example | Emit-Demo-2026 | Email and password |
-| Select | mgray@goselect.com | Emit-Demo-2026 | Google |
-| Select | dmartin@goselect.com | Emit-Demo-2026 | Google |
+| Select | mgray@goselect.com | Emit-Demo-2026 | Email and password |
+| Select | dmartin@goselect.com | Emit-Demo-2026 | Email and password |
 
 Those passwords exist only when the demo seed runs. Production with `DEMO_SEED=false` creates nobody.
 
@@ -69,15 +69,12 @@ Set these on the Vercel project for **Production**. Preview can keep `DEMO_SEED=
 | `BLOB_READ_WRITE_TOKEN` | Filled in when the Blob store is connected. |
 | `DEMO_SEED` | `false` |
 | `NEXT_PUBLIC_DEMO_HINT` | `false` |
-| `SELECT_ADMIN_EMAILS` | `mgray@goselect.com,dmartin@goselect.com` |
+| `SELECT_ADMIN_EMAILS` | `mgray@goselect.com,dmartin@goselect.com`. Add every other Select admin, including Ainsley, before creating that account. |
 | `EMIT_EMAIL_DOMAINS` | `emit.com,emittechnologies.com` |
-| `GOOGLE_CLIENT_ID` | Select Workspace OAuth client id. |
-| `GOOGLE_CLIENT_SECRET` | That client's secret. |
-| `GOOGLE_HOSTED_DOMAIN` | `goselect.com` |
 
 ## Preview environment variables
 
-Vercel Preview builds with `NODE_ENV=production`. An unset `DEMO_SEED` does **not** create `m.gray@emit.example`. Variables checked only for Production are invisible to the preview, so email sign-in fails and the page cannot open a database. Google stays off until `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` exist. That part is expected.
+Vercel Preview builds with `NODE_ENV=production`. An unset `DEMO_SEED` does **not** create `m.gray@emit.example`. Variables checked only for Production are invisible to the preview, so email sign-in fails and the page cannot open a database. That part is expected.
 
 Sign-in does not use Blob. A missing `BLOB_READ_WRITE_TOKEN` only blocks file uploads, and the upload error names that variable.
 
@@ -91,11 +88,10 @@ Use a **second Turso database** for Preview. If Preview points at the production
 6. `TURSO_AUTH_TOKEN` — the token for that same preview database.
 7. `DEMO_SEED` — `true` for Preview. Production stays `false`.
 8. `NEXT_PUBLIC_DEMO_HINT` — `true` for Preview, so the sign-in page shows the test password. Production stays `false`.
-9. Leave `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` empty until the Workspace OAuth client exists. The Google button stays hidden, with a note to use email and password.
-10. Leave `PORTAL_PUBLIC_URL` unset on Preview so links use the preview host. Production is the new hostname.
-11. `BLOB_READ_WRITE_TOKEN` — required on Preview if you want the sample BOL and POD files (or any upload) to be stored. Connect the Blob store to Preview, or paste a token and check Preview. Tracking links do not need it.
-12. **Deployments** → the latest Preview deployment → **Redeploy**. Environment changes do not apply to a deployment that is already built. A push to the preview branch also starts a new deployment.
-13. Open the preview URL. Sign in as `m.gray@emit.example` / `Emit-Demo-2026`.
+9. Leave `PORTAL_PUBLIC_URL` unset on Preview so links use the preview host. Production is the new hostname.
+10. `BLOB_READ_WRITE_TOKEN` — required on Preview if you want the sample BOL and POD files (or any upload) to be stored. Connect the Blob store to Preview, or paste a token and check Preview. Tracking links do not need it.
+11. **Deployments** → the latest Preview deployment → **Redeploy**. Environment changes do not apply to a deployment that is already built. A push to the preview branch also starts a new deployment.
+12. Open the preview URL. Sign in as `m.gray@emit.example` / `Emit-Demo-2026`.
 
 A preview updates its own Turso database when its server starts. Accounts and loads stay. No wipe is required. With `DEMO_SEED=true`, that start also fills sample paperwork and fake tracking links onto the existing demo loads:
 
@@ -109,7 +105,7 @@ If the sample PDFs are missing and the Track buttons are there, Preview has no B
 
 If a name is still missing, the sign-in page lists it. Redeploy after you save the variable.
 
-No new environment variables were added for the SAM button, view-as, or EMIT permissions. The SAM button uses the three variables already in the table below.
+View-as and EMIT permissions do not add environment variables. The portal no longer posts a load to a build webhook, and it does not email a carrier assignment. The variables for the Slack note and the status callback are in the table below.
 
 Leave these blank unless you are turning that feature on:
 
@@ -120,14 +116,15 @@ Leave these blank unless you are turning that feature on:
 | `AI_API_KEY`, `AI_BASE_URL`, `AI_MODEL` | Optional assistant. Blank uses the built-in answers. |
 | `CARRIER_PHOTO_INGEST_TOKEN` | Bearer token for the photo ingest API. Admins can upload without it. |
 | `BOT_UPLOAD_KEY` | Bearer token for the Select bot. At least 16 characters. Same key for `POST /api/integrations/documents`, `POST /api/integrations/tracking-link`, and `POST /api/integrations/loads/import`. |
-| `LOAD_BUILDER_WEBHOOK_URL` | Where **Build load in SAM** posts the load. `http` or `https`. Unset: the button returns an error and the load is not marked building. |
-| `LOAD_BUILDER_SECRET` | Shared bearer secret, at least 16 characters. Sent to the webhook and required on the callback. |
+| `LOAD_BUILDER_WEBHOOK_URL` | Leave blank. The portal does not call it. The Load Builder bot reads the Slack note instead. |
+| `LOAD_BUILDER_SECRET` | Shared bearer secret, at least 16 characters. The bot sends it on `POST /api/integrations/sam-load`. A session cookie is not accepted. |
+| `LOAD_STATUS_WEBHOOK_SECRET` | Optional second bearer secret for that same callback, at least 16 characters. Either this or `LOAD_BUILDER_SECRET` is enough. |
 | `SAM_LOAD_URL_TEMPLATE` | Link for a stored SAM number. Must contain `{loadNumber}`. Example: `https://sam.example.com/loads/{loadNumber}`. Unset: the number shows and is not a link. |
 | `SAM_API_BASE_URL`, `SAM_API_TOKEN`, `SAM_CUSTOMER_ID` | Leave blank. The portal does not call the SAM API. |
 | `SLACK_NEW_LOADS_WEBHOOK_URL` | Slack incoming webhook for a new-load note. Unset: no Slack message is sent. The note names the owner and who entered the load. It does not include carrier pay. A missing equipment type or destination adds a line that the owner needs a human check. |
-| `SLACK_USER_ID_DREW`, `SLACK_USER_ID_AINSLEY` | Optional Slack member ids (like `U012ABCDEF`) so that note @mentions Drew or Ainsley. Unset: the note uses the plain name. Drew owns flatbed and hot shot loads into Texas. Ainsley owns every other load. |
+| `SLACK_USER_ID_DREW`, `SLACK_USER_ID_AINSLEY` | Optional Slack member ids (like `U012ABCDEF`) so that note @mentions Drew or Ainsley. Unset: the note uses the plain name. Drew owns every load into Price, UT, plus flatbed and hot shot loads into Texas. Ainsley owns every other load. |
 | `SLACK_MESSAGES_WEBHOOK_URL` | Slack incoming webhook when an EMIT user posts in Messages. Unset: no Slack message is sent. The note has the load number (when one is attached), a short preview, and a link. It does not include the full message or carrier pay. |
-| `MESSAGE_NOTIFY_EMAILS` | Optional comma-separated addresses for that same note. The portal has no email sender, so setting this does not send mail and does not block the message. |
+| `MESSAGE_NOTIFY_EMAILS` | Optional comma-separated addresses for that same note. Message notes are not emailed. Setting this does not send mail and does not block the message. |
 
 Do not set `DEMO_USER_PASSWORD` in production. Do not set a Gmail client. Order mail has been removed.
 
@@ -140,30 +137,25 @@ Do not set `DEMO_USER_PASSWORD` in production. Do not set a Gmail client. Order 
 3. Set `AUTH_SECRET`, `DEMO_SEED=false`, and `NEXT_PUBLIC_DEMO_HINT=false`.
 4. Set `PORTAL_PUBLIC_URL` to `https://` plus the new hostname, with no trailing slash.
 5. Set `EMIT_EMAIL_DOMAINS` to the real EMIT domains. Drop `emit.example`.
-6. In Google Cloud, OAuth consent screen **Internal**, client type Web application.
-   - Authorized redirect URI: `{PORTAL_PUBLIC_URL}/api/auth/google/callback`
-   - Authorized JavaScript origin: the same origin, with no path
-   - Scopes: `openid`, `email`, `profile`
-   - Put the client id and secret in `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
-7. Attach the new domain (steps below) and redeploy Production. Leave the old Lovable hostname where it is.
-8. Sign in as `mgray@goselect.com` or `dmartin@goselect.com` with Google. That first sign-in creates the admin. There is no password for that account in production.
-9. Open **Users**. Add each EMIT person (name and email). Set a temporary password or generate one, and send it to them yourself. The portal does not email it. Choose **EMIT admin** or **Regular EMIT user**, and one permission: **View only**, **Add loads**, **See pricing**, or **Full access**. A regular user never sees what Select charges EMIT. An EMIT admin with see pricing or full access does. An email that is not on this list cannot sign in. **Chat enabled** stays off until you check it for that person. Select staff always have Messages.
-10. Ask one EMIT person to sign in and change the password under **Password**.
-11. Submit a test order. Confirm the Select load says Pending. Use **Build load in SAM** once the webhook is set, or enter the real SAM number (for example `458934-1`) and the public tracking link. Confirm EMIT sees that number and a Track button. Sign in as a regular user and confirm the cost line is gone. Sign in as an EMIT admin with full access and confirm the cost is there. Use **View as** a regular user and confirm the cost line is gone, then **View as** an EMIT admin and confirm it is there, without signing out.
-12. Add receiver companies under Settings only when a receiver should have a private link.
+6. Attach the new domain (steps below) and redeploy Production. Leave the old Lovable hostname where it is.
+7. Set the first Select password, then sign in. See **Select passwords** below. There is no Google sign-in.
+8. Open **Users**. Under **Select staff**, add Drew and any other address on `SELECT_ADMIN_EMAILS`. Set or generate a temporary password and give it to them yourself. The portal does not email it. Then add each EMIT person. Choose **EMIT admin** or **Regular EMIT user**, and one permission: **View only**, **Add loads**, **See pricing**, or **Full access**. A regular user never sees the price EMIT pays Select. An EMIT admin with see pricing or full access does. An email that is not on this list cannot sign in as EMIT. **Chat enabled** stays off until you check it for that person. Select staff always have Messages.
+9. Ask one EMIT person to sign in and change the password under **Password**.
+10. Submit a test order. Confirm the Select load says Pending, and that the build status says **Sent to Slack** once `SLACK_NEW_LOADS_WEBHOOK_URL` is set. There is no **Build load in SAM** button. After the bot stores the SAM number (for example `458934-1`), the status says **Built in SAM: 458934-1**. Paste the public tracking link. Confirm EMIT sees that number and a Track button. Sign in as a view-only user and confirm the status is visible and there is nothing to click that builds or edits the load. Sign in as a regular user and confirm the cost line is gone. Sign in as an EMIT admin with full access and confirm the cost is there. Use **View as** a regular user and confirm the cost line is gone, then **View as** an EMIT admin and confirm it is there, without signing out.
+11. Add receiver companies under Settings only when a receiver should have a private link.
 
 Microsoft sign-in can stay unconfigured. The login page hides that button until the Azure variables are set.
 
 ## Custom domain
 
-Use a new domain for this portal. Do not point the old Lovable site's name at this app unless that name is the one you actually want. Nothing in the running code hardcodes `emit-select.com`. Links and the Google callback come from `PORTAL_PUBLIC_URL`. If that is blank in production, links fall back to `VERCEL_PROJECT_PRODUCTION_URL` (the domain attached to the Vercel project). Auth callbacks use the host the browser called when `PORTAL_PUBLIC_URL` is blank. Set `PORTAL_PUBLIC_URL` anyway so a preview deployment cannot mint a production link.
+Use a new domain for this portal. Do not point the old Lovable site's name at this app unless that name is the one you actually want. Nothing in the running code hardcodes `emit-select.com`. Links come from `PORTAL_PUBLIC_URL`. If that is blank in production, links fall back to `VERCEL_PROJECT_PRODUCTION_URL` (the domain attached to the Vercel project). Set `PORTAL_PUBLIC_URL` anyway so a preview deployment cannot mint a production link.
 
 These are the only domain-shaped settings:
 
 | What | Tied to |
 | --- | --- |
-| Portal links, tracking links, receiver links, Google callback | `PORTAL_PUBLIC_URL` |
-| Select Google sign-in | `GOOGLE_HOSTED_DOMAIN` (default `goselect.com`) and the redirect URI you register, which must be `{PORTAL_PUBLIC_URL}/api/auth/google/callback` |
+| Portal links, tracking links, receiver links | `PORTAL_PUBLIC_URL` |
+| Who may be a Select admin | `SELECT_ADMIN_EMAILS` |
 | Who may be added as EMIT | `EMIT_EMAIL_DOMAINS` and `EMIT_ALLOWED_EMAILS` |
 | SAM load link | `SAM_LOAD_URL_TEMPLATE` |
 
@@ -173,8 +165,25 @@ These are the only domain-shaped settings:
    - Value: `76.76.21.21`
    If the DNS host supports ALIAS or ANAME, `cname.vercel-dns.com` is the other form Vercel accepts. For `www`, add a **CNAME** to `cname.vercel-dns.com`.
 3. Wait until Vercel marks the domain Valid. Vercel requests the certificate. Do not turn on a proxy that rewrites the host.
-4. Set `PORTAL_PUBLIC_URL` to `https://` plus that hostname, with no trailing slash. In Google Cloud, set the authorized redirect URI to `https://<that-host>/api/auth/google/callback` and the JavaScript origin to `https://<that-host>`.
-5. Redeploy Production. Open the new hostname and sign in with Google. A preview URL (`*.vercel.app`) is not the production site.
+4. Set `PORTAL_PUBLIC_URL` to `https://` plus that hostname, with no trailing slash.
+5. Redeploy Production. Open the new hostname and sign in with email and password. A preview URL (`*.vercel.app`) is not the production site.
+
+## Select passwords
+
+Select staff use the same sign-in form as EMIT. The account is an admin only when the email is on `SELECT_ADMIN_EMAILS`. Capital letters and spaces around each address are ignored. If that address was saved earlier as an EMIT user, the next successful sign-in stores it as a Select admin. An EMIT address that is not on the list stays an EMIT user. Passwords are stored as hashes. The portal does not email them.
+
+The first Select password, before anyone can sign in as Select:
+
+1. In Vercel, open the project, then **Settings**, then **Environment Variables**. Add `SELECT_SETUP_KEY` for **Production**. The value is a random string you create, at least 16 characters. Do not put it in git.
+2. Add any missing Select address, including Ainsley's, to `SELECT_ADMIN_EMAILS`. The default already includes `mgray@goselect.com` and `dmartin@goselect.com`.
+3. Redeploy Production. Environment changes do not apply to a deployment that is already built.
+4. Open the production site and the sign-in page. A **Set a Select password** section is there because the setup key is set.
+5. Enter the setup key, the Select email, and a new password of at least 10 characters. Save it.
+6. Sign in with that email and password.
+7. Open **Users**. Under **Select staff**, add the other people and set or generate a password for each. Give them the password yourself.
+8. Delete `SELECT_SETUP_KEY` and redeploy. The setup section disappears. Later password resets are done on **Users** by a signed-in Select admin.
+
+`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_HOSTED_DOMAIN` are not used. Remove them from Vercel.
 
 ## Select load numbers
 
@@ -190,7 +199,7 @@ There is no self-service signup and no password email. Azure is not involved.
 
 ## EMIT permissions and pricing
 
-Select staff (`admin`) sign in with Google and can open Review, Users, and Settings. Every Select account can build a load in SAM and can use **View as**. EMIT people are added only on the Select Users page. Each person has an access and a permission:
+Select staff (`admin`) sign in with email and password and can open Review, Users, and Settings. Every Select account can use **View as**. Building a load in SAM is not a portal action. EMIT people are added only on the Select Users page. Each person has an access and a permission:
 
 | Access | What it changes |
 | --- | --- |
@@ -226,7 +235,7 @@ A drop is linked to a receiver when the company name matches, so the receiver pa
 
 Select staff see four lists: **Needs Attention** (no Select load number, files in review, an in-transit load with no tracking link, or a past-due delivery), **Active**, **Delivered** for the last 7 days, and **History**. A delivered historical import is not flagged Missing tracking or Past due. An import that is still in transit can be. EMIT admins, regular EMIT users, and Select **View as** do not get that list, its count, or the Needs Attention badge. Those loads stay on Active or Delivered, so nothing is hidden from them. A delivered load moves to History on its own after those 7 days. Cancelled loads are in History too.
 
-Each load is a card: the lane in bold, pickup and delivery dates, a colored status, and Track when there is a link. **Entered by** is on the card and the load page for Select and every EMIT user: the name and email, the email alone when the name is missing, or Unknown on older loads. That line is only the person. It is not carrier pay, and view only or add loads still do not see EMIT's cost. Long notes stay on two lines until you expand them. Open a card for the four-step timeline (Ordered, Booked, Picked up, Delivered) and the stops, documents, tracking, and notes. A PDF opens with **View PDF**, and a PNG or JPEG opens with **View**, both in a new tab. **Download** saves the file. Anything else only downloads. Light mode is in the header. EMIT users see a short tip the first time.
+Each load is a card: the lane in bold, pickup and delivery dates, a colored status, and Track when there is a link. **Entered by** is on the card and the load page for Select and every EMIT user: the name and email, the email alone when the name is missing, or Unknown on older loads. That line is only the person. It is not carrier pay, and view only or add loads still do not see EMIT's cost. Long notes stay on two lines until you expand them. Open a card for the four-step timeline (Confirmed, Booked, Picked up, Delivered) and the stops, documents, tracking, and notes. A PDF opens with **View PDF**, and a PNG or JPEG opens with **View**, both in a new tab. **Download** saves the file. Anything else only downloads. Light mode is in the header. EMIT users see a short tip the first time.
 
 One search box looks through every list for a Select load number, an EMIT order number, a city, or a receiver. Date range, pickup site, receiver, and status narrow whichever list you are in. Loads are grouped by pickup date. The page loads 25 at a time.
 
@@ -319,14 +328,14 @@ Status is the SAM transit status:
 
 | SAM status | Portal status | Tracking stage |
 | --- | --- | --- |
-| Open, and the words pending, submitted, being prepared | Being Prepared | Submitted |
-| Covered, and the words booked, ready to ship | Ready to Ship | Booked |
-| Dispatched | Ready to Ship | Booked |
+| Open, and the words pending, submitted, being prepared | Being Prepared | Confirmed |
+| Covered, and the words booked, ready to ship | Ready to Ship | Confirmed |
+| Dispatched | Ready to Ship | Confirmed |
 | At Shipper, At Pickup, Loaded | Shipped | At Pickup |
 | In Transit, and the word active | Shipped | In Transit |
 | At Receiver, Out for Delivery | Shipped | In Transit |
 | Delivered, Completed | Shipped | Delivered |
-| Cancelled, voided | Cancelled | Submitted |
+| Cancelled, voided | Cancelled | Confirmed |
 
 Delivered and Completed land on Delivered in the list, then History after 7 days. They are not Missing tracking and they are not Past due, even with no share link and an old delivery date. In Transit with no link is still Missing tracking. A delivery date before today on a load that is not delivered is still Past due.
 
@@ -334,15 +343,31 @@ Equipment maps onto the portal truck list when the name is one of those types. `
 
 Delivery stops link to a saved location only on an exact dock: the same normalized street, city, state, and ZIP. `East`/`E`, `Drive`/`Dr`, and a ZIP+4 are the same street the location page already uses. A likely match (same street, different ZIP or only a similar company) is reported and not linked, because the portal otherwise asks a person. The import does not create location rows, and it does not change how often a dock has been used. Pickups are stored on the load only.
 
-## Build load in SAM
+## Load status
 
-Select sees **Build load in SAM** on a load that has no SAM number yet, on the list and on the load page. The click calls the portal, and the portal posts the load to `LOAD_BUILDER_WEBHOOK_URL` with `Authorization: Bearer <LOAD_BUILDER_SECRET>`. The body is an allowlist: ids, stops, truck, dates, comments, and EMIT's cost. It does not include carrier pay.
+The list and the load page show a read-only build status. **Sent to Slack** appears after Slack accepts a note. **Built in SAM: 458934-1** appears when a SAM load number is stored, including when Select types it. A load that has neither stays blank. View only, add loads, see pricing, full access, Select, and view-as all see the same words. None of them can start a SAM build from the portal.
 
-The control shows four states: **Not built**, **Building**, **Built**, and **Failed**. While it is building, the button says **Building in SAM…** and checks the load until the bot calls back. A bot error is **Failed**, and the button says **Try build again**. A second click inside two minutes is rejected so the bot is not asked twice. After that, Select can try again.
+Creating a load posts an **Order received - Being Prepared** note. That note does not say New load request. Moving it to **Ready to Ship** posts a second note whose first line is `Ready to Ship`. Load Builder should build from that second note only. Both notes name the SO in capitals, the origin and destination as the company and street (`EMIT TECHNOLOGIES — 2437 Allen Avenue, Sheridan, WY, USA`), the equipment, the ship date, and the owner. A ship time is added to the ship date when the form has one (`2026-11-05 at 14:00`). A must-deliver date is a `Delivery date` line when the form has one. They have no price and no carrier pay. The Ready to Ship note is sent once per order. People who can add loads can change the stage. View only and see pricing cannot. Each change is on History.
 
-The bot posts the SAM number to `POST /api/integrations/sam-load` with the same bearer secret. The body is JSON: `loadNumber` (such as `458934-1`) and either `orderId` or `salesOrderNumber`. The same number again is a no-op. A different number on a load that already has one is 409. A missing or wrong secret is 401. The path is limited to 60 requests a minute per IP. The response is `{ orderId, salesOrderNumber, loadNumber }` only.
+The Load Builder bot, or any bot with the secret, records the SAM number and the carrier on `POST /api/integrations/sam-load`. Send `Authorization: Bearer` with `LOAD_BUILDER_SECRET` or `LOAD_STATUS_WEBHOOK_SECRET`. The secret is at least 16 characters and compared in constant time. A missing, short, or wrong secret is 401. A session cookie is not accepted. The path is limited to 60 requests a minute per IP.
 
-Once the number is stored, the state is **Built**. The button becomes **SAM 458934-1** and links to `SAM_LOAD_URL_TEMPLATE` with `{loadNumber}` filled in. Without that template the number still shows, and it is not a link. EMIT never sees the build button, the build status, or carrier pay. View-as does not either.
+Name the load with `orderId` (the portal id) or `salesOrderNumber` (`sales_order_number` too). The sales order match ignores capital letters and surrounding spaces, so SAM can send the SO in all capitals. `loadNumber` (`load_number` too) is the SAM number, such as `458934-1`. The same number again is a no-op. A different number on a load that already has one is 409. A missing match is 404. More than one sales order match is 409. The same call can be load number only, then a later call can add the carrier, the tracking link, or both.
+
+`tracking_url` (`trackingUrl` too) is optional. It must be `https` and the host and path must be `customer.goselect.com/tracking/` (for example `https://customer.goselect.com/tracking/abc`). Anything else is 400 and nothing from that request is written. The same URL again does not add another History line. A new URL is stored on the order, History says Tracking started (or Tracking link updated), and the load shows Track shipment.
+
+`carrierName` (`carrier_name` too) and `mcNumber` (`mc_number` or `mc` too) are the assigned carrier. The portal stores that name and MC so it can tell a first assignment from a change. It does not store carrier pay. A blank name or MC leaves the stored value as it is. `MC 445566` and `445566` are the same MC.
+
+The first time a carrier is stored, and again when the name or MC changes, the portal writes a **History** line and marks the order updated. It does not send email and it does not send a push notification. No mail environment variables are required. Sending the same carrier again does not add another History line. The line names the company and MC, and on a change it names the previous company. It has no price, no carrier pay, and no rate confirmation.
+
+Each person sees a **Carrier assigned** or **Carrier changed** badge on that order until they open it. Opening it clears the badge for that person only. After sign-in, a banner says how many orders were updated since their last visit. Tapping it filters the list to those orders. The load page highlights the company and MC.
+
+A rate, pay, cost, price, or rate-confirmation field anywhere in the JSON, including inside a stop, is 400. Nothing is written. The response without a carrier change is `{ orderId, salesOrderNumber, loadNumber }`. A carrier call also includes `notice`: `assigned`, `changed`, or `unchanged`.
+
+```json
+{ "salesOrderNumber": "SO4429", "loadNumber": "458934-1", "carrierName": "Northline Freight", "mcNumber": "445566", "tracking_url": "https://customer.goselect.com/tracking/abc" }
+```
+
+Select still sees a SAM link on the load when `SAM_LOAD_URL_TEMPLATE` is set. EMIT does not see that link. EMIT does see the load number and the read-only build status.
 
 ## Carrier pay
 

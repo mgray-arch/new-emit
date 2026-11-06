@@ -127,7 +127,7 @@ const LOADS: SeedLoad[] = [
     salesOrderNumber: "SO2981",
     loadNumber: "900181-1",
     portalStatus: "ready_to_ship",
-    trackingStage: "booked",
+    trackingStage: "submitted",
     origin: allen,
     destination: encore,
     truckType: "Hot Shot",
@@ -181,7 +181,7 @@ const LOADS: SeedLoad[] = [
     salesOrderNumber: "so-003108_T15",
     loadNumber: "900184-1",
     portalStatus: "ready_to_ship",
-    trackingStage: "booked",
+    trackingStage: "submitted",
     origin: north,
     destination: enchanted,
     truckType: "48' Flatbed",
@@ -235,7 +235,7 @@ const LOADS: SeedLoad[] = [
     salesOrderNumber: "transfer orders wk 42",
     loadNumber: "900187-1",
     portalStatus: "ready_to_ship",
-    trackingStage: "booked",
+    trackingStage: "submitted",
     origin: north,
     destination: pen,
     truckType: "24' Box Truck",
@@ -325,7 +325,7 @@ const LOADS: SeedLoad[] = [
     salesOrderNumber: "SO4429",
     loadNumber: "900192-1",
     portalStatus: "ready_to_ship",
-    trackingStage: "booked",
+    trackingStage: "submitted",
     origin: north,
     destination: spitzer,
     truckType: "53' Flatbed",
@@ -379,7 +379,7 @@ const LOADS: SeedLoad[] = [
     salesOrderNumber: "SO4514",
     loadNumber: "900195-1",
     portalStatus: "cancelled",
-    trackingStage: "booked",
+    trackingStage: "submitted",
     origin: allen,
     destination: johnson,
     truckType: "Flatbed",
@@ -415,7 +415,7 @@ const LOADS: SeedLoad[] = [
     salesOrderNumber: "SO4526",
     loadNumber: "900198-1",
     portalStatus: "ready_to_ship",
-    trackingStage: "booked",
+    trackingStage: "submitted",
     origin: allen,
     destination: encore,
     truckType: "Hot Shot",
@@ -487,7 +487,7 @@ const LOADS: SeedLoad[] = [
     salesOrderNumber: "SO4555",
     loadNumber: "900202-1",
     portalStatus: "ready_to_ship",
-    trackingStage: "booked",
+    trackingStage: "submitted",
     origin: north,
     destination: enchanted,
     truckType: "Multi Stop Box Truck",
@@ -898,7 +898,11 @@ export async function seedDemo(ctx: PortalContext): Promise<void> {
       const latestEta =
         load.etaOffset == null ? null : denverLocalToISO(addDaysISO(today, load.etaOffset), "15:00");
       const anchor = latestEta ?? denverLocalToISO(shipDate, load.shipTime);
-      const assignment = assignLoadOwner({ destinationState: load.destination.state, equipment: load.truckType });
+      const assignment = assignLoadOwner({
+        destinationCity: load.destination.city,
+        destinationState: load.destination.state,
+        equipment: load.truckType,
+      });
       await insertLoad.run(
         randomUUID(),
         load.salesOrderNumber,

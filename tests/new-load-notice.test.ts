@@ -1,13 +1,12 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { PATCH as setOwnerRoute } from "@/app/api/admin/orders/[id]/owner/route";
 import { GET as listOrdersRoute } from "@/app/api/orders/route";
-import { GET as getOrderRoute } from "@/app/api/orders/[id]/route";
+import { GET as getOrderRoute, PATCH as patchOrderRoute } from "@/app/api/orders/[id]/route";
 import { POST as createOrderRoute } from "@/app/api/orders/route";
 import { presentCustomerOrder } from "@/lib/customer-view";
 import { formatEnteredBy } from "@/lib/entered-by";
 import { assignLoadOwner } from "@/lib/load-owner";
-import { loadBuilderPayload } from "@/lib/load-builder";
-import { newLoadSlackText, slackUserIdForOwner } from "@/lib/slack-new-load";
+import { newLoadSlackText, readyToShipSlackText, slackUserIdForOwner } from "@/lib/slack-new-load";
 import type { PortalContext } from "@/lib/db";
 import type { CustomerOrder, Session } from "@/lib/types";
 import { adminSession, customerSession, seededPortal, sessionCookie } from "./helpers";
@@ -72,16 +71,56 @@ describe("load owner", () => {
     expect(assignLoadOwner({ destinationState: "TX", equipment: "   " })).toEqual({ owner: "Ainsley", needsCheck: true });
     expect(assignLoadOwner({ destinationState: null, equipment: "53' Flatbed" })).toEqual({ owner: "Ainsley", needsCheck: true });
     expect(assignLoadOwner({ destinationState: null, equipment: null })).toEqual({ owner: "Ainsley", needsCheck: true });
+    expect(assignLoadOwner({ destinationCity: "Price", destinationState: "UT", equipment: "24' Box Truck" })).toEqual({
+      owner: "Drew",
+      needsCheck: false,
+    });
+    expect(assignLoadOwner({ destinationCity: " price ", destinationState: "utah", equipment: "LTL" })).toEqual({
+      owner: "Drew",
+      needsCheck: false,
+    });
+    expect(assignLoadOwner({ destinationCity: "Price", destinationState: "UT", equipment: null })).toEqual({
+      owner: "Drew",
+      needsCheck: false,
+    });
+    expect(assignLoadOwner({ destinationCity: "Price", destinationState: "CO", equipment: "24' Box Truck" })).toEqual({
+      owner: "Ainsley",
+      needsCheck: false,
+    });
+    expect(assignLoadOwner({ destinationCity: "Price", destinationState: "TX", equipment: "24' Box Truck" })).toEqual({
+      owner: "Ainsley",
+      needsCheck: false,
+    });
+  });
+
+  it("stores Drew for a box truck delivered to Price, UT", async () => {
+    const cookie = await sessionCookie(customerSession());
+    const created = await createOrderRoute(
+      new Request("http://portal.test/api/orders", {
+        method: "POST",
+        headers: headers(cookie),
+        body: JSON.stringify({
+          salesOrderNumber: "SO-PRICE",
+          origin: emit,
+          destination: { company: "Mine", address1: "1 Main", city: "Price", state: "UT", postalCode: "84501" },
+          truckType: "24' Box Truck",
+        }),
+      }),
+    );
+    expect(created.status).toBe(201);
+    const row = (await ctx.db.prepare(`SELECT owner, owner_needs_check FROM loads WHERE sales_order_number = ?`).get("SO-PRICE")) as {
+      owner: string;
+      owner_needs_check: number;
+    };
+    expect(row).toEqual({ owner: "Drew", owner_needs_check: 0 });
   });
 });
 
 describe("new load slack text", () => {
   const notice = {
     salesOrderNumber: "SO-1",
-    originCity: "Sheridan",
-    originState: "WY",
-    destinationCity: "Houston",
-    destinationState: "TX",
+    origin: { city: "Sheridan", state: "WY" },
+    destination: { city: "Houston", state: "TX" },
     equipment: "53' Flatbed",
     owner: "Drew" as const,
     enteredByName: "Jane Doe",
@@ -90,6 +129,14 @@ describe("new load slack text", () => {
 
   it("names the owner and who entered the load, and never includes a price", () => {
     const text = newLoadSlackText(notice, {});
+    expect(text.startsWith("Order received - Being Prepared\n")).toBe(true);
+    expect(text).toContain("SO: SO-1");
+    expect(text).toContain("Origin: Sheridan, WY");
+    expect(text).toContain("Destination: Houston, TX");
+    expect(text).not.toContain("—");
+    expect(text).not.toContain("USA");
+    expect(text).not.toMatch(/New load request/i);
+    expect(text).not.toContain("Ready to Ship");
     expect(text).toContain("Owner: Drew");
     expect(text).not.toContain("Needs a human check");
     expect(text).toContain("Entered by: Jane Doe (jane@emit.example)");
@@ -104,6 +151,54 @@ describe("new load slack text", () => {
   it("mentions a Slack user id and falls back to the plain name", () => {
     expect(slackUserIdForOwner("Drew", {})).toBeNull();
     expect(slackUserIdForOwner("Drew", { SLACK_USER_ID_DREW: "not an id" })).toBeNull();
+    const ready = readyToShipSlackText(
+      {
+        salesOrderNumber: "so-44",
+        origin: {
+          company: "EMIT TECHNOLOGIES",
+          address1: "2437 Allen Avenue",
+          address2: "Dock 2",
+          city: "Sheridan",
+          state: "WY",
+          country: "US",
+        },
+        destination: {
+          company: "SPITZER INDUSTRIES, INC.",
+          address1: "10543 Fisher Road",
+          city: "Houston",
+          state: "TX",
+          country: "US",
+        },
+        equipment: "48' Flatbed",
+        shipDate: "2026-11-05",
+        shipTime: "14:00",
+        deliveryDate: "2026-11-07",
+        owner: "Drew",
+        enteredByName: null,
+        enteredByEmail: null,
+      },
+      { SLACK_USER_ID_DREW: "UDREW123" },
+    );
+    expect(ready).toBe(
+      [
+        "Ready to Ship",
+        "SO: SO-44",
+        "Origin: EMIT TECHNOLOGIES — 2437 Allen Avenue, Dock 2, Sheridan, WY, USA",
+        "Destination: SPITZER INDUSTRIES, INC. — 10543 Fisher Road, Houston, TX, USA",
+        "Equipment: 48' Flatbed",
+        "Ship date: 2026-11-05 at 14:00",
+        "Delivery date: 2026-11-07",
+        "Owner: <@UDREW123>",
+      ].join("\n"),
+    );
+    expect(ready).not.toMatch(/pay|rate|\$|New load request|Being Prepared/i);
+    const datedOnly = readyToShipSlackText({ ...notice, shipDate: "2026-11-10", salesOrderNumber: "so-44" }, {});
+    expect(datedOnly).toContain("Ship date: 2026-11-10");
+    expect(datedOnly).not.toContain(" at ");
+    expect(datedOnly).not.toContain("Delivery date");
+    const timeOnly = readyToShipSlackText({ ...notice, shipTime: "09:30" }, {});
+    expect(timeOnly).toContain("Ship date: not set");
+    expect(timeOnly).toContain("Ship time: 09:30");
     expect(newLoadSlackText(notice, { SLACK_USER_ID_DREW: "UDREW123" })).toContain("Owner: <@UDREW123>");
     expect(newLoadSlackText({ ...notice, owner: "Ainsley" }, { SLACK_USER_ID_AINSLEY: "WAINSLEY1" })).toContain(
       "Owner: <@WAINSLEY1>",
@@ -154,6 +249,7 @@ describe("entered by on a new load", () => {
     expect(formatEnteredBy(created.enteredByName, created.enteredByEmail)).toBe("M. Gray (m.gray@emit.example)");
     expect(created.customerCost).toBeUndefined();
     expect(created.pendingReviewCount).toBeUndefined();
+    expect(created.buildStatus).toBeNull();
     expect(JSON.stringify(created)).not.toMatch(/carrierPay|carrier_pay|pendingReviewCount|samBuild/);
 
     process.env.SLACK_NEW_LOADS_WEBHOOK_URL = "https://hooks.slack.test/new-loads";
@@ -174,11 +270,16 @@ describe("entered by on a new load", () => {
     expect(sent.status).toBe(201);
     expect(posts).toHaveLength(1);
     expect(posts[0]).toContain("https://hooks.slack.test/new-loads");
+    expect(posts[0]).toContain("Order received - Being Prepared");
+    expect(posts[0]).not.toMatch(/New load request/i);
+    expect(posts[0]).not.toContain("Ready to Ship");
     expect(posts[0]).toContain("Owner: <@UDREW123>");
     expect(posts[0]).toContain("Entered by: M. Gray (m.gray@emit.example)");
-    expect(posts[0]).not.toMatch(/1800|1750|carrier|8765/);
+    expect(posts[0]).not.toMatch(/1800|1750|carrier|8765|\$/);
 
-    const id = ((await sent.json()).order as CustomerOrder).id;
+    const sentOrder = (await sent.json()).order as CustomerOrder;
+    expect(sentOrder.buildStatus).toBe("Sent to Slack");
+    const id = sentOrder.id;
     const selectView = await getOrderRoute(new Request("http://portal.test/api/orders/" + id, { headers: headers(admin) }), {
       params: Promise.resolve({ id }),
     });
@@ -247,14 +348,7 @@ describe("entered by on a new load", () => {
     expect(viewAsOrder.customerCost).toBeUndefined();
     expect(viewAsOrder.pendingReviewCount).toBeUndefined();
     expect(JSON.stringify(viewAsOrder)).not.toMatch(/carrierPay|carrier_pay|samBuild/);
-
-    const payload = loadBuilderPayload({
-      ...selectOrder,
-      carrierPay: 8765.43,
-    } as CustomerOrder);
-    expect(JSON.stringify(payload)).not.toMatch(/enteredBy|m\.gray@emit\.example|carrierPay|8765|ownerNeedsCheck/);
-    expect(payload.createdBy).toBe("M. Gray");
-    expect(payload.owner).toEqual({ name: selectOrder.owner, slackUserId: expect.any(String) });
+    expect(viewAsOrder.buildStatus).toBe("Sent to Slack");
 
     const older = await ctx.db.prepare(`SELECT id FROM loads WHERE entered_by_email IS NULL LIMIT 1`).get();
     const oldId = String(older?.id);
@@ -361,5 +455,133 @@ describe("entered by on a new load", () => {
       }),
     );
     expect(response.status).toBe(201);
+    expect((await response.json()).order.buildStatus).toBeNull();
+  });
+
+  it("does not mark Sent to Slack when Slack rejects the note", async () => {
+    process.env.SLACK_NEW_LOADS_WEBHOOK_URL = "https://hooks.slack.test/reject";
+    vi.stubGlobal("fetch", async () => new Response("no", { status: 500 }));
+    const response = await createOrderRoute(
+      new Request("http://portal.test/api/orders", {
+        method: "POST",
+        headers: headers(await sessionCookie(customerSession())),
+        body: JSON.stringify({
+          salesOrderNumber: "SO-SLACK-500",
+          origin: emit,
+          destination: destination("CO"),
+          truckType: "Flatbed",
+        }),
+      }),
+    );
+    expect(response.status).toBe(201);
+    expect((await response.json()).order.buildStatus).toBeNull();
+  });
+});
+
+describe("stage changes", () => {
+  it("lets an add-loads user move Being Prepared to Ready to Ship once, and records History", async () => {
+    process.env.SLACK_NEW_LOADS_WEBHOOK_URL = "https://hooks.slack.test/new-loads";
+    process.env.SLACK_USER_ID_DREW = "UDREW123";
+    const posts: string[] = [];
+    vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => {
+      posts.push(String(init?.body));
+      return new Response("ok", { status: 200 });
+    });
+    const cookie = await sessionCookie(customerSession());
+    const created = await createOrderRoute(
+      new Request("http://portal.test/api/orders", {
+        method: "POST",
+        headers: headers(cookie),
+        body: JSON.stringify({
+          salesOrderNumber: "so-stage",
+          origin: emit,
+          destination: destination("TX"),
+          truckType: "53' Flatbed",
+          shipDate: "2026-11-10",
+          shipTime: "14:00",
+          mustDeliverDate: "2026-11-12",
+          comments: "carrier pay 8765.43",
+        }),
+      }),
+    );
+    expect(created.status).toBe(201);
+    const order = (await created.json()).order as CustomerOrder;
+    expect(order.stageEvents?.map((event) => event.text)).toEqual(["Stage set to Being Prepared."]);
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toContain("Order received - Being Prepared");
+    expect(posts[0]).not.toMatch(/New load request/i);
+    expect(posts[0]).toContain("SO: SO-STAGE");
+    expect(posts[0]).toContain("Origin: EMIT ALLEN — 2437 Allen Avenue, Sheridan, WY, USA");
+    expect(posts[0]).toContain("Destination: Receiver — 100 Market, Houston, TX, USA");
+    expect(posts[0]).toContain("Ship date: 2026-11-10 at 14:00");
+    expect(posts[0]).toContain("Delivery date: 2026-11-12");
+    expect(posts[0]).not.toContain("Ready to Ship");
+    expect(posts[0]).not.toMatch(/8765|\$|carrier pay/i);
+
+    const viewer = await sessionCookie({
+      userId: "emit-viewer-1",
+      email: "viewer@emit.example",
+      name: "View Only",
+      role: "emit_viewer",
+      permission: "view",
+    });
+    const refused = await patchOrderRoute(
+      new Request(`http://portal.test/api/orders/${order.id}`, {
+        method: "PATCH",
+        headers: headers(viewer),
+        body: JSON.stringify({ portalStatus: "ready_to_ship" }),
+      }),
+      { params: Promise.resolve({ id: order.id }) },
+    );
+    expect(refused.status).toBe(403);
+
+    const moved = await patchOrderRoute(
+      new Request(`http://portal.test/api/orders/${order.id}`, {
+        method: "PATCH",
+        headers: headers(cookie),
+        body: JSON.stringify({ portalStatus: "ready_to_ship" }),
+      }),
+      { params: Promise.resolve({ id: order.id }) },
+    );
+    expect(moved.status).toBe(200);
+    const ready = (await moved.json()).order as CustomerOrder;
+    expect(ready.portalStatus).toBe("ready_to_ship");
+    expect(ready.stageEvents?.map((event) => event.text)).toEqual([
+      "Stage set to Being Prepared.",
+      "Stage changed from Being Prepared to Ready to Ship.",
+    ]);
+    expect(posts).toHaveLength(2);
+    expect(posts[1]).toContain("Ready to Ship");
+    expect(posts[1]).toContain("SO: SO-STAGE");
+    expect(posts[1]).toContain("Origin: EMIT ALLEN — 2437 Allen Avenue, Sheridan, WY, USA");
+    expect(posts[1]).toContain("Destination: Receiver — 100 Market, Houston, TX, USA");
+    expect(posts[1]).toContain("Equipment: 53' Flatbed");
+    expect(posts[1]).toContain("Ship date: 2026-11-10 at 14:00");
+    expect(posts[1]).toContain("Delivery date: 2026-11-12");
+    expect(posts[1]).toContain("Owner: <@UDREW123>");
+    expect(posts[1]).not.toMatch(/8765|\$|carrier pay|New load request/i);
+
+    const again = await patchOrderRoute(
+      new Request(`http://portal.test/api/orders/${order.id}`, {
+        method: "PATCH",
+        headers: headers(cookie),
+        body: JSON.stringify({ portalStatus: "shipped" }),
+      }),
+      { params: Promise.resolve({ id: order.id }) },
+    );
+    expect(again.status).toBe(200);
+    expect((await again.json()).order.stageEvents?.at(-1)?.text).toBe("Stage changed from Ready to Ship to Shipped.");
+    expect(posts).toHaveLength(2);
+
+    const back = await patchOrderRoute(
+      new Request(`http://portal.test/api/orders/${order.id}`, {
+        method: "PATCH",
+        headers: headers(cookie),
+        body: JSON.stringify({ portalStatus: "ready_to_ship" }),
+      }),
+      { params: Promise.resolve({ id: order.id }) },
+    );
+    expect(back.status).toBe(200);
+    expect(posts).toHaveLength(2);
   });
 });

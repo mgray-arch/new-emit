@@ -107,7 +107,8 @@ describe("production sign-in and an empty database", () => {
       expect((await response.json()).error).toMatch(/no accounts/);
       const listed = await providers(new Request("http://portal.test/api/auth/providers"));
       const payload = await listed.json();
-      expect(payload.google).toBe(false);
+      expect(payload.google).toBeUndefined();
+      expect(payload.selectSetup).toBe(false);
       expect(payload.setup.join(" ")).toMatch(/DEMO_SEED/);
     } finally {
       useTestPortal(ctx);
@@ -139,7 +140,8 @@ describe("production sign-in and an empty database", () => {
       const listed = await providers(new Request("http://portal.test/api/auth/providers"));
       expect((await listed.json()).setup.join(" ")).toMatch(/TURSO_DATABASE_URL/);
       const page = readFileSync("app/login/page.tsx", "utf8");
-      expect(page).toMatch(/Google sign-in isn't set up/);
+      expect(page).not.toMatch(/Sign in with Google|api\/auth\/google/);
+      expect(page).toMatch(/Email and password/);
       expect(page).toMatch(/EMIT staff/);
       expect(page).toMatch(/Select staff/);
     } finally {
@@ -155,7 +157,8 @@ describe("production sign-in and an empty database", () => {
       .filter((name) => name.endsWith(".ts"))
       .map((name) => readFileSync(path.join("lib", name), "utf8"))
       .join("\n");
-    expect(lib).not.toMatch(/gmail\.googleapis|GMAIL_CLIENT|GMAIL_REFRESH|EMAIL_FROM|sendOrderConfirmation|nextLoadNumber/);
+    expect(lib).not.toMatch(/gmail\.googleapis|GMAIL_CLIENT|GMAIL_REFRESH|sendOrderConfirmation|nextLoadNumber|EMAIL_FROM|EMAIL_API_KEY|EMAIL_API_URL|api\.resend\.com|sendEmail/);
+    expect(readFileSync("lib/orders.ts", "utf8")).not.toMatch(/sendEmail|EMAIL_FROM/);
     process.env.DEMO_SEED = "false";
     delete process.env.ALLOW_PASSWORD_LOGIN;
     const admin = await sessionCookie(adminSession());
@@ -576,7 +579,19 @@ describe("Select load numbers", () => {
     expect(Number(chatFlag?.chat_enabled ?? 0)).toBe(0);
     const loadColumns = (await upgraded.prepare(`PRAGMA table_info(loads)`).all()) as Array<{ name: string }>;
     expect(loadColumns.map((column) => column.name)).toEqual(
-      expect.arrayContaining(["tracking_link", "tracking_link_source", "sam_build_status", "sam_build_error", "sam_build_at", "owner", "owner_needs_check"]),
+      expect.arrayContaining([
+        "tracking_link",
+        "tracking_link_source",
+        "sam_build_status",
+        "sam_build_error",
+        "sam_build_at",
+        "owner",
+        "owner_needs_check",
+        "slack_notified_at",
+        "carrier_name",
+        "carrier_mc",
+        "carrier_notice_log",
+      ]),
     );
     const customerDocs = (await upgraded.prepare(`PRAGMA table_info(customer_documents)`).all()) as Array<{ name: string }>;
     const internalDocs = (await upgraded.prepare(`PRAGMA table_info(internal_documents)`).all()) as Array<{ name: string }>;

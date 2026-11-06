@@ -658,15 +658,22 @@ export default function LoadForm({
         </section>
       )}
       <StopsEditor draft={draft} setDraft={setDraft} sites={sites} readOnly={readOnly} />
-      <div className="field">
-        <label>Status</label>
-        <select value={draft.portalStatus} onChange={(event) => setDraft({ ...draft, portalStatus: event.target.value as PortalStatus })}>
+      <div className="field stage-field">
+        <label htmlFor="load-stage">Stage</label>
+        <select
+          id="load-stage"
+          aria-label="Stage"
+          value={draft.portalStatus}
+          disabled={readOnly}
+          onChange={(event) => setDraft({ ...draft, portalStatus: event.target.value as PortalStatus })}
+        >
           {Object.entries(STATUS_LABEL).map(([value, label]) => (
             <option key={value} value={value}>
               {label}
             </option>
           ))}
         </select>
+        <p className="mini">New loads start at Being Prepared. Saving this form saves the stage.</p>
       </div>
       <SalesOrdersEditor draft={draft} setDraft={setDraft} readOnly={readOnly} />
       <div className="grid-2">

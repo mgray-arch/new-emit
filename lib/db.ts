@@ -88,12 +88,17 @@ CREATE TABLE IF NOT EXISTS loads (
   sam_build_status TEXT,
   sam_build_error TEXT,
   sam_build_at TEXT,
+  slack_notified_at TEXT,
+  slack_ready_at TEXT,
   carrier_name TEXT,
   carrier_mc TEXT,
   driver_name TEXT,
   carrier_updated_at TEXT,
   bol_changed_at TEXT,
-  copied_from_id TEXT
+  copied_from_id TEXT,
+  carrier_notice_log TEXT,
+  stage_log TEXT,
+  tracking_event_log TEXT
 );
 
 CREATE TABLE IF NOT EXISTS bol_prints (
@@ -108,6 +113,7 @@ CREATE TABLE IF NOT EXISTS bol_prints (
   carrier_mc TEXT,
   driver_name TEXT,
   bol_fingerprint TEXT NOT NULL,
+  printed_by TEXT,
   UNIQUE (load_id, version)
 );
 
@@ -246,19 +252,28 @@ CREATE TABLE IF NOT EXISTS message_reads (
   user_id TEXT PRIMARY KEY,
   read_seq INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS order_seen (
+  user_id TEXT NOT NULL,
+  load_id TEXT NOT NULL,
+  seen_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, load_id)
+);
+
 `;
 
 /**
- * Every column stored on a load that the portal reads back.
- * Carrier pay is not a column. Carrier name, MC, and driver are identity only.
+ * Columns the order list reads back. Carrier pay is not a column.
+ * Carrier name, MC, and driver are identity. The notice log is the in-portal history.
  */
 export const CUSTOMER_LOAD_COLUMNS = `
   id, sales_order_number, load_number, portal_status, tracking_stage, timeline_json,
   origin_json, destination_json, stops_json, sales_orders_json, truck_type, transit, ship_date, ship_time,
   must_deliver_date, truck_eta, latest_eta, tracking_token, tracking_link, customer_cost_cents,
   rate_reason, comments, created_by, entered_by_name, entered_by_email, owner, owner_needs_check, created_at, updated_at, pending_review_count,
-  sam_build_status, sam_build_error, sam_build_at,
-  carrier_name, carrier_mc, driver_name, carrier_updated_at, bol_changed_at, copied_from_id
+  sam_build_status, sam_build_error, sam_build_at, slack_notified_at,
+  carrier_name, carrier_mc, driver_name, carrier_updated_at, bol_changed_at, copied_from_id,
+  carrier_notice_log, stage_log, tracking_event_log
 `;
 
 function coerce(value: unknown): unknown {
@@ -432,8 +447,38 @@ export async function openDatabase(file?: string): Promise<SqlDatabase> {
   await migrateLoadSource(db);
   await migrateChatEnabled(db);
   await ensureColumn(db, "users", "profile", "TEXT");
+  await migrateLoadStatus(db);
+  await ensureColumn(db, "loads", "driver_name", "TEXT");
+  await migrateBolPrintColumns(db);
+  await migrateUnassignedBooked(db);
   await db.exec(`DROP TABLE IF EXISTS outbox`);
   return db;
+}
+
+/**
+ * Booked means a carrier is stored. Older saves stamped Ready to Ship as booked
+ * with no carrier. Those loads go back to Confirmed.
+ */
+export async function migrateUnassignedBooked(db: SqlDatabase): Promise<void> {
+  if (!(await columnReadable(db, "loads", "tracking_stage"))) return;
+  if (!(await columnReadable(db, "loads", "carrier_name"))) return;
+  const rows = await db
+    .prepare(
+      `SELECT id, created_at FROM loads
+       WHERE tracking_stage = 'booked'
+         AND (carrier_name IS NULL OR trim(carrier_name) = '')
+         AND (carrier_mc IS NULL OR trim(carrier_mc) = '')
+         AND (carrier_notice_log IS NULL OR (
+           carrier_notice_log NOT LIKE '%"kind":"assigned"%'
+           AND carrier_notice_log NOT LIKE '%"kind":"changed"%'
+         ))`,
+    )
+    .all();
+  for (const row of rows) {
+    const at = typeof row.created_at === "string" && row.created_at ? row.created_at : new Date().toISOString();
+    const timeline = JSON.stringify([{ stage: "submitted", at, label: "Confirmed" }]);
+    await db.prepare(`UPDATE loads SET tracking_stage = 'submitted', timeline_json = ? WHERE id = ?`).run(timeline, String(row.id));
+  }
 }
 
 async function columnNames(db: SqlDatabase, table: string): Promise<string[]> {
@@ -451,21 +496,42 @@ function migrationError(error: unknown): string {
  * ADD COLUMN is not idempotent in SQLite: a second server that cannot yet see
  * the new column tries the same ALTER and gets "duplicate column name".
  * That used to reject the process cache and every later request on that instance failed.
+ * PRAGMA table_info names have also been wrong on some Turso rows, so a missing
+ * column looked present and the ALTER was skipped. A real SELECT is the check.
  */
+async function columnReadable(db: SqlDatabase, table: string, column: string): Promise<boolean> {
+  try {
+    await db.prepare(`SELECT "${column}" FROM "${table}" LIMIT 0`).get();
+    return true;
+  } catch (error) {
+    if (/no such column|no such table|has no column/i.test(migrationError(error))) return false;
+    throw error;
+  }
+}
+
 async function ensureColumn(db: SqlDatabase, table: string, column: string, definition: string): Promise<void> {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(table) || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(column)) {
     throw new Error("Unsafe migration identifier");
   }
-  const columns = await columnNames(db, table);
-  if (columns.includes(column)) return;
+  if (await columnReadable(db, table, column)) return;
   try {
     await db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   } catch (error) {
+    if (await columnReadable(db, table, column)) return;
     if (/duplicate column/i.test(migrationError(error))) return;
-    const again = await columnNames(db, table);
-    if (again.includes(column)) return;
     throw error;
   }
+}
+
+/** Columns and the per-user seen table the loads list reads. Safe to call on every request. */
+export async function ensureLoadListColumns(db: SqlDatabase): Promise<void> {
+  await migrateLoadStatus(db);
+  await db.exec(`CREATE TABLE IF NOT EXISTS order_seen (
+    user_id TEXT NOT NULL,
+    load_id TEXT NOT NULL,
+    seen_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, load_id)
+  )`);
 }
 
 async function tableSql(db: SqlDatabase, table: string): Promise<string | null> {
@@ -508,10 +574,7 @@ async function migrateStops(db: SqlDatabase): Promise<void> {
 
 const CARRIER_COLUMNS = ["carrier_pay_cents", "staff_notes"];
 
-/**
- * Carrier pay and staff notes are not stored. Carrier name, MC, and driver
- * stay: they identify who is hauling the load and are not pay.
- */
+/** Carrier pay and staff notes are not stored. Name, MC, and driver stay; they are not pay. */
 async function migrateDropCarrierColumns(db: SqlDatabase): Promise<void> {
   const columns = await columnNames(db, "loads");
   for (const name of CARRIER_COLUMNS) {
@@ -788,6 +851,40 @@ async function migrateChatEnabled(db: SqlDatabase): Promise<void> {
   await ensureColumn(db, "users", "chat_enabled", "INTEGER NOT NULL DEFAULT 0");
 }
 
+/** Older print rows only stored who and when. Version, carrier, and fingerprint are added beside them. */
+async function migrateBolPrintColumns(db: SqlDatabase): Promise<void> {
+  await db.exec(`CREATE TABLE IF NOT EXISTS bol_prints (
+    id TEXT PRIMARY KEY,
+    load_id TEXT NOT NULL,
+    document_id TEXT NOT NULL,
+    printed_at TEXT NOT NULL
+  )`);
+  for (const [column, definition] of [
+    ["version", "INTEGER"],
+    ["printed_by", "TEXT"],
+    ["printed_by_id", "TEXT"],
+    ["printed_by_name", "TEXT"],
+    ["carrier_name", "TEXT"],
+    ["carrier_mc", "TEXT"],
+    ["driver_name", "TEXT"],
+    ["bol_fingerprint", "TEXT"],
+  ] as const) {
+    await ensureColumn(db, "bol_prints", column, definition);
+  }
+  await db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS bol_prints_version ON bol_prints(load_id, version)`);
+  await db.exec(`CREATE INDEX IF NOT EXISTS bol_prints_load ON bol_prints(load_id, printed_at)`);
+}
+
+/** Slack acceptance time, carrier identity, and the in-portal history log. */
+async function migrateLoadStatus(db: SqlDatabase): Promise<void> {
+  await ensureColumn(db, "loads", "slack_notified_at", "TEXT");
+  await ensureColumn(db, "loads", "slack_ready_at", "TEXT");
+  await ensureColumn(db, "loads", "carrier_name", "TEXT");
+  await ensureColumn(db, "loads", "carrier_mc", "TEXT");
+  await ensureColumn(db, "loads", "carrier_notice_log", "TEXT");
+  await ensureColumn(db, "loads", "stage_log", "TEXT");
+}
+
 /** Older document tables have no uploader. The bot upload log is created with the schema. */
 async function migrateDocumentUploaders(db: SqlDatabase): Promise<void> {
   for (const table of ["customer_documents", "internal_documents"] as const) {
@@ -799,6 +896,7 @@ async function migrateDocumentUploaders(db: SqlDatabase): Promise<void> {
 async function migrateTrackingLink(db: SqlDatabase): Promise<void> {
   await ensureColumn(db, "loads", "tracking_link", "TEXT");
   await ensureColumn(db, "loads", "tracking_link_source", "TEXT");
+  await ensureColumn(db, "loads", "tracking_event_log", "TEXT");
 }
 
 /** Databases that allowed a receiver login role drop those users. */

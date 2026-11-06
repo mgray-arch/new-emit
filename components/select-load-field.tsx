@@ -6,19 +6,25 @@ import type { CustomerOrder } from "@/lib/types";
 export default function SelectLoadField({
   orderId,
   loadNumber,
+  canCorrect = false,
   onUpdated,
 }: {
   orderId: string;
   loadNumber: string | null;
+  /** Select staff only. EMIT never gets a way to type a SAM number. */
+  canCorrect?: boolean;
   onUpdated: (order: CustomerOrder) => void;
 }) {
   const [value, setValue] = useState(loadNumber ?? "");
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
   const [pending, setPending] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const stored = loadNumber?.trim() ?? "";
 
   useEffect(() => {
     setValue(loadNumber ?? "");
+    setEditing(false);
   }, [loadNumber, orderId]);
 
   async function save() {
@@ -33,7 +39,8 @@ export default function SelectLoadField({
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Could not save the Select load number");
-      setSaved(body.order.loadNumber ? `Saved Select load ${body.order.loadNumber}.` : "Cleared. EMIT sees this load as pending.");
+      setSaved(body.order.loadNumber ? `Saved Select load ${body.order.loadNumber}.` : "Cleared. This load is pending again.");
+      setEditing(false);
       onUpdated(body.order);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save the Select load number");
@@ -42,8 +49,25 @@ export default function SelectLoadField({
     }
   }
 
+  if (!canCorrect || !editing) {
+    return (
+      <div className="sam-status" data-sam={stored ? "built" : "pending"} role="status">
+        <div className="sam-copy">
+          <span className="k">{stored ? "Built in SAM" : "Waiting for SAM build"}</span>
+          <strong className="sam-number">{stored || "Pending"}</strong>
+        </div>
+        {canCorrect ? (
+          <button className="text-link" type="button" onClick={() => { setError(""); setSaved(""); setEditing(true); }}>
+            Correct
+          </button>
+        ) : null}
+        {saved && <p className="mini">{saved}</p>}
+      </div>
+    );
+  }
+
   return (
-    <div className="field">
+    <div className="field sam-edit">
       <label htmlFor={`select-load-${orderId}`}>Select load number</label>
       <div className="inline-field">
         <input
@@ -54,14 +78,22 @@ export default function SelectLoadField({
           onChange={(event) => setValue(event.target.value)}
         />
         <button className="btn" type="button" onClick={save} disabled={pending}>
-          {pending ? "Saving…" : "Save load number"}
+          {pending ? "Saving…" : "Save"}
         </button>
       </div>
-      <p className="mini">
-        Enter the load number from SAM after the order is built there. Leave it blank until then. EMIT sees Pending, not a made-up number.
-      </p>
+      <button
+        className="text-link"
+        type="button"
+        onClick={() => {
+          setValue(stored);
+          setError("");
+          setEditing(false);
+        }}
+      >
+        Cancel
+      </button>
+      <p className="mini">Replaces the number stored from SAM.</p>
       {error && <p className="error">{error}</p>}
-      {saved && <p className="mini">{saved}</p>}
     </div>
   );
 }
