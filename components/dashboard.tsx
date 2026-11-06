@@ -13,7 +13,7 @@ import TrackLink from "@/components/track-link";
 import TrackingLinkField from "@/components/tracking-link-field";
 import { formatDay } from "@/lib/dates";
 import { deleteConfirmText } from "@/lib/delete-confirm";
-import { readyToShipConfirmText, stageBecomesReadyToShip } from "@/lib/load-stage";
+import { stageBecomesReadyToShip } from "@/lib/load-stage";
 import { formatEnteredBy } from "@/lib/entered-by";
 import {
   LOAD_TAB_LABEL,
@@ -679,7 +679,6 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
             <LoadForm draft={draft} setDraft={setDraft} order={editing} sites={sites} hideCommercial={!showPricing} readOnly={readOnly} />
             {confirmReady ? (
               <div className="confirm-box ready-confirm" role="status">
-                <p>{readyToShipConfirmText()}</p>
                 <button className="btn" type="button" disabled={saving} onClick={() => void save(true)}>
                   {saving ? "Saving…" : "Save as Ready to Ship"}
                 </button>
