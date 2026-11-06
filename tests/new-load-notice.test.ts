@@ -119,10 +119,8 @@ describe("load owner", () => {
 describe("new load slack text", () => {
   const notice = {
     salesOrderNumber: "SO-1",
-    originCity: "Sheridan",
-    originState: "WY",
-    destinationCity: "Houston",
-    destinationState: "TX",
+    origin: { city: "Sheridan", state: "WY" },
+    destination: { city: "Houston", state: "TX" },
     equipment: "53' Flatbed",
     owner: "Drew" as const,
     enteredByName: "Jane Doe",
@@ -133,6 +131,10 @@ describe("new load slack text", () => {
     const text = newLoadSlackText(notice, {});
     expect(text.startsWith("Order received - Being Prepared\n")).toBe(true);
     expect(text).toContain("SO: SO-1");
+    expect(text).toContain("Origin: Sheridan, WY");
+    expect(text).toContain("Destination: Houston, TX");
+    expect(text).not.toContain("—");
+    expect(text).not.toContain("USA");
     expect(text).not.toMatch(/New load request/i);
     expect(text).not.toContain("Ready to Ship");
     expect(text).toContain("Owner: Drew");
@@ -149,14 +151,54 @@ describe("new load slack text", () => {
   it("mentions a Slack user id and falls back to the plain name", () => {
     expect(slackUserIdForOwner("Drew", {})).toBeNull();
     expect(slackUserIdForOwner("Drew", { SLACK_USER_ID_DREW: "not an id" })).toBeNull();
-    const ready = readyToShipSlackText({ ...notice, shipDate: "2026-11-10", salesOrderNumber: "so-44" }, { SLACK_USER_ID_DREW: "UDREW123" });
-    expect(ready.startsWith("Ready to Ship\n")).toBe(true);
-    expect(ready).toContain("SO: SO-44");
-    expect(ready).toContain("Sheridan, WY → Houston, TX");
-    expect(ready).toContain("Equipment: 53' Flatbed");
-    expect(ready).toContain("Ship date: 2026-11-10");
-    expect(ready).toContain("Owner: <@UDREW123>");
+    const ready = readyToShipSlackText(
+      {
+        salesOrderNumber: "so-44",
+        origin: {
+          company: "EMIT TECHNOLOGIES",
+          address1: "2437 Allen Avenue",
+          address2: "Dock 2",
+          city: "Sheridan",
+          state: "WY",
+          country: "US",
+        },
+        destination: {
+          company: "SPITZER INDUSTRIES, INC.",
+          address1: "10543 Fisher Road",
+          city: "Houston",
+          state: "TX",
+          country: "US",
+        },
+        equipment: "48' Flatbed",
+        shipDate: "2026-11-05",
+        shipTime: "14:00",
+        deliveryDate: "2026-11-07",
+        owner: "Drew",
+        enteredByName: null,
+        enteredByEmail: null,
+      },
+      { SLACK_USER_ID_DREW: "UDREW123" },
+    );
+    expect(ready).toBe(
+      [
+        "Ready to Ship",
+        "SO: SO-44",
+        "Origin: EMIT TECHNOLOGIES — 2437 Allen Avenue, Dock 2, Sheridan, WY, USA",
+        "Destination: SPITZER INDUSTRIES, INC. — 10543 Fisher Road, Houston, TX, USA",
+        "Equipment: 48' Flatbed",
+        "Ship date: 2026-11-05 at 14:00",
+        "Delivery date: 2026-11-07",
+        "Owner: <@UDREW123>",
+      ].join("\n"),
+    );
     expect(ready).not.toMatch(/pay|rate|\$|New load request|Being Prepared/i);
+    const datedOnly = readyToShipSlackText({ ...notice, shipDate: "2026-11-10", salesOrderNumber: "so-44" }, {});
+    expect(datedOnly).toContain("Ship date: 2026-11-10");
+    expect(datedOnly).not.toContain(" at ");
+    expect(datedOnly).not.toContain("Delivery date");
+    const timeOnly = readyToShipSlackText({ ...notice, shipTime: "09:30" }, {});
+    expect(timeOnly).toContain("Ship date: not set");
+    expect(timeOnly).toContain("Ship time: 09:30");
     expect(newLoadSlackText(notice, { SLACK_USER_ID_DREW: "UDREW123" })).toContain("Owner: <@UDREW123>");
     expect(newLoadSlackText({ ...notice, owner: "Ainsley" }, { SLACK_USER_ID_AINSLEY: "WAINSLEY1" })).toContain(
       "Owner: <@WAINSLEY1>",
@@ -456,6 +498,8 @@ describe("stage changes", () => {
           destination: destination("TX"),
           truckType: "53' Flatbed",
           shipDate: "2026-11-10",
+          shipTime: "14:00",
+          mustDeliverDate: "2026-11-12",
           comments: "carrier pay 8765.43",
         }),
       }),
@@ -467,6 +511,10 @@ describe("stage changes", () => {
     expect(posts[0]).toContain("Order received - Being Prepared");
     expect(posts[0]).not.toMatch(/New load request/i);
     expect(posts[0]).toContain("SO: SO-STAGE");
+    expect(posts[0]).toContain("Origin: EMIT ALLEN — 2437 Allen Avenue, Sheridan, WY, USA");
+    expect(posts[0]).toContain("Destination: Receiver — 100 Market, Houston, TX, USA");
+    expect(posts[0]).toContain("Ship date: 2026-11-10 at 14:00");
+    expect(posts[0]).toContain("Delivery date: 2026-11-12");
     expect(posts[0]).not.toContain("Ready to Ship");
     expect(posts[0]).not.toMatch(/8765|\$|carrier pay/i);
 
@@ -505,9 +553,11 @@ describe("stage changes", () => {
     expect(posts).toHaveLength(2);
     expect(posts[1]).toContain("Ready to Ship");
     expect(posts[1]).toContain("SO: SO-STAGE");
-    expect(posts[1]).toContain("Sheridan, WY → Houston, TX");
+    expect(posts[1]).toContain("Origin: EMIT ALLEN — 2437 Allen Avenue, Sheridan, WY, USA");
+    expect(posts[1]).toContain("Destination: Receiver — 100 Market, Houston, TX, USA");
     expect(posts[1]).toContain("Equipment: 53' Flatbed");
-    expect(posts[1]).toContain("Ship date: 2026-11-10");
+    expect(posts[1]).toContain("Ship date: 2026-11-10 at 14:00");
+    expect(posts[1]).toContain("Delivery date: 2026-11-12");
     expect(posts[1]).toContain("Owner: <@UDREW123>");
     expect(posts[1]).not.toMatch(/8765|\$|carrier pay|New load request/i);
 
