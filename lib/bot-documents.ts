@@ -1,3 +1,4 @@
+import { coverLoadFromReleasedBol } from "@/lib/bol-coverage";
 import { SALES_ORDER_MATCH_SQL, salesOrderMatchArgs } from "@/lib/sales-orders";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { PortalContext } from "@/lib/db";
@@ -242,6 +243,9 @@ export async function ingestBotDocument(
       .get(load.id, sha256);
     if (winner) return fromRow(load, winner as unknown as UploadRow, true);
     throw error;
+  }
+  if (input.docType === "bol" && screened.releasedIds.length > 0) {
+    await coverLoadFromReleasedBol(ctx, load.id, screened.releasedTexts.join("\n"));
   }
   return {
     loadNumber: load.loadNumber,

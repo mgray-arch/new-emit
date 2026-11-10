@@ -68,7 +68,15 @@ function printDocument(title: string, heading: string, body: string): string {
   ${body}
   <script>
     document.getElementById("print").addEventListener("click", function () {
-      var frame = document.querySelector("iframe");
+      var frames = document.querySelectorAll("iframe");
+      if (frames.length === 1) {
+        var src = frames[0].getAttribute("src");
+        if (src) {
+          window.location.href = src;
+          return;
+        }
+      }
+      var frame = frames[0];
       try {
         if (frame && frame.contentWindow) {
           frame.contentWindow.focus();

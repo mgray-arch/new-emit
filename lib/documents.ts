@@ -164,6 +164,8 @@ export async function refreshLoadReviewCount(db: SqlDatabase, loadId: string): P
 export interface IngestResult {
   releasedIds: string[];
   heldIds: string[];
+  /** Text of pages that were shown to the customer. Held pages are omitted. */
+  releasedTexts: string[];
 }
 
 export async function ingestDocument(
@@ -204,6 +206,7 @@ export async function ingestDocument(
 
   const releasedIds: string[] = [];
   const heldIds: string[] = [];
+  const releasedTexts: string[] = [];
   const stored: Array<{
     id: string;
     index: number;
@@ -229,6 +232,7 @@ export async function ingestDocument(
           )
           .run(item.id, input.loadId, slot, filename, item.page.mediaType, item.storageKey, createdAt, uploadedBy);
         releasedIds.push(item.id);
+        if (item.page.text?.trim()) releasedTexts.push(item.page.text);
         continue;
       }
       const storedKind = item.screened.decision === "block" ? "rate_confirmation" : "uncertain";
@@ -261,7 +265,7 @@ export async function ingestDocument(
       await ctx.db.prepare(`UPDATE loads SET bol_changed_at = ? WHERE id = ?`).run(createdAt, input.loadId);
     }
   });
-  return { releasedIds, heldIds };
+  return { releasedIds, heldIds, releasedTexts };
 }
 
 export const CUSTOMER_DOCUMENT_READ_SQL = `

@@ -1,6 +1,7 @@
 import { listBolPages } from "@/lib/bol-print";
 import { recordBolPrint } from "@/lib/bol-prints";
 import { bolPrintHtml } from "@/lib/document-print";
+import { documentOpensInline } from "@/lib/document-view";
 import { isSession, rejectIfViewingAs, requireSession } from "@/lib/guard";
 import { errorResponse, json, PortalError } from "@/lib/http";
 import { getOrder } from "@/lib/orders";
@@ -44,6 +45,16 @@ export async function GET(req: Request, context: { params: Promise<{ id: string 
         driverName: order.driverName ?? null,
       },
     });
+    // The browser's own viewer shows one PDF or image and prints that file.
+    if (pages.length === 1 && documentOpensInline(pages[0].mediaType)) {
+      return new Response(null, {
+        status: 302,
+        headers: {
+          location: `/api/documents/${encodeURIComponent(pages[0].id)}`,
+          "cache-control": "no-store",
+        },
+      });
+    }
     const html = bolPrintHtml(
       pages.map((page) => ({
         src: `/api/documents/${encodeURIComponent(page.id)}`,
