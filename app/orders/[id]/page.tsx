@@ -13,6 +13,7 @@ import StageField from "@/components/stage-field";
 import TrackingCallout from "@/components/tracking-callout";
 import SelectLoadField from "@/components/select-load-field";
 import Shell from "@/components/shell";
+import SoNumber from "@/components/so-number";
 import StatusPill from "@/components/status-pill";
 import Timeline from "@/components/timeline";
 import TrackLink from "@/components/track-link";
@@ -182,7 +183,9 @@ export default function OrderPage() {
               <StatusPill status={displayStatus(order, today, { needsAttention: selectView })} />
             </div>
             <p className="lede">
-              {order.salesOrderNumber} · Select load {formatLoadNumber(order.loadNumber)}
+              <SoNumber>{order.salesOrderNumber}</SoNumber>
+              {" · Select load "}
+              {formatLoadNumber(order.loadNumber)}
             </p>
             <StageField order={order} canEdit={allowLoads && !readOnly} />
             <BuildStatus status={order.buildStatus} />
@@ -277,7 +280,9 @@ export default function OrderPage() {
                         <div className="addr">{formatPlace(stop.place)}</div>
                         {schedule ? <div className="mini">{schedule}</div> : null}
                         {stop.kind === "drop" && salesOrdersForStop(order.salesOrders, stop.id).length ? (
-                          <div className="mini">SO: {salesOrdersForStop(order.salesOrders, stop.id).join(", ")}</div>
+                          <div className="mini">
+                            <SoNumber>SO: {salesOrdersForStop(order.salesOrders, stop.id).join(", ")}</SoNumber>
+                          </div>
                         ) : null}
                       </li>
                     );

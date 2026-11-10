@@ -3,24 +3,49 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import Shell from "@/components/shell";
+import SoNumber from "@/components/so-number";
 import { formatWhen } from "@/lib/dates";
 import { splitMessageMentions, type LoadOption, type MessageLoadRef, type MessageView } from "@/lib/message-types";
 
 const POLL_MS = 15_000;
 
-function loadLabel(load: MessageLoadRef): string {
-  const number = load.loadNumber ? `Load ${load.loadNumber}` : load.salesOrderNumber || "Load";
-  const so = load.loadNumber && load.salesOrderNumber ? ` · ${load.salesOrderNumber}` : "";
-  const lane =
-    load.originCity && load.destinationCity
-      ? ` · ${load.originCity}, ${load.originState} → ${load.destinationCity}, ${load.destinationState}`
-      : "";
-  return `${number}${so}${lane}`;
+function laneText(originCity: string, originState: string, destinationCity: string, destinationState: string): string {
+  if (!originCity || !destinationCity) return "";
+  return ` · ${originCity}, ${originState} → ${destinationCity}, ${destinationState}`;
 }
 
-function optionLabel(load: LoadOption): string {
-  const number = load.loadNumber || "Pending";
-  return `${number} · ${load.salesOrderNumber} · ${load.originCity}, ${load.originState} → ${load.destinationCity}, ${load.destinationState}`;
+function LoadLabel({ load }: { load: MessageLoadRef }) {
+  const lane = laneText(load.originCity, load.originState, load.destinationCity, load.destinationState);
+  if (load.loadNumber) {
+    return (
+      <>
+        {`Load ${load.loadNumber}`}
+        {load.salesOrderNumber ? (
+          <>
+            {" · "}
+            <SoNumber>{load.salesOrderNumber}</SoNumber>
+          </>
+        ) : null}
+        {lane}
+      </>
+    );
+  }
+  return (
+    <>
+      {load.salesOrderNumber ? <SoNumber>{load.salesOrderNumber}</SoNumber> : "Load"}
+      {lane}
+    </>
+  );
+}
+
+function OptionLabel({ load }: { load: LoadOption }) {
+  return (
+    <>
+      {`${load.loadNumber || "Pending"} · `}
+      <SoNumber>{load.salesOrderNumber}</SoNumber>
+      {laneText(load.originCity, load.originState, load.destinationCity, load.destinationState)}
+    </>
+  );
 }
 
 function mergeMessages(current: MessageView[], incoming: MessageView[]): MessageView[] {
@@ -274,10 +299,12 @@ export default function MessagesPanel() {
                 <div className="msg-load">
                   {message.load.id ? (
                     <Link href={`/orders/${message.load.id}`} className="text-link">
-                      {loadLabel(message.load)}
+                      <LoadLabel load={message.load} />
                     </Link>
                   ) : (
-                    <span>{loadLabel(message.load)}</span>
+                    <span>
+                      <LoadLabel load={message.load} />
+                    </span>
                   )}
                 </div>
               ) : null}
@@ -300,7 +327,7 @@ export default function MessagesPanel() {
                 aria-labelledby="load-picker-label"
                 onClick={() => setPickerOpen((open) => !open)}
               >
-                <span>{selectedLoad ? optionLabel(selectedLoad) : loadId ? "Selected load" : "No specific load"}</span>
+                <span>{selectedLoad ? <OptionLabel load={selectedLoad} /> : loadId ? "Selected load" : "No specific load"}</span>
                 <span className="load-picker-action">{pickerOpen ? "Close" : "Choose"}</span>
               </button>
               {pickerOpen ? (
@@ -321,7 +348,7 @@ export default function MessagesPanel() {
                       className={load.id === loadId ? "load-picker-option on" : "load-picker-option"}
                       onClick={() => chooseLoad(load.id)}
                     >
-                      {optionLabel(load)}
+                      <OptionLabel load={load} />
                     </button>
                   ))}
                   {loads.length === 0 ? <p className="mini">No loads match that search.</p> : null}
