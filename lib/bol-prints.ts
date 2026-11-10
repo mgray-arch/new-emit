@@ -2,7 +2,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { listBolPages } from "@/lib/bol-print";
 import type { PortalContext } from "@/lib/db";
 import { withTransaction } from "@/lib/db";
+import { readCustomerDocument } from "@/lib/documents";
 import { PortalError } from "@/lib/http";
+import { parseSamBol, sameBolCarrier, textFromBolBytes } from "@/lib/sam-bol";
 import { readStoredBytes } from "@/lib/storage";
 
 /**
@@ -51,6 +53,35 @@ function fingerprint(documentId: string, bytes: Uint8Array): string {
 
 function norm(value: string | null | undefined): string {
   return (value ?? "").trim().toUpperCase();
+}
+
+/**
+ * A print with no carrier stored, followed by the carrier that was already on that
+ * BOL, is not a change. The file showed the company before the portal did.
+ * A different company, or a new BOL file, still asks for a reprint.
+ */
+async function carrierReprint(ctx: PortalContext, printed: PrintRow, current: CarrierIdentity): Promise<boolean> {
+  if (sameIdentity(printed, current)) return false;
+  const printedHadNoCarrier = !norm(printed.carrier_name) && !norm(printed.carrier_mc);
+  if (!printedHadNoCarrier) return true;
+  const onBol = await carrierOnPrintedBol(ctx, printed.document_id);
+  if (!onBol) return true;
+  return !sameBolCarrier(onBol, { carrierName: current.carrierName, carrierMc: current.carrierMc });
+}
+
+async function carrierOnPrintedBol(
+  ctx: PortalContext,
+  documentId: string,
+): Promise<{ carrierName: string | null; carrierMc: string | null } | null> {
+  try {
+    const doc = await readCustomerDocument(ctx, documentId);
+    if (!doc || doc.kind !== "bol") return null;
+    const parsed = parseSamBol(await textFromBolBytes(doc.mediaType, doc.bytes));
+    if (!parsed.carrierName && !parsed.carrierMc) return null;
+    return { carrierName: parsed.carrierName, carrierMc: parsed.carrierMc };
+  } catch {
+    return null;
+  }
 }
 
 function sameIdentity(printed: PrintRow, current: CarrierIdentity): boolean {
@@ -104,7 +135,7 @@ export async function bolPrintState(
   const last = rows[0];
   const newest = await newestBol(ctx, loadId);
   const reasons: Array<"carrier_changed" | "bol_updated"> = [];
-  if (!sameIdentity(last, current)) reasons.push("carrier_changed");
+  if (await carrierReprint(ctx, last, current)) reasons.push("carrier_changed");
   const bolRemoved = !newest;
   if (!newest || newest.id !== last.document_id || newest.fingerprint !== last.bol_fingerprint) {
     reasons.push("bol_updated");

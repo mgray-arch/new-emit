@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { PortalContext } from "@/lib/db";
 
 export interface BolPage {
@@ -31,14 +30,6 @@ export async function listBolPages(ctx: PortalContext, loadId: string): Promise<
     createdAt: String(row.created_at),
   }));
   return latestBolPages(pages);
-}
-
-/** One row per time someone opens the uploaded BOL to print. Screen prints are not recorded. */
-export async function recordBolPrint(ctx: PortalContext, input: { loadId: string; documentId: string; userId: string }): Promise<void> {
-  if (!input.loadId || !input.documentId || !input.userId) return;
-  await ctx.db
-    .prepare(`INSERT INTO bol_prints (id, load_id, document_id, printed_by, printed_at) VALUES (?, ?, ?, ?, ?)`)
-    .run(randomUUID(), input.loadId, input.documentId, input.userId, ctx.now().toISOString());
 }
 
 export async function countBolPrints(ctx: PortalContext, loadId: string): Promise<number> {

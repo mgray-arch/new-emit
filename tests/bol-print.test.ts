@@ -209,7 +209,9 @@ describe("startup keeps carrier identity columns", () => {
 describe("uploaded BOL print page", () => {
   it("prints only the newest uploaded BOL and records that print", async () => {
     expect(latestBolPages([])).toEqual([]);
-    const load = await ctx.db.prepare(`SELECT id FROM loads LIMIT 1`).get();
+    const load = await ctx.db
+      .prepare(`SELECT id FROM loads WHERE id NOT IN (SELECT load_id FROM customer_documents WHERE kind = 'bol') LIMIT 1`)
+      .get();
     const loadId = String(load?.id);
     const cookie = await sessionCookie(adminSession());
     const missing = await printBolPage(new Request(`http://portal.test/api/orders/${loadId}/bol/print`, { headers: headers(cookie) }), {
