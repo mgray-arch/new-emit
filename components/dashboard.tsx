@@ -7,6 +7,7 @@ import DocumentLinks from "@/components/document-links";
 import LoadForm, { draftFromCopy, draftFromOrder, draftSalesOrderErrors, emptyDraft, payloadFromDraft, useSites, type Draft } from "@/components/load-form";
 import BuildStatus from "@/components/build-status";
 import PhotoGallery from "@/components/photo-gallery";
+import PortalStatusControl from "@/components/portal-status-control";
 import SelectLoadField from "@/components/select-load-field";
 import StatusPill from "@/components/status-pill";
 import TrackLink from "@/components/track-link";
@@ -15,7 +16,7 @@ import { carrierIdentityLabel } from "@/lib/carrier";
 import { formatDay, formatWhenBoise } from "@/lib/dates";
 import { reprintMessage } from "@/lib/reprint";
 import { deleteConfirmText } from "@/lib/delete-confirm";
-import { stageBecomesReadyToShip } from "@/lib/load-stage";
+import { listStageChoice, stageBecomesReadyToShip, type ListPortalStatus } from "@/lib/load-stage";
 import { formatEnteredBy } from "@/lib/entered-by";
 import {
   LOAD_TAB_LABEL,
@@ -119,7 +120,11 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   const [soWarning, setSoWarning] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [confirmReady, setConfirmReady] = useState(false);
+  const [pendingReadyId, setPendingReadyId] = useState<string | null>(null);
+  const [stageBusyId, setStageBusyId] = useState<string | null>(null);
+  const [stageError, setStageError] = useState<{ id: string; message: string } | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const stageBusyRef = useRef(new Set<string>());
   const updatedRef = useRef(updatedOnly);
 
   useEffect(() => {
@@ -162,6 +167,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   const showCarrier = canSeeCarrierIdentity(me);
   const allowPrint = canPrintBol(me);
   const selectView = role === "admin" && !readOnly;
+  const canChangeStage = allowLoads && !readOnly;
 
   useEffect(() => {
     if (!allowLoads || readOnly) setCreating(false);
@@ -284,6 +290,60 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       setError("Could not delete that order");
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  function clearStagePrompt(id: string) {
+    setPendingReadyId((current) => (current === id ? null : current));
+  }
+
+  function pickListStage(order: CustomerOrder, next: ListPortalStatus) {
+    const choice = listStageChoice(order.portalStatus, next);
+    if (choice === "noop") {
+      clearStagePrompt(order.id);
+      return;
+    }
+    if (choice === "confirm") {
+      setPendingReadyId(order.id);
+      setStageError((current) => (current?.id === order.id ? null : current));
+      return;
+    }
+    clearStagePrompt(order.id);
+    void changeListStage(order, next);
+  }
+
+  async function changeListStage(order: CustomerOrder, next: ListPortalStatus) {
+    if (!canChangeStage || stageBusyRef.current.has(order.id)) return;
+    stageBusyRef.current.add(order.id);
+    setStageBusyId(order.id);
+    setStageError((current) => (current?.id === order.id ? null : current));
+    try {
+      const response = await fetch(`/api/orders/${order.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ portalStatus: next }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setStageError({
+          id: order.id,
+          message: typeof body.error === "string" ? body.error : "Could not change the stage",
+        });
+        return;
+      }
+      const updated = body.order as CustomerOrder;
+      replaceOrder({
+        ...updated,
+        carrierBadge: updated.carrierBadge ?? order.carrierBadge,
+        trackingBadge: updated.trackingBadge ?? order.trackingBadge,
+      });
+      clearStagePrompt(order.id);
+      toast("Stage saved.");
+    } catch {
+      setStageError({ id: order.id, message: "Could not change the stage" });
+    } finally {
+      stageBusyRef.current.delete(order.id);
+      setStageBusyId((current) => (current === order.id ? null : current));
     }
   }
 
@@ -581,7 +641,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                   aria-label={`Open ${order.salesOrderNumber}`}
                   onClick={(event) => {
                     const target = event.target as HTMLElement;
-                    if (target.closest("a, button, select, input, label, option")) return;
+                    if (target.closest("a, button, select, input, label, option, .stage-menu, .confirm-box")) return;
                     router.push(`/orders/${order.id}`);
                   }}
                   onKeyDown={(event) => {
@@ -593,7 +653,17 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                       {order.origin.city}, {order.origin.state} → {order.destination.city}, {order.destination.state}
                     </div>
                     <div className="load-row-status">
-                      <span className="stage-name">{STATUS_LABEL[order.portalStatus]}</span>
+                      <PortalStatusControl
+                        status={order.portalStatus}
+                        salesOrderNumber={order.salesOrderNumber}
+                        canChange={canChangeStage}
+                        confirming={pendingReadyId === order.id && order.portalStatus !== "ready_to_ship"}
+                        busy={stageBusyId === order.id}
+                        error={stageError?.id === order.id ? stageError.message : ""}
+                        onPick={(next) => pickListStage(order, next)}
+                        onConfirm={() => void changeListStage(order, "ready_to_ship")}
+                        onCancel={() => clearStagePrompt(order.id)}
+                      />
                       {order.carrierBadge ? <CarrierBadge kind={order.carrierBadge} /> : null}
                       {order.trackingBadge ? (
                         <span className="carrier-badge" data-kind="tracking">
