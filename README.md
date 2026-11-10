@@ -125,6 +125,9 @@ Leave these blank unless you are turning that feature on:
 | `SLACK_USER_ID_DREW`, `SLACK_USER_ID_AINSLEY` | Optional Slack member ids (like `U012ABCDEF`) so that note @mentions Drew or Ainsley. Unset: the note uses the plain name. Drew owns every load into Price, UT, plus flatbed and hot shot loads into Texas. Ainsley owns every other load. |
 | `SLACK_MESSAGES_WEBHOOK_URL` | Slack incoming webhook when an EMIT user posts in Messages. Unset: no Slack message is sent. The note has the load number (when one is attached), a short preview, and a link. It does not include the full message or carrier pay. |
 | `MESSAGE_NOTIFY_EMAILS` | Optional comma-separated addresses for that same note. Message notes are not emailed. Setting this does not send mail and does not block the message. |
+| `INBOUND_EMAIL_WEBHOOK_SECRET` | Signing secret for BOL email received at the portal. See **Inbound BOL email**. Unsigned requests are rejected. |
+| `RESEND_API_KEY` | Downloads those attachments after the signature checks out. The portal does not send mail with it. |
+| `INBOUND_EMAIL_ALLOWED_SENDERS` | Who may file a BOL. Unset means `goselect.com` only. |
 
 Do not set `DEMO_USER_PASSWORD` in production. Do not set a Gmail client. Order mail has been removed.
 
@@ -342,6 +345,47 @@ Delivered and Completed land on Delivered in the list, then History after 7 days
 Equipment maps onto the portal truck list when the name is one of those types. `Flatbed, Hotshot` is Hot Shot. `Sprinter` is Sprinter Van. `F53` and `53' Flatbed` are 53' Flatbed. `Straight Box Truck`, `Power Only`, `Step Deck`, `Flatbed or Stepdeck`, `Straight Van`, and `53' Van` stay as that text, because the portal list has no length or type for them. Any other name is kept as sent, up to 80 characters.
 
 Delivery stops link to a saved location only on an exact dock: the same normalized street, city, state, and ZIP. `East`/`E`, `Drive`/`Dr`, and a ZIP+4 are the same street the location page already uses. A likely match (same street, different ZIP or only a similar company) is reported and not linked, because the portal otherwise asks a person. The import does not create location rows, and it does not change how often a dock has been used. Pickups are stored on the load only.
+
+## Inbound BOL email
+
+SAM generates a bill of lading and emails it. The portal receives that message at `bol@bol.emit-shipping.app` and files the PDF itself. There is no mailbox bot and no Gmail client. The portal still does not send mail.
+
+Resend is the receiver. The webhook is `POST /api/integrations/inbound-email`. Resend signs the body (Svix). A missing secret, a missing signature, a stale timestamp, or a bad signature is 401 and nothing is stored. After the signature checks out, the portal downloads PDF and image attachments with `RESEND_API_KEY`. That key is not used to send mail.
+
+The subject and filename are matched to a Select load number such as `467862-1`. A date like `2026-11-09` is not a load number. If that number is not on an order, sales orders in the PDF are tried, including `SO-2582, S0-2583` (the letter O and the digit 0, any case, more than one SO). Several matching orders is not a guess: the mail stays on the Select review queue. A recognizable bill of lading that passes the same page screening as a portal upload is stored as a BOL. A rate confirmation, carrier-pay language, a dollar amount tied to carrier language, or a page that is not a clear BOL is held. EMIT does not see held files. Receiver links do not show documents. The same file bytes on the same order are stored once.
+
+Select sees each message on Review, under Inbound mail: sender, subject, matched order, and outcome. The log does not include the message body or carrier pay. Mail from any other domain is logged as not allowed and its files are not stored.
+
+### What Mike sets up
+
+Use a subdomain so this does not take over mail for `emit-shipping.app` if that name ever has a mailbox. The website DNS (the Vercel A or CNAME record) stays as it is.
+
+1. In Resend, open Domains and add `bol.emit-shipping.app`. Enable Receiving. Add every TXT record Resend shows for that domain so Resend can verify it. Those TXT records are not the website.
+2. On the domain page, copy the receiving MX record. Resend does not use one fixed host. The screen may show `receive.forge.rmta.net`, a regional name such as `receive-euw1.forge.rmta.net`, or `inbound-smtp.<region>.amazonaws.com`. Use the value on the screen.
+3. At the DNS host for `emit-shipping.app` (the registrar, or Vercel → Domains → the domain → DNS, if Vercel is the DNS host):
+   - Type: `MX`
+   - Name / host: `bol`
+   - Value: the host Resend shows
+   - Priority: `10`
+   This must be the only MX on `bol.emit-shipping.app`, and it must be the lowest priority number on that name. Do not add this MX on `@`. An apex MX would take all mail for the website's domain.
+4. In Resend, confirm the MX and wait until Receiving is verified.
+5. Tell SAM, or whoever sends "Select Transport Bill of Lading" mail, to deliver it to `bol@bol.emit-shipping.app`. Resend accepts any local part on that domain. This is the address to use.
+6. In Resend, open Webhooks → Add.
+   - Endpoint: `https://emit-shipping.app/api/integrations/inbound-email` (the same host as `PORTAL_PUBLIC_URL`).
+   - Event: `email.received` only.
+   - Open the saved webhook and copy the signing secret. It starts with `whsec_`.
+7. In the Vercel project, Settings → Environment Variables, for Production (and Preview if you want to try it there):
+
+| Variable | Value |
+| --- | --- |
+| `INBOUND_EMAIL_WEBHOOK_SECRET` | The webhook signing secret from step 6. At least 16 characters. |
+| `RESEND_API_KEY` | A Resend API key. The portal uses it only to download attachments after the signature checks out. |
+| `INBOUND_EMAIL_ALLOWED_SENDERS` | `goselect.com`. If SAM's From address is not on `goselect.com`, add it, comma-separated: `goselect.com,notifications@sam.example`. A domain allows that domain and its subdomains. A full address allows only that mailbox. Unset means `goselect.com` only. |
+
+Do not commit the secret or the API key. Do not put them in the webhook URL.
+
+8. Redeploy Production. A deployment that is already built does not see new variables.
+9. Send one bill of lading from an allowed address to `bol@bol.emit-shipping.app`. Sign in as Select, open Review, and confirm the inbound mail line. A clear BOL is on the order. Anything that is not a clear BOL, or that does not match one order, is in the queue and is not on a receiver link.
 
 ## Load status
 

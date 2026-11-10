@@ -50,6 +50,7 @@ describe("boundaries", () => {
     expect(isPublicPath("/api/integrations/tracking-link")).toBe(true);
     expect(isPublicPath("/api/integrations/loads/import")).toBe(true);
     expect(isPublicPath("/api/integrations/sam-load")).toBe(true);
+    expect(isPublicPath("/api/integrations/inbound-email")).toBe(true);
     expect(isPublicPath("/api/integrations")).toBe(false);
     expect(isPublicPath("/api/documents/abc")).toBe(false);
     expect(isPublicPath("/api/carrier-photos/abc")).toBe(false);

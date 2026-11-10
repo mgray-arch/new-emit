@@ -168,63 +168,86 @@ export interface IngestResult {
   releasedTexts: string[];
 }
 
-export async function ingestDocument(
+export interface ScreenedUploadPage {
+  bytes: Uint8Array;
+  text: string | null;
+  mediaType: string;
+  decision: ScreenDecision;
+  reason: string;
+}
+
+/** Split an upload and run the same page screening manual and bot uploads use. */
+export async function screenUpload(filename: string, bytes: Uint8Array): Promise<ScreenedUploadPage[]> {
+  if (bytes.byteLength === 0) throw new PortalError("That file is empty");
+  if (bytes.byteLength > MAX_UPLOAD_BYTES) throw new PortalError("Files must be 8 MB or smaller");
+  const safeName = safeFilename(filename);
+  const kind = sniffUpload(bytes, safeName);
+  type Page = { bytes: Uint8Array; text: string | null; mediaType: string };
+  let pages: Page[] = [];
+  if (kind === "pdf") {
+    const split = await splitPdf(bytes);
+    const texts = await textForPdf(bytes, split);
+    pages = split.map((pageBytes, index) => ({ bytes: pageBytes, text: texts[index] ?? null, mediaType: "application/pdf" }));
+  } else if (kind === "text") {
+    pages = [{ bytes, text: Buffer.from(bytes).toString("utf8"), mediaType: "text/plain" }];
+  } else {
+    pages = [{ bytes, text: null, mediaType: mediaTypeFor(kind) }];
+  }
+  const screened: ScreenedUploadPage[] = [];
+  for (const page of pages) {
+    const result = await screenPageBytes(page);
+    screened.push({
+      bytes: page.bytes,
+      text: result.text,
+      mediaType: page.mediaType,
+      decision: result.decision,
+      reason: result.reason,
+    });
+  }
+  return screened;
+}
+
+export async function storeScreenedUpload(
   ctx: PortalContext,
   input: {
     loadId: string;
     filename: string;
-    bytes: Uint8Array;
     slot: "attachment" | "bol";
     uploadedBy?: string | null;
+    pages: ScreenedUploadPage[];
+    /** Passing pages stay on the Select queue. Block decisions stay blocks. */
+    holdPasses?: boolean;
+    holdPassReason?: string;
   },
 ): Promise<IngestResult> {
-  if (input.bytes.byteLength === 0) throw new PortalError("That file is empty");
-  if (input.bytes.byteLength > MAX_UPLOAD_BYTES) throw new PortalError("Files must be 8 MB or smaller");
   const filename = safeFilename(input.filename);
-  const kind = sniffUpload(input.bytes, filename);
   const slot = input.slot === "bol" ? "bol" : "attachment";
   const uploadedBy = input.uploadedBy?.trim() ? input.uploadedBy.trim().slice(0, 80) : null;
   const createdAt = ctx.now().toISOString();
-
-  type Page = { bytes: Uint8Array; text: string | null; mediaType: string };
-  let pages: Page[] = [];
-  if (kind === "pdf") {
-    const split = await splitPdf(input.bytes);
-    const texts = await textForPdf(input.bytes, split);
-    pages = split.map((bytes, index) => ({ bytes, text: texts[index] ?? null, mediaType: "application/pdf" }));
-  } else if (kind === "text") {
-    pages = [{ bytes: input.bytes, text: Buffer.from(input.bytes).toString("utf8"), mediaType: "text/plain" }];
-  } else {
-    pages = [
-      {
-        bytes: input.bytes,
-        text: null,
-        mediaType: mediaTypeFor(kind),
-      },
-    ];
-  }
-
+  const holdReason = input.holdPassReason?.trim() || "Not a recognizable bill of lading, so it stays with Select.";
   const releasedIds: string[] = [];
   const heldIds: string[] = [];
   const releasedTexts: string[] = [];
   const stored: Array<{
     id: string;
     index: number;
-    page: Page;
-    screened: { decision: ScreenDecision; reason: string };
+    page: ScreenedUploadPage;
+    decision: ScreenDecision;
+    reason: string;
     storageKey: string;
   }> = [];
-  for (const [index, page] of pages.entries()) {
-    const screened = await screenPageBytes(page);
-    page.text = screened.text;
+  for (const [index, page] of input.pages.entries()) {
+    const heldPass = Boolean(input.holdPasses) && page.decision === "pass";
+    const decision: ScreenDecision = heldPass ? "uncertain" : page.decision;
+    const reason = heldPass ? holdReason : page.reason;
     const id = randomUUID();
-    const prefix = screened.decision === "pass" ? "customer-documents" : "internal-documents";
+    const prefix = decision === "pass" ? "customer-documents" : "internal-documents";
     const storageKey = await writeStoredBytes(`${prefix}/${id}`, page.bytes, page.mediaType);
-    stored.push({ id, index, page, screened, storageKey });
+    stored.push({ id, index, page, decision, reason, storageKey });
   }
   await withTransaction(ctx.db, async () => {
     for (const item of stored) {
-      if (item.screened.decision === "pass") {
+      if (item.decision === "pass") {
         await ctx.db
           .prepare(
             `INSERT INTO customer_documents (id, load_id, kind, filename, media_type, storage_key, created_at, uploaded_by)
@@ -235,7 +258,7 @@ export async function ingestDocument(
         if (item.page.text?.trim()) releasedTexts.push(item.page.text);
         continue;
       }
-      const storedKind = item.screened.decision === "block" ? "rate_confirmation" : "uncertain";
+      const storedKind = item.decision === "block" ? "rate_confirmation" : "uncertain";
       await ctx.db
         .prepare(
           `INSERT INTO internal_documents (
@@ -247,12 +270,12 @@ export async function ingestDocument(
           item.id,
           input.loadId,
           storedKind,
-          item.screened.decision,
-          item.screened.reason,
+          item.decision,
+          item.reason,
           filename,
           item.page.mediaType,
           item.index + 1,
-          pages.length,
+          input.pages.length,
           item.page.text ? item.page.text.slice(0, 600) : null,
           item.storageKey,
           createdAt,
@@ -266,6 +289,20 @@ export async function ingestDocument(
     }
   });
   return { releasedIds, heldIds, releasedTexts };
+}
+
+export async function ingestDocument(
+  ctx: PortalContext,
+  input: {
+    loadId: string;
+    filename: string;
+    bytes: Uint8Array;
+    slot: "attachment" | "bol";
+    uploadedBy?: string | null;
+  },
+): Promise<IngestResult> {
+  const pages = await screenUpload(input.filename, input.bytes);
+  return storeScreenedUpload(ctx, { ...input, pages });
 }
 
 export const CUSTOMER_DOCUMENT_READ_SQL = `
@@ -374,11 +411,40 @@ export async function listReviewQueue(ctx: PortalContext): Promise<ReviewItem[]>
         mediaType: String(row.media_type),
         pageIndex: 1,
         pageCount: 1,
-        textExcerpt: reason || null,
-        createdAt: String(row.created_at),
-      };
+      textExcerpt: reason || null,
+      createdAt: String(row.created_at),
+    };
     }),
   ];
+  const inbound = await ctx.db
+    .prepare(
+      `SELECT f.id, f.filename, f.media_type, f.screen_result, f.screen_reason, f.page_index, f.page_count, f.created_at,
+              e.load_id, e.sales_order_number, e.load_number
+       FROM inbound_email_files f
+       JOIN inbound_emails e ON e.id = f.inbound_email_id
+       WHERE f.review_status = 'pending'
+       ORDER BY f.created_at DESC`,
+    )
+    .all();
+  items.push(
+    ...inbound.map((row) => ({
+      id: String(row.id),
+      loadId: row.load_id == null ? "" : String(row.load_id),
+      salesOrderNumber: String(row.sales_order_number ?? ""),
+      loadNumber: row.load_number == null || row.load_number === "" ? null : String(row.load_number),
+      source: "inbound" as const,
+      kind: row.screen_result === "block" ? "rate_confirmation" : "uncertain",
+      screenResult: row.screen_result === "block" ? ("block" as const) : ("uncertain" as const),
+      screenReason: String(row.screen_reason ?? ""),
+      reviewStatus: "pending" as const,
+      filename: String(row.filename),
+      mediaType: String(row.media_type),
+      pageIndex: Number(row.page_index),
+      pageCount: Number(row.page_count),
+      textExcerpt: null,
+      createdAt: String(row.created_at),
+    })),
+  );
   return items.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
 }
 
@@ -448,7 +514,11 @@ export async function reviewDocument(
        FROM carrier_photos WHERE id = ?`,
     )
     .get(id);
-  if (!photo || photo.held !== 1) throw new PortalError("That page is not waiting for review", 404);
+  if (!photo || photo.held !== 1) {
+    const inbound = await reviewInboundEmailFile(ctx, id, action, reviewer);
+    if (inbound) return inbound;
+    throw new PortalError("That page is not waiting for review", 404);
+  }
   if (action === "approve" && photoScreen(photo.hold_reason == null ? null : String(photo.hold_reason)) === "block") {
     throw new PortalError("A rate confirmation cannot be released to EMIT.", 409);
   }
@@ -485,10 +555,41 @@ export async function readInternalDocumentFile(
   const photo = await ctx.db
     .prepare(`SELECT filename, media_type, storage_key FROM carrier_photos WHERE id = ? AND held = 1`)
     .get(id);
-  if (!photo) return null;
+  if (photo) {
+    return {
+      filename: String(photo.filename),
+      mediaType: allowedMedia(String(photo.media_type)),
+      bytes: await readStoredBytes(String(photo.storage_key)),
+    };
+  }
+  const inbound = await ctx.db
+    .prepare(
+      `SELECT filename, media_type, storage_key FROM inbound_email_files WHERE id = ? AND review_status = 'pending'`,
+    )
+    .get(id);
+  if (!inbound) return null;
   return {
-    filename: String(photo.filename),
-    mediaType: allowedMedia(String(photo.media_type)),
-    bytes: await readStoredBytes(String(photo.storage_key)),
+    filename: String(inbound.filename),
+    mediaType: allowedMedia(String(inbound.media_type)),
+    bytes: await readStoredBytes(String(inbound.storage_key)),
   };
+}
+
+/** Unmatched inbound mail stays with Select. Approving it would publish a file that never matched an order. */
+async function reviewInboundEmailFile(
+  ctx: PortalContext,
+  id: string,
+  action: "approve" | "delete",
+  reviewer: string,
+): Promise<{ reviewedBy: string; reviewedAt: string; reviewStatus: "approved" | "deleted" } | null> {
+  const row = await ctx.db
+    .prepare(`SELECT id, storage_key, review_status FROM inbound_email_files WHERE id = ?`)
+    .get(id);
+  if (!row || row.review_status !== "pending") return null;
+  if (action === "approve") {
+    throw new PortalError("This email did not match one order, so it cannot be released to EMIT.", 409);
+  }
+  await deleteStoredBytes(String(row.storage_key));
+  await ctx.db.prepare(`DELETE FROM inbound_email_files WHERE id = ?`).run(id);
+  return { reviewedBy: reviewer, reviewedAt: ctx.now().toISOString(), reviewStatus: "deleted" };
 }

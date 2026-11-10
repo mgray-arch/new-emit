@@ -167,6 +167,39 @@ CREATE TABLE IF NOT EXISTS document_uploads (
 
 CREATE INDEX IF NOT EXISTS document_uploads_load ON document_uploads(load_id);
 
+CREATE TABLE IF NOT EXISTS inbound_emails (
+  id TEXT PRIMARY KEY,
+  provider_id TEXT NOT NULL UNIQUE,
+  sender TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  load_id TEXT,
+  load_number TEXT,
+  sales_order_number TEXT,
+  detail TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS inbound_emails_created ON inbound_emails(created_at);
+
+CREATE TABLE IF NOT EXISTS inbound_email_files (
+  id TEXT PRIMARY KEY,
+  inbound_email_id TEXT NOT NULL,
+  sha256 TEXT NOT NULL,
+  filename TEXT NOT NULL,
+  media_type TEXT NOT NULL,
+  storage_key TEXT NOT NULL,
+  screen_result TEXT NOT NULL,
+  screen_reason TEXT NOT NULL,
+  review_status TEXT NOT NULL,
+  page_index INTEGER NOT NULL,
+  page_count INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (sha256, page_index)
+);
+
+CREATE INDEX IF NOT EXISTS inbound_email_files_review ON inbound_email_files(review_status);
+
 CREATE INDEX IF NOT EXISTS loads_ship_date ON loads(ship_date);
 CREATE INDEX IF NOT EXISTS loads_status ON loads(portal_status);
 CREATE INDEX IF NOT EXISTS loads_so ON loads(sales_order_number);

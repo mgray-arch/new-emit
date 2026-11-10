@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Shell from "@/components/shell";
 import SoNumber from "@/components/so-number";
 import { formatWhen } from "@/lib/dates";
-import { formatLoadNumber, type ReviewItem } from "@/lib/types";
+import { formatLoadNumber, type InboundEmailLog, type ReviewItem } from "@/lib/types";
 
 interface DeletedLoad {
   id: string;
@@ -14,14 +14,29 @@ interface DeletedLoad {
   deletedBy: string;
 }
 
+const MAIL_OUTCOME: Record<string, string> = {
+  released: "Filed on the order",
+  held: "Held for review",
+  unmatched: "No matching order",
+  ambiguous: "More than one order",
+  rejected_sender: "Sender not allowed",
+  duplicate: "Already filed",
+  no_attachment: "No PDF or image",
+};
+
 export default function ReviewPage() {
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [deleted, setDeleted] = useState<DeletedLoad[]>([]);
+  const [emails, setEmails] = useState<InboundEmailLog[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   async function load() {
-    const [response, removed] = await Promise.all([fetch("/api/admin/review"), fetch("/api/admin/deleted")]);
-    if (response.status === 403) {
+    const [response, removed, mail] = await Promise.all([
+      fetch("/api/admin/review"),
+      fetch("/api/admin/deleted"),
+      fetch("/api/admin/inbound-email"),
+    ]);
+    if (response.status === 403 || removed.status === 403 || mail.status === 403) {
       setError("Select staff only.");
       return;
     }
@@ -34,6 +49,10 @@ export default function ReviewPage() {
     if (removed.ok) {
       const deletedBody = await removed.json();
       setDeleted(Array.isArray(deletedBody.loads) ? deletedBody.loads : []);
+    }
+    if (mail.ok) {
+      const mailBody = await mail.json();
+      setEmails(Array.isArray(mailBody.emails) ? mailBody.emails : []);
     }
   }
 
@@ -89,9 +108,19 @@ export default function ReviewPage() {
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <span className={`badge ${item.screenResult}`}>{item.screenResult === "block" ? "Rate confirmation" : "Uncertain"}</span>
                 <strong>
-                  {item.salesOrderNumber ? <SoNumber>{item.salesOrderNumber}</SoNumber> : "Order"}
-                  {" · "}
-                  {item.loadNumber ?? "Pending"}
+                  {item.source === "inbound" ? (
+                    item.loadNumber ? (
+                      <>Inbound email · {item.loadNumber}</>
+                    ) : (
+                      "Inbound email · no matching order"
+                    )
+                  ) : (
+                    <>
+                      {item.salesOrderNumber ? <SoNumber>{item.salesOrderNumber}</SoNumber> : "Order"}
+                      {" · "}
+                      {item.loadNumber ?? "Pending"}
+                    </>
+                  )}
                 </strong>
                 <span className="mini">
                   {item.source === "photo" ? "Photo" : `Page ${item.pageIndex} of ${item.pageCount}`} · {item.filename}
@@ -100,15 +129,20 @@ export default function ReviewPage() {
               <p>{item.screenReason}</p>
               {item.screenResult === "block" ? (
                 <p className="warn">This matches a rate confirmation. It cannot be released to EMIT.</p>
+              ) : item.source === "inbound" ? (
+                <p className="mini">This email did not match one order. It stays off EMIT and off receiver links.</p>
               ) : (
                 <p className="mini">OCR could not confirm this is safe. Approving it shows it to EMIT.</p>
+              )}
+              {item.source === "inbound" && item.screenResult === "block" && (
+                <p className="mini">This email did not match one order. It stays off EMIT and off receiver links.</p>
               )}
               {item.textExcerpt && <pre className="excerpt">{item.textExcerpt}</pre>}
               <div className="actions">
                 <a className="btn secondary" href={`/api/admin/review/${item.id}`}>
                   Download
                 </a>
-                {item.screenResult === "uncertain" && (
+                {item.screenResult === "uncertain" && item.source !== "inbound" && (
                   <button className="btn" type="button" onClick={() => decide(item.id, "approve")}>
                     Approve for EMIT
                   </button>
@@ -137,6 +171,32 @@ export default function ReviewPage() {
               <button className="btn secondary" type="button" onClick={() => void restore(load.id)}>
                 Restore
               </button>
+            </article>
+          ))}
+        </div>
+        <h2>INBOUND MAIL</h2>
+        <p className="lede">
+          BOL emails the portal received. Each line is the sender, subject, matched order, and what happened. Carrier pay is not stored here.
+        </p>
+        <div className="review">
+          {emails.length === 0 && <p className="mini">No inbound mail yet.</p>}
+          {emails.map((email) => (
+            <article key={email.id}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <span className="badge uncertain">{MAIL_OUTCOME[email.outcome] ?? "Received"}</span>
+                <strong>{email.loadNumber ?? "No order"}</strong>
+                <span className="mini">{email.sender}</span>
+              </div>
+              <p>{email.subject}</p>
+              <p className="mini">
+                {email.detail}
+                {email.salesOrderNumber ? (
+                  <>
+                    {" · "}
+                    <SoNumber>{email.salesOrderNumber}</SoNumber>
+                  </>
+                ) : null}
+              </p>
             </article>
           ))}
         </div>
