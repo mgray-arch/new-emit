@@ -1,18 +1,27 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { CustomerOrder } from "@/lib/types";
+import { NO_LIVE_TRACKING, trackingCardCopy } from "@/lib/customer-copy";
+import type { CustomerOrder, TrackingStage } from "@/lib/types";
 
 export default function SelectLoadField({
   orderId,
   loadNumber,
   canCorrect = false,
+  trackingStage = "submitted",
+  carrierAssigned = false,
+  cancelled = false,
+  trackingLink = null,
   onUpdated,
 }: {
   orderId: string;
   loadNumber: string | null;
-  /** Select staff only. EMIT never gets a way to type a SAM number. */
+  /** Select staff only. EMIT sees shipment progress instead of the build status. */
   canCorrect?: boolean;
+  trackingStage?: TrackingStage;
+  carrierAssigned?: boolean;
+  cancelled?: boolean;
+  trackingLink?: string | null;
   onUpdated: (order: CustomerOrder) => void;
 }) {
   const [value, setValue] = useState(loadNumber ?? "");
@@ -49,7 +58,22 @@ export default function SelectLoadField({
     }
   }
 
-  if (!canCorrect || !editing) {
+  if (!canCorrect) {
+    const copy = trackingCardCopy({ trackingStage, carrierAssigned, cancelled });
+    return (
+      <>
+        <div className="tracking-card" data-tracking={cancelled ? "cancelled" : trackingStage} role="status" aria-label={copy.phrase}>
+          <div className="tracking-copy">
+            <span className="k">{copy.kicker}</span>
+            <strong className="tracking-number">{copy.title}</strong>
+          </div>
+        </div>
+        {!trackingLink && trackingStage !== "delivered" && !cancelled ? <p className="empty">{NO_LIVE_TRACKING}</p> : null}
+      </>
+    );
+  }
+
+  if (!editing) {
     return (
       <div className="sam-status" data-sam={stored ? "built" : "pending"} role="status">
         <div className="sam-copy">

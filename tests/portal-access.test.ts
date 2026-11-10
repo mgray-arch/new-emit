@@ -457,7 +457,7 @@ describe("SAM load number callback", () => {
     });
     const emitOrder = (await emitView.json()).order;
     expect(emitOrder.loadNumber).toBe("458940-1");
-    expect(emitOrder.buildStatus).toBe("Built in SAM: 458940-1");
+    expect(emitOrder.buildStatus).toBe("Load # 458940-1");
     expect("samUrl" in emitOrder).toBe(false);
     expect("customerCost" in emitOrder).toBe(false);
     expectNoSecrets(emitOrder);
@@ -472,7 +472,7 @@ describe("SAM load number callback", () => {
 
     const listed = await listOrdersRoute(new Request("http://portal.test/api/orders?q=SO-NO-HOOK", { headers: { cookie: viewer } }));
     const listedOrder = (await listed.json()).orders.find((order: CustomerOrder) => order.id === pending.order.id);
-    expect(listedOrder.buildStatus).toBe("Built in SAM: 458940-1");
+    expect(listedOrder.buildStatus).toBe("Load # 458940-1");
   });
 });
 

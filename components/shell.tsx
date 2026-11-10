@@ -273,7 +273,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             </Link>
           ) : null}
         </header>
-        {demo && <div className="demo-bar">Test environment. These shipments are not live SAM data.</div>}
+        {demo && <div className="demo-bar">Test environment. These shipments are sample data.</div>}
         {me?.viewAs ? (
           <div className="view-as-bar" role="status">
             <span>

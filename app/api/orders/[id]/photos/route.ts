@@ -1,3 +1,4 @@
+import { customerFacingText } from "@/lib/customer-copy";
 import { isSession, requireSession } from "@/lib/guard";
 import { errorResponse, json } from "@/lib/http";
 import { getOrder } from "@/lib/orders";
@@ -16,12 +17,14 @@ export async function GET(req: Request, context: { params: Promise<{ id: string 
     const order = await getOrder(ctx, id);
     if (!order) return json({ error: "Order not found" }, 404);
     const includeHeld = session.role === "admin";
+    const selectStaff = includeHeld && !session.viewAs;
+    const show = (value: string) => (selectStaff ? value : customerFacingText(value));
     const photos = (await listCarrierPhotos(ctx, id, includeHeld)).map((photo) => ({
       id: photo.id,
-      filename: photo.filename,
+      filename: show(photo.filename),
       mediaType: photo.mediaType,
-      source: photo.source,
-      subject: photo.subject,
+      source: show(photo.source),
+      subject: photo.subject ? show(photo.subject) : photo.subject,
       receivedAt: photo.receivedAt,
       held: includeHeld ? photo.held : false,
       holdReason: includeHeld && photo.held ? photo.holdReason : null,

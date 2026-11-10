@@ -222,7 +222,7 @@ export default function OrderPage() {
               </div>
             </div>
             {!order.loadNumber && (
-              <p className="mini">The SAM load number is not stored yet. This page is the confirmation. Submitting an order does not send email.</p>
+              <p className="mini">The load number is not stored yet. This page is the confirmation. Submitting an order does not send email.</p>
             )}
             <div className="load-row-actions">
               <TrackLink href={order.trackingLink} label="Track shipment" />
@@ -353,6 +353,10 @@ export default function OrderPage() {
                 orderId={order.id}
                 loadNumber={order.loadNumber}
                 canCorrect={canUpload}
+                trackingStage={order.trackingStage}
+                carrierAssigned={Boolean(order.carrierName?.trim() || order.carrierMc?.trim())}
+                cancelled={order.portalStatus === "cancelled"}
+                trackingLink={order.trackingLink}
                 onUpdated={(next) => {
                   setOrder(next);
                   toast("Select load number saved.");
@@ -369,9 +373,7 @@ export default function OrderPage() {
                 />
               ) : order.trackingLink ? (
                 <p className="mini">Live tracking is the Track button above.</p>
-              ) : (
-                <p className="empty">No live tracking link yet. Select adds one when the truck is on the way.</p>
-              )}
+              ) : null}
               {canUpload && order.trackingLink ? <p className="mini">Live tracking is the Track button above.</p> : null}
               <p>
                 <a className="track-link" href={order.trackingUrl} title="Shareable status page">

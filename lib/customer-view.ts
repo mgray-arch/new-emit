@@ -26,6 +26,7 @@ import {
   TRUCK_TYPES,
 } from "@/lib/types";
 import { buildStatusLabel } from "@/lib/build-status";
+import { customerBuildStatus, customerFacingText } from "@/lib/customer-copy";
 import { portalPublicUrl } from "@/lib/public-url";
 import { redactSensitiveText, sensitiveReason } from "@/lib/sensitive";
 import { samLoadUrl } from "@/lib/sam-link";
@@ -264,12 +265,17 @@ export function presentCustomerOrder(order: CustomerOrder, viewer: Viewer, optio
     const url = samLoadUrl(view.loadNumber);
     if (url) view.samUrl = url;
   }
-  view.buildStatus = buildStatusLabel(view.loadNumber, order.slackNotifiedAt);
   view.notices = presentNotices(order.notices);
   const stages = presentStageEvents(order.stageEvents);
   if (stages.length) view.stageEvents = stages;
   const tracking = presentTrackingEvents(order.trackingEvents);
   if (tracking.length) view.trackingEvents = tracking;
+  if (access.select) {
+    view.buildStatus = buildStatusLabel(view.loadNumber, order.slackNotifiedAt);
+  } else {
+    view.buildStatus = customerBuildStatus(view.loadNumber, order.slackNotifiedAt);
+    scrubCustomerCopy(view);
+  }
   if (options?.trackingBadge) view.trackingBadge = true;
   const callout = haulCalloutFrom(view.notices);
   if (callout) view.haulCallout = callout;
@@ -277,6 +283,34 @@ export function presentCustomerOrder(order: CustomerOrder, viewer: Viewer, optio
     view.carrierBadge = options.carrierBadge;
   }
   return view;
+}
+
+function scrubCustomerCopy(view: CustomerOrder): void {
+  view.comments = customerFacingText(view.comments);
+  view.createdBy = customerFacingText(view.createdBy);
+  if (view.enteredByName) {
+    const name = customerFacingText(view.enteredByName);
+    view.enteredByName = name || null;
+  }
+  if (view.buildStatus) {
+    const status = customerFacingText(view.buildStatus);
+    view.buildStatus = status || null;
+  }
+  if (view.notices) {
+    view.notices = view.notices
+      .map((notice) => ({ ...notice, text: customerFacingText(notice.text) }))
+      .filter((notice) => notice.text);
+  }
+  if (view.stageEvents) {
+    view.stageEvents = view.stageEvents
+      .map((event) => ({ ...event, text: customerFacingText(event.text) }))
+      .filter((event) => event.text);
+  }
+  if (view.trackingEvents) {
+    view.trackingEvents = view.trackingEvents
+      .map((event) => ({ ...event, text: customerFacingText(event.text) }))
+      .filter((event) => event.text);
+  }
 }
 
 function cleanLabel(value: string | undefined): string {
@@ -347,25 +381,26 @@ function numberOrZero(value: unknown): number {
 }
 
 export function toPublicTracking(order: CustomerOrder): PublicTracking {
+  const place = (value: string) => customerFacingText(value);
   return {
     loadNumber: order.loadNumber,
-    salesOrderNumber: order.salesOrderNumber,
+    salesOrderNumber: place(order.salesOrderNumber),
     portalStatus: order.portalStatus,
     trackingStage: order.trackingStage,
     timeline: order.timeline.map((event) => ({
       stage: event.stage,
       at: event.at,
-      label: event.label,
+      label: place(event.label),
     })),
     latestEta: order.latestEta,
-    originCity: order.origin.city,
-    originState: order.origin.state,
-    destinationCity: order.destination.city,
-    destinationState: order.destination.state,
-    stops: order.stops.map((stop) => ({ kind: stop.kind, city: stop.place.city, state: stop.place.state })),
+    originCity: place(order.origin.city),
+    originState: place(order.origin.state),
+    destinationCity: place(order.destination.city),
+    destinationState: place(order.destination.state),
+    stops: order.stops.map((stop) => ({ kind: stop.kind, city: place(stop.place.city), state: place(stop.place.state) })),
     shipDate: order.shipDate,
     mustDeliverDate: order.mustDeliverDate,
-    truckType: order.truckType,
+    truckType: order.truckType ? place(order.truckType) : order.truckType,
     trackingLink: order.trackingLink ?? null,
   };
 }

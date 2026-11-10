@@ -324,7 +324,7 @@ describe("carrier assignment in the portal", () => {
       params: Promise.resolve({ id: order.id }),
     });
     const seen = (await detail.json()).order as CustomerOrder;
-    expect(seen.buildStatus).toBe("Built in SAM: 459100-1");
+    expect(seen.buildStatus).toBe("Load # 459100-1");
     expect(seen.notices?.map((notice) => notice.kind)).toEqual(["assigned", "changed"]);
     expect(seen.notices?.[0].text).toContain("Carrier assigned: Northline Freight");
     expect(seen.notices?.[0].text).toContain("MC 445566");

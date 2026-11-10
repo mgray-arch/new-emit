@@ -737,7 +737,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                   <b>Select load {formatLoadNumber(submitted.loadNumber)}</b>
                 </div>
                 <p className="mini">
-                  This screen is the confirmation. Submitting an order does not send email. The Select load number stays pending until it is stored from SAM.
+                  This screen is the confirmation. Submitting an order does not send email. The load number stays blank until Select adds it.
                 </p>
               </div>
             )}

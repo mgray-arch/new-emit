@@ -552,7 +552,7 @@ const LOADS: SeedLoad[] = [
     etaOffset: null,
     customerCost: 1750,
     rateReason: null,
-    comments: "Waiting for Select to build this in SAM.",
+    comments: "Waiting for Select to schedule a carrier.",
     createdBy: "M. Gray",
   },
 ];

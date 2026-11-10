@@ -344,7 +344,8 @@ describe("POST /api/integrations/loads/import", () => {
     expect(hiddenBody.order.stops).toHaveLength(3);
     expect(hiddenBody.order.stops[1].schedule.appointmentStart).toBe("08:00");
     expect(hiddenBody.order.customerCost).toBeUndefined();
-    expect(formatEnteredBy(hiddenBody.order.enteredByName, hiddenBody.order.enteredByEmail)).toBe("Imported from SAM");
+    expect(formatEnteredBy(hiddenBody.order.enteredByName, hiddenBody.order.enteredByEmail)).toBe("Imported");
+    expect(JSON.stringify(hiddenBody)).not.toMatch(/\bSAM\b/i);
     expectNoSecrets(hiddenBody);
 
     const admin = await sessionCookie(adminSession());
