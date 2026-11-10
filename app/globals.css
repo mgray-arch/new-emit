@@ -1150,6 +1150,32 @@ html[data-theme="light"] .carrier-badge { background: #e5f6ec; color: #0f5c32; }
 html[data-theme="light"] .carrier-badge[data-kind="changed"] { background: #fbf3df; color: #6a4e08; }
 .load-row-status { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
 .stage-name { font-weight: 750; font-size: 13px; }
+.stage-menu {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  width: 11.5rem;
+  max-width: 100%;
+  min-width: 0;
+}
+.stage-menu select {
+  appearance: auto;
+  font-weight: 750;
+  font-size: 16px;
+  line-height: 1.2;
+  min-height: 44px;
+  width: 100%;
+  max-width: 100%;
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  touch-action: manipulation;
+}
+.stage-menu .confirm-box { margin-top: 0; }
+.stage-menu .error { margin: 0; }
 .stage-field { max-width: 420px; }
 .stage-field select, .stage-field strong { font-size: 16px; }
 .stage-field select { min-height: 48px; width: 100%; }
@@ -1244,6 +1270,8 @@ html[data-theme="light"] .update-banner { background: #fbf3df; color: #5c4310; }
   .load-row { padding: 16px; }
   .load-row-top { flex-direction: column; align-items: stretch; gap: 10px; }
   .load-row-status { order: -1; justify-content: flex-start; }
+  .stage-menu { width: 100%; }
+  .stage-menu .ready-confirm .btn { min-height: 48px; }
   .load-row .lane { font-size: 18px; }
   .load-row-actions { flex-direction: column; align-items: stretch; }
   .load-row-actions .btn,
