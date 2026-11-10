@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { GET as exportOrders } from "@/app/api/orders/export/route";
 import { GET as listOrdersRoute } from "@/app/api/orders/route";
-import { DISPLAY_STATUS_LABEL, SIMPLE_STEPS, attentionReasons, displayStatus, emptyListMessage, fileSummary, loadsToCsv, pickupGroup, simpleStepIndex, tripCaption } from "@/lib/load-list";
+import { DISPLAY_STATUS_LABEL, SIMPLE_STEPS, attentionReasons, compareLoadList, displayStatus, emptyListMessage, fileSummary, loadsToCsv, pickupGroup, replaceListedOrder, simpleStepIndex, sortLoadList, tripCaption } from "@/lib/load-list";
 import { listBoard, listOrders } from "@/lib/orders";
 import type { PortalContext } from "@/lib/db";
 import type { CustomerOrder } from "@/lib/types";
@@ -302,19 +302,49 @@ describe("load lists", () => {
     expectNoSecrets(adminCsv);
   });
 
-  it("lists loads newest first by created time", async () => {
-    const older = "SO-SORT-OLD";
-    const newer = "SO-SORT-NEW";
-    await ctx.db
-      .prepare(
-        `UPDATE loads SET created_at = '2026-01-01T00:00:00.000Z' WHERE id = (SELECT id FROM loads ORDER BY created_at LIMIT 1)`,
-      )
-      .run();
-    const first = await ctx.db.prepare(`SELECT id FROM loads ORDER BY created_at LIMIT 1`).get();
-    const second = await ctx.db.prepare(`SELECT id FROM loads WHERE id != ? LIMIT 1`).get(String(first?.id));
-    await ctx.db.prepare(`UPDATE loads SET sales_order_number = ?, created_at = ? WHERE id = ?`).run(older, "2026-01-02T00:00:00.000Z", String(first?.id));
-    await ctx.db.prepare(`UPDATE loads SET sales_order_number = ?, created_at = ? WHERE id = ?`).run(newer, "2026-12-01T00:00:00.000Z", String(second?.id));
-    const board = await listBoard(ctx, { q: "SO-SORT-", pageSize: 10 });
-    expect(board.orders.map((order) => order.salesOrderNumber)).toEqual([newer, older]);
+  it("sorts the loads list by ship date, with finished loads at the bottom", async () => {
+    const samples = [
+      { so: "SO-SORT-A", status: "ready_to_ship", stage: "booked", date: "2026-11-02", time: "15:30" },
+      { so: "SO-SORT-B", status: "being_prepared", stage: "submitted", date: "2026-11-02", time: "08:00" },
+      { so: "SO-SORT-C", status: "being_prepared", stage: "submitted", date: "2026-11-02", time: "" },
+      { so: "SO-SORT-D", status: "ready_to_ship", stage: "booked", date: "2026-11-05", time: "06:00" },
+      { so: "SO-SORT-E", status: "being_prepared", stage: "submitted", date: "", time: "" },
+      { so: "SO-SORT-F", status: "shipped", stage: "in_transit", date: "2026-11-10", time: "09:00" },
+      { so: "SO-SORT-G", status: "shipped", stage: "delivered", date: "2026-10-01", time: "16:00" },
+      { so: "SO-SORT-H", status: "cancelled", stage: "submitted", date: "2026-01-01", time: "07:00" },
+      { so: "SO-SORT-I", status: "shipped", stage: "in_transit", date: "", time: "" },
+    ] as const;
+    const ids = (await ctx.db.prepare(`SELECT id FROM loads ORDER BY id LIMIT ?`).all(samples.length)) as Array<{ id: string }>;
+    expect(ids).toHaveLength(samples.length);
+    for (const [index, sample] of samples.entries()) {
+      await ctx.db
+        .prepare(
+          `UPDATE loads SET sales_order_number = ?, portal_status = ?, tracking_stage = ?, ship_date = ?, ship_time = ?,
+             load_number = ?, pending_review_count = 0, tracking_link = 'https://track.example/sort', must_deliver_date = '2099-01-01'
+           WHERE id = ?`,
+        )
+        .run(sample.so, sample.status, sample.stage, sample.date || null, sample.time || null, `900-sort-${index}`, ids[index].id);
+    }
+
+    const expected = ["SO-SORT-B", "SO-SORT-A", "SO-SORT-C", "SO-SORT-D", "SO-SORT-E", "SO-SORT-F", "SO-SORT-G", "SO-SORT-H", "SO-SORT-I"];
+    const board = await listBoard(ctx, { q: "SO-SORT-", pageSize: 20 });
+    expect(board.orders.map((order) => order.salesOrderNumber)).toEqual(expected);
+    expect(board.orders.map((order) => order.salesOrderNumber)).toEqual(sortLoadList(board.orders).map((order) => order.salesOrderNumber));
+
+    const emit = await listBoard(ctx, { q: "SO-SORT-", tab: "active", includeAttention: false, pageSize: 20 });
+    expect(emit.orders.map((order) => order.salesOrderNumber)).toEqual(sortLoadList(emit.orders).map((order) => order.salesOrderNumber));
+    expect(emit.orders.some((order) => order.salesOrderNumber === "SO-SORT-B")).toBe(true);
+    expect(emit.orders.findIndex((order) => order.salesOrderNumber === "SO-SORT-F")).toBeGreaterThan(
+      emit.orders.findIndex((order) => order.salesOrderNumber === "SO-SORT-B"),
+    );
+
+    const open = board.orders.find((order) => order.salesOrderNumber === "SO-SORT-B");
+    expect(open).toBeTruthy();
+    const dropped = replaceListedOrder(board.orders, { ...open!, portalStatus: "shipped" });
+    expect(dropped.at(-1)?.salesOrderNumber).not.toBe("SO-SORT-B");
+    expect(dropped.findIndex((order) => order.salesOrderNumber === "SO-SORT-B")).toBeGreaterThan(
+      dropped.findIndex((order) => order.salesOrderNumber === "SO-SORT-D"),
+    );
+    expect(compareLoadList({ portalStatus: "ready_to_ship", shipDate: "2026-11-02", shipTime: "08:00" }, { portalStatus: "shipped", shipDate: "2026-11-02", shipTime: "08:00" })).toBeLessThan(0);
   });
 });

@@ -31,6 +31,7 @@ import {
   canPrintBol,
   canSeeCarrierIdentity,
   canSeePricing,
+  canUploadBol,
   canUploadDocs,
   canUploadPhotos,
   formatLoadNumber,
@@ -74,6 +75,7 @@ export default function OrderPage() {
   const showCarrier = canSeeCarrierIdentity(me);
   const allowPrint = canPrintBol(me) && !readOnly;
   const allowDocs = canUploadDocs(me) && !readOnly;
+  const allowBol = canUploadBol(me) && !readOnly;
   const allowPhotos = canUploadPhotos(me) && !readOnly;
 
   async function uploadFile(slot: "attachment" | "bol", file: File) {
@@ -298,7 +300,9 @@ export default function OrderPage() {
               </p>
               {selectView && (order.pendingReviewCount ?? 0) > 0 && <p className="hold">{order.pendingReviewCount} in review</p>}
               {order.documents.length === 0 ? (
-                <p className="empty">No documents yet. Add a BOL or another file from Edit load.</p>
+                <p className="empty">
+                  {allowBol || allowDocs ? "No documents yet." : "No documents yet. Add a BOL or another file from Edit load."}
+                </p>
               ) : (
                 <div className="refs">
                   {order.bolPrint ? (
@@ -337,16 +341,27 @@ export default function OrderPage() {
                   ) : null}
                 </div>
               )}
-              {allowDocs ? (
+              {allowBol || allowDocs ? (
                 <div className="grid-2">
-                  <div className="field">
-                    <label htmlFor="detail-bol">Upload BOL</label>
-                    <input id="detail-bol" type="file" onChange={(event) => event.target.files?.[0] && void uploadFile("bol", event.target.files[0])} />
-                  </div>
-                  <div className="field">
-                    <label htmlFor="detail-file">Upload another file</label>
-                    <input id="detail-file" type="file" onChange={(event) => event.target.files?.[0] && void uploadFile("attachment", event.target.files[0])} />
-                  </div>
+                  {allowBol ? (
+                    <div className="field">
+                      <label className="btn secondary file-btn" htmlFor="detail-bol">
+                        Upload BOL
+                        <input
+                          id="detail-bol"
+                          aria-label="Upload BOL"
+                          type="file"
+                          onChange={(event) => event.target.files?.[0] && void uploadFile("bol", event.target.files[0])}
+                        />
+                      </label>
+                    </div>
+                  ) : null}
+                  {allowDocs ? (
+                    <div className="field">
+                      <label htmlFor="detail-file">Upload another file</label>
+                      <input id="detail-file" type="file" onChange={(event) => event.target.files?.[0] && void uploadFile("attachment", event.target.files[0])} />
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
               <PhotoGallery orderId={order.id} loadNumber={order.loadNumber} canUpload={allowPhotos} />

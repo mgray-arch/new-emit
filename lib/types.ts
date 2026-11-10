@@ -377,6 +377,15 @@ export function canUploadDocs(viewer: Viewer): boolean {
   return canAddLoads(viewer);
 }
 
+/**
+ * Manual BOL on any load. Every Select staff session can upload one.
+ * The load owner is not consulted. EMIT keeps the same rule as other files.
+ * View-as is rejected by the route before this is used.
+ */
+export function canUploadBol(viewer: Viewer): boolean {
+  return canUploadDocs(viewer);
+}
+
 /** Freight photos. Select, Sales, and Loader. Not a pricing permission. */
 export function canUploadPhotos(viewer: Viewer): boolean {
   const access = resolveAccess(viewer);

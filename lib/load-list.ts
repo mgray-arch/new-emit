@@ -117,6 +117,71 @@ export function listEndpointNames(order: {
   };
 }
 
+/** Shipped, Delivered, and Cancelled sit below loads that are still open. */
+export function loadIsFinished(order: {
+  portalStatus?: string | null;
+  trackingStage?: string | null;
+}): boolean {
+  return order.portalStatus === "shipped" || order.portalStatus === "cancelled" || order.trackingStage === "delivered";
+}
+
+export interface LoadListSortKey {
+  id?: string | null;
+  salesOrderNumber?: string | null;
+  portalStatus?: string | null;
+  trackingStage?: string | null;
+  shipDate?: string | null;
+  shipTime?: string | null;
+}
+
+function shipDateKey(order: LoadListSortKey): string {
+  return order.shipDate?.trim() ?? "";
+}
+
+function shipTimeKey(order: LoadListSortKey, missing: string): string {
+  return order.shipTime?.trim() || missing;
+}
+
+/**
+ * Open dated loads first (soonest ship date and time; a blank time is after timed loads that day).
+ * Open loads with no ship date next, by sales order.
+ * Shipped, Delivered, and Cancelled last, most recent ship date and time first.
+ * A blank time on a finished load sorts as the start of that day. A blank date sorts last.
+ */
+export function compareLoadList(a: LoadListSortKey, b: LoadListSortKey): number {
+  const rankA = loadIsFinished(a) ? 2 : shipDateKey(a) ? 0 : 1;
+  const rankB = loadIsFinished(b) ? 2 : shipDateKey(b) ? 0 : 1;
+  if (rankA !== rankB) return rankA - rankB;
+  if (rankA === 2) {
+    const dateA = shipDateKey(a);
+    const dateB = shipDateKey(b);
+    if (dateA !== dateB) {
+      if (!dateA) return 1;
+      if (!dateB) return -1;
+      return dateB.localeCompare(dateA);
+    }
+    const time = shipTimeKey(b, "00:00").localeCompare(shipTimeKey(a, "00:00"));
+    if (time) return time;
+  } else if (rankA === 0) {
+    const date = shipDateKey(a).localeCompare(shipDateKey(b));
+    if (date) return date;
+    const time = shipTimeKey(a, "24:00").localeCompare(shipTimeKey(b, "24:00"));
+    if (time) return time;
+  }
+  const salesOrder = (a.salesOrderNumber ?? "").localeCompare(b.salesOrderNumber ?? "");
+  if (salesOrder) return salesOrder;
+  return (a.id ?? "").localeCompare(b.id ?? "");
+}
+
+export function sortLoadList<T extends LoadListSortKey>(orders: T[]): T[] {
+  return [...orders].sort(compareLoadList);
+}
+
+/** Put an updated card back into the list order. A new Shipped status drops it into the finished group. */
+export function replaceListedOrder<T extends LoadListSortKey>(rows: T[], next: T): T[] {
+  return sortLoadList(rows.map((row) => (row.id === next.id ? next : row)));
+}
+
 export function fileSummary(order: Pick<CustomerOrder, "attachmentCount" | "bolCount" | "pendingReviewCount">): string {
   const files = order.attachmentCount + order.bolCount;
   const filePart = files === 0 ? "" : files === 1 ? "1 file" : `${files} files`;

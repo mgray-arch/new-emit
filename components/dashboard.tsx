@@ -26,6 +26,7 @@ import {
   displayStatus,
   emptyListMessage,
   fileSummary,
+  replaceListedOrder,
   visibleLoadTabs,
   type LoadTab,
   type LoadTabCounts,
@@ -182,7 +183,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   }, [role]);
 
   const replaceOrder = useCallback((next: CustomerOrder) => {
-    setRows((current) => current.map((item) => (item.id === next.id ? next : item)));
+    setRows((current) => replaceListedOrder(current, next));
     setEditing((current) => (current?.id === next.id ? next : current));
   }, []);
 

@@ -5,7 +5,7 @@ import { isSession, rejectIfViewingAs, requireSession } from "@/lib/guard";
 import { errorResponse, json, PortalError } from "@/lib/http";
 import { getOrder } from "@/lib/orders";
 import { readyPortal } from "@/lib/portal";
-import { canUploadDocs } from "@/lib/types";
+import { canUploadBol, canUploadDocs } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,11 +18,12 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
     if (readonly) return readonly;
     const { id } = await context.params;
     const ctx = await readyPortal();
-    if (!canUploadDocs(session)) return json({ error: "This account can view loads but cannot add files." }, 403);
-    if (!(await getOrder(ctx, id))) return json({ error: "Order not found" }, 404);
     const form = await req.formData();
     const file = form.get("file");
     const slot = form.get("slot") === "bol" ? "bol" : "attachment";
+    const allowed = slot === "bol" ? canUploadBol(session) : canUploadDocs(session);
+    if (!allowed) return json({ error: "This account can view loads but cannot add files." }, 403);
+    if (!(await getOrder(ctx, id))) return json({ error: "Order not found" }, 404);
     if (!(file instanceof File)) throw new PortalError("Choose a file to upload");
     const bytes = new Uint8Array(await file.arrayBuffer());
     const result = await ingestDocument(ctx, { loadId: id, filename: file.name, bytes, slot });

@@ -48,7 +48,10 @@ export interface OrderFilter {
    * loads stay on Active or Delivered and the attention count is omitted.
    */
   includeAttention?: boolean;
-  /** Group by pickup date. The dashboard uses this. Other callers keep the older order. */
+  /**
+   * Loads list and CSV. Soonest ship date first, with shipped and later loads at the bottom.
+   * Other callers keep created time.
+   */
   grouped?: boolean;
   /** Internal. The CSV export asks for every matching row. */
   exportAll?: boolean;
@@ -366,9 +369,30 @@ function buildWhere(filter: OrderFilter, today: string): { sql: string; params: 
   return { sql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
 }
 
-/** Newest orders first. Created time is the default order on the loads page. */
-function listOrderSql(): string {
-  return `ORDER BY loads.created_at DESC, loads.sales_order_number ASC`;
+const FINISHED_LIST_SQL = `(portal_status IN ('shipped', 'cancelled') OR tracking_stage = 'delivered')`;
+
+/**
+ * Loads list order.
+ * Open loads with a ship date: soonest date, then soonest time. A missing time
+ * sorts after timed loads on that day.
+ * Open loads with no ship date come next, by sales order.
+ * Shipped, Delivered, and Cancelled come last. Among those, the latest ship
+ * date and time come first. A missing time sorts as the start of that day, and
+ * a missing date sorts last.
+ */
+function listOrderSql(byShipDate: boolean): string {
+  if (!byShipDate) return `ORDER BY loads.created_at DESC, loads.sales_order_number ASC`;
+  return `ORDER BY
+    CASE WHEN ${FINISHED_LIST_SQL} THEN 2 WHEN NULLIF(trim(ship_date), '') IS NULL THEN 1 ELSE 0 END ASC,
+    CASE WHEN NOT ${FINISHED_LIST_SQL} THEN NULLIF(trim(ship_date), '') END ASC,
+    CASE
+      WHEN NOT ${FINISHED_LIST_SQL} AND NULLIF(trim(ship_date), '') IS NOT NULL
+      THEN COALESCE(NULLIF(trim(ship_time), ''), '24:00')
+    END ASC,
+    CASE WHEN ${FINISHED_LIST_SQL} THEN NULLIF(trim(ship_date), '') END DESC,
+    CASE WHEN ${FINISHED_LIST_SQL} THEN COALESCE(NULLIF(trim(ship_time), ''), '00:00') END DESC,
+    loads.sales_order_number ASC,
+    loads.id ASC`;
 }
 
 export async function listOrders(ctx: PortalContext, filter: OrderFilter = {}): Promise<OrderPage> {
@@ -379,7 +403,7 @@ export async function listOrders(ctx: PortalContext, filter: OrderFilter = {}): 
   const where = buildWhere(filter, today);
   const totalRow = await ctx.db.prepare(`SELECT COUNT(*) AS n FROM loads ${where.sql}`).get(...where.params);
   const rows = (await ctx.db
-    .prepare(`${LIST_SQL_HEAD} ${where.sql} ${listOrderSql()} LIMIT ? OFFSET ?`)
+    .prepare(`${LIST_SQL_HEAD} ${where.sql} ${listOrderSql(filter.grouped === true)} LIMIT ? OFFSET ?`)
     .all(...where.params, pageSize, (page - 1) * pageSize)) as unknown as LoadRow[];
   return {
     orders: await Promise.all(rows.map((row) => rowToOrder(ctx, row, false))),
