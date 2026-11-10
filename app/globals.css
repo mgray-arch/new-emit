@@ -402,7 +402,8 @@ html[data-theme="light"] .bol-reprint { color: #8a3b12; }
   color: var(--muted);
 }
 .build-status[data-build-status="built"] { color: var(--text); }
-.sam-status {
+.sam-status,
+.tracking-card {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -414,21 +415,29 @@ html[data-theme="light"] .bol-reprint { color: #8a3b12; }
   background: var(--bg);
 }
 .sam-status[data-sam="pending"] { border-style: dashed; }
-.sam-status[data-sam="built"] { box-shadow: inset 3px 0 0 var(--orange); }
-.sam-copy { display: grid; gap: 2px; min-width: 0; }
-.sam-status .k {
+.sam-status[data-sam="built"],
+.tracking-card[data-tracking="booked"],
+.tracking-card[data-tracking="at_pickup"],
+.tracking-card[data-tracking="in_transit"],
+.tracking-card[data-tracking="delivered"] { box-shadow: inset 3px 0 0 var(--orange); }
+.sam-copy,
+.tracking-copy { display: grid; gap: 2px; min-width: 0; }
+.sam-status .k,
+.tracking-card .k {
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
-.sam-number { font-size: 1.35rem; font-weight: 750; letter-spacing: -0.02em; }
-.sam-status[data-sam="pending"] .sam-number { color: var(--muted); font-size: 1.15rem; }
+.sam-number,
+.tracking-number { font-size: 1.35rem; font-weight: 750; letter-spacing: -0.02em; }
+.sam-status[data-sam="pending"] .sam-number,
+.tracking-card[data-tracking="submitted"] .tracking-number { color: var(--muted); font-size: 1.15rem; }
 .sam-link { color: var(--text); font-weight: 650; overflow-wrap: anywhere; }
-.sam-status .text-link, .sam-edit .text-link { padding: 0; font-size: 14px; }
+.sam-status .text-link, .sam-edit .text-link, .tracking-card .text-link { padding: 0; font-size: 14px; }
 .sam-edit { display: grid; gap: 8px; }
-.sam-status .mini, .sam-edit .mini { flex-basis: 100%; margin: 0; }
+.sam-status .mini, .sam-edit .mini, .tracking-card .mini { flex-basis: 100%; margin: 0; }
 .notice-log { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; gap: 10px; }
 .notice-log p { margin: 2px 0 0; }
 .demo-hint { background: #241c14; border: 1px solid #4a3824; border-radius: 10px; padding: 10px 12px; color: #f0d3a4; font-size: 13px; margin: 12px 0; }

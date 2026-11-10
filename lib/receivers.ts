@@ -3,6 +3,7 @@ import { assertNoCarrierFields } from "@/lib/customer-view";
 import type { PortalContext } from "@/lib/db";
 import { PortalError } from "@/lib/http";
 import { listOrders } from "@/lib/orders";
+import { customerFacingText } from "@/lib/customer-copy";
 import { salesOrdersForStop } from "@/lib/sales-orders";
 import { portalPublicUrl } from "@/lib/public-url";
 import type { PortalStatus, StopKind, TimelineEvent, TrackingStage } from "@/lib/types";
@@ -215,12 +216,19 @@ export async function shipmentsForReceiver(ctx: PortalContext, company: string):
       loadNumber: order.loadNumber,
       portalStatus: order.portalStatus,
       trackingStage: order.trackingStage,
-      timeline: order.timeline,
+      timeline: order.timeline.map((event) => ({ ...event, label: customerFacingText(event.label) })),
       stops: order.stops.map((stop) => {
-        const base = { kind: stop.kind, city: stop.place.city, state: stop.place.state };
+        const base = {
+          kind: stop.kind,
+          city: customerFacingText(stop.place.city),
+          state: customerFacingText(stop.place.state),
+        };
         const ownDrop = stop.kind === "drop" && stop.place.company.trim().toLowerCase() === target;
         if (!ownDrop) return base;
-        return { ...base, salesOrders: salesOrdersForStop(order.salesOrders, stop.id) };
+        return {
+          ...base,
+          salesOrders: salesOrdersForStop(order.salesOrders, stop.id).map((number) => customerFacingText(number)),
+        };
       }),
       shipDate: order.shipDate,
       mustDeliverDate: order.mustDeliverDate,

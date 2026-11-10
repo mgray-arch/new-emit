@@ -1,3 +1,4 @@
+import { customerFacingText } from "@/lib/customer-copy";
 import { serializeCustomerOrder } from "@/lib/customer-view";
 import { listAllOrders } from "@/lib/orders";
 import type { PortalContext } from "@/lib/db";
@@ -72,7 +73,12 @@ export function buildModelRequest(
   messages: Array<{ role: "system" | "user"; content: string }>;
 } {
   const includePricing = options?.includePricing !== false;
-  const shipments = orders.map((order) => serializeCustomerOrder(order, { includePricing, includeCarrier: false, includeBolPrint: false }));
+  const shipments = orders.map((order) => {
+    const view = serializeCustomerOrder(order, { includePricing, includeCarrier: false, includeBolPrint: false });
+    view.comments = customerFacingText(view.comments);
+    view.createdBy = customerFacingText(view.createdBy);
+    return view;
+  });
   return {
     model: process.env.AI_MODEL || "gpt-4o-mini",
     messages: [

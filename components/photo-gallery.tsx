@@ -112,7 +112,7 @@ export default function PhotoGallery({
         ))}
       </div>
       {canUpload && !loadNumber && (
-        <p className="mini">Photos can be attached after a Select admin enters the SAM load number.</p>
+        <p className="mini">Photos can be attached after Select adds the load number.</p>
       )}
       {canUpload && loadNumber && (
         <div className="photo-upload">

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { NO_LIVE_TRACKING } from "@/lib/customer-copy";
 import type { CustomerOrder } from "@/lib/types";
 
 export default function TrackingLinkField({
@@ -66,7 +67,7 @@ export default function TrackingLinkField({
   if (!editing) {
     return (
       <div>
-        <p className="empty">No live tracking link yet. Select adds one when the truck is on the way.</p>
+        <p className="empty">{NO_LIVE_TRACKING}</p>
         <button className="text-link" type="button" onClick={() => setEditing(true)}>
           Add tracking link
         </button>

@@ -28,9 +28,19 @@ describe("tracking panel", () => {
     expect(pending).not.toContain("Save load number");
 
     const emit = renderToStaticMarkup(
-      createElement(SelectLoadField, { orderId: "o1", loadNumber: null, canCorrect: false, onUpdated: noop }),
+      createElement(SelectLoadField, {
+        orderId: "o1",
+        loadNumber: "467624-1",
+        canCorrect: false,
+        trackingStage: "booked",
+        carrierAssigned: true,
+        trackingLink: null,
+        onUpdated: noop,
+      }),
     );
-    expect(emit).toContain("Pending");
+    expect(emit).toContain("Booked - carrier assigned");
+    expect(emit).toContain("No live tracking link yet");
+    expect(emit).not.toMatch(/\bSAM\b/i);
     expect(emit).not.toContain("Correct");
     expect(emit).not.toContain("<input");
     expect(emit).not.toContain("Save");
