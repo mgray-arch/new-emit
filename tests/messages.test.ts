@@ -9,9 +9,12 @@ import { POST as markReadRoute } from "@/app/api/messages/read/route";
 import { GET as unreadRoute } from "@/app/api/messages/unread/route";
 import type { PortalContext } from "@/lib/db";
 import {
+  messageDestinationLabel,
   messageEmailDraft,
   messageNoticeText,
+  messageOwnerLine,
   messagePreview,
+  notifySelectOfEmitMessage,
   MESSAGE_PREVIEW_LIMIT,
 } from "@/lib/message-notify";
 import { splitMessageMentions } from "@/lib/message-types";
@@ -21,7 +24,14 @@ import { adminSession, customerSession, expectNoSecrets, seededPortal, sessionCo
 
 let ctx: PortalContext;
 const savedEnv: Record<string, string | undefined> = {};
-const ENV_KEYS = ["SLACK_MESSAGES_WEBHOOK_URL", "MESSAGE_NOTIFY_EMAILS", "AI_API_KEY", "AI_BASE_URL"];
+const ENV_KEYS = [
+  "SLACK_MESSAGES_WEBHOOK_URL",
+  "SLACK_USER_ID_DREW",
+  "SLACK_USER_ID_AINSLEY",
+  "MESSAGE_NOTIFY_EMAILS",
+  "AI_API_KEY",
+  "AI_BASE_URL",
+];
 
 beforeAll(async () => {
   ctx = await seededPortal();
@@ -539,10 +549,78 @@ describe("unread counts and Select notification", () => {
     const text = JSON.parse(calls[0].body).text as string;
     expect(text).toContain("Load 900196-1");
     expect(text).toContain("SO2196");
+    expect(text).toContain("Destination: Oklahoma City, OK");
+    expect(text).toContain("Owner: <@U0CE02REJCB>");
     expect(text).toContain("http://portal.test/messages");
     expect(text).toContain("Please confirm the dock.");
     expect(text).not.toContain(tail);
-    expect(text).not.toMatch(/carrier|8765|\$/);
+    expect(text).not.toMatch(/carrier|8765|1500|\$/);
+    expect(calls[0].body).toContain("<@U0CE02REJCB>");
+    expect(calls[0].body).not.toContain("\\u003c");
+    expect(calls[0].body).not.toContain("&lt;");
+    expect(Object.keys(JSON.parse(calls[0].body))).toEqual(["text"]);
+
+    const saved = (await ctx.db.prepare(`SELECT owner, stops_json FROM loads WHERE id = ?`).get(load.id)) as {
+      owner: string | null;
+      stops_json: string | null;
+    };
+    await ctx.db.prepare(`UPDATE loads SET owner = ?, stops_json = ? WHERE id = ?`).run(
+      "Drew",
+      JSON.stringify([
+        { kind: "pickup", place: { city: "Sheridan", state: "WY", carrierPay: 8765 } },
+        { kind: "drop", place: { city: "Midland", state: "TX", rate: 4.25 } },
+        { kind: "drop", place: { city: "Pecos", state: "TX", company: "Final Dock", lineHaul: 1500 } },
+      ]),
+      load.id,
+    );
+    calls.length = 0;
+    const multi = await postMessageRoute(
+      new Request("http://portal.test/api/messages", {
+        method: "POST",
+        headers: headers(emit, true),
+        body: JSON.stringify({ body: "Final stop is Pecos.", loadId: load.id }),
+      }),
+    );
+    expect(multi.status).toBe(201);
+    const multiBody = calls[0].body;
+    const multiText = JSON.parse(multiBody).text as string;
+    expect(multiText).toContain("Destination: Pecos, TX");
+    expect(multiText).toContain("Owner: <@U0AGS6MDBL1>");
+    expect(multiText).not.toContain("Midland");
+    expect(multiText).not.toContain("Oklahoma City");
+    expect(multiText).not.toMatch(/8765|1500|4\.25|carrier|lineHaul|\$/);
+    expect(multiBody).toContain("<@U0AGS6MDBL1>");
+    expect(multiBody).not.toContain("\\u003c");
+
+    await ctx.db.prepare(`UPDATE loads SET owner = ? WHERE id = ?`).run("Mike", load.id);
+    calls.length = 0;
+    const mike = await postMessageRoute(
+      new Request("http://portal.test/api/messages", {
+        method: "POST",
+        headers: headers(emit, true),
+        body: JSON.stringify({ body: "Mike owns this one.", loadId: load.id }),
+      }),
+    );
+    expect(mike.status).toBe(201);
+    const mikeText = JSON.parse(calls[0].body).text as string;
+    expect(mikeText).toContain("Owner: Mike");
+    expect(mikeText).not.toContain("<@");
+
+    await ctx.db.prepare(`UPDATE loads SET owner = NULL, stops_json = ? WHERE id = ?`).run("{", load.id);
+    calls.length = 0;
+    const blank = await postMessageRoute(
+      new Request("http://portal.test/api/messages", {
+        method: "POST",
+        headers: headers(emit, true),
+        body: JSON.stringify({ body: "No owner on this load.", loadId: load.id }),
+      }),
+    );
+    expect(blank.status).toBe(201);
+    const blankText = JSON.parse(calls[0].body).text as string;
+    expect(blankText).toContain("Owner: unassigned");
+    expect(blankText).toContain("Destination: Oklahoma City, OK");
+    expect(blankText).not.toContain("<@");
+    await ctx.db.prepare(`UPDATE loads SET owner = ?, stops_json = ? WHERE id = ?`).run(saved.owner, saved.stops_json, load.id);
     expect(calls[0].body.length).toBeLessThan(body.length);
     const preview = messagePreview(body);
     expect(preview.length).toBeLessThanOrEqual(MESSAGE_PREVIEW_LIMIT);
@@ -597,5 +675,160 @@ describe("unread counts and Select notification", () => {
       preview: "Hi",
       threadUrl: "/messages",
     }, {})).toBeNull();
+  });
+});
+
+describe("message slack destination and owner", () => {
+  const pecosDestination = JSON.stringify({
+    company: "Acme Dock",
+    address1: "1 Main",
+    city: "Pecos",
+    state: "tx",
+    carrierPay: 8765,
+    customerCost: 1500,
+    rate: 4.25,
+  });
+  const singleStops = JSON.stringify([
+    { kind: "pickup", place: { city: "Sheridan", state: "WY", carrierPay: 8765 } },
+    { kind: "drop", place: { city: "Midland", state: "TX", lineHaul: 1500 } },
+  ]);
+  const multiStops = JSON.stringify([
+    { kind: "pickup", place: { city: "Sheridan", state: "WY" } },
+    { kind: "drop", place: { city: "Midland", state: "TX", carrier_pay: 8765, rate: "secret" } },
+    { kind: "drop", place: { city: " Pecos ", state: " tx ", company: "Final Dock", lineHaul: 1500 } },
+  ]);
+
+  it("mentions Drew and Ainsley, and leaves an unmapped owner as plain text", () => {
+    expect(messageOwnerLine("Drew", {})).toBe("Owner: <@U0AGS6MDBL1>");
+    expect(messageOwnerLine("Ainsley", {})).toBe("Owner: <@U0CE02REJCB>");
+    expect(messageOwnerLine(" drew ", {})).toBe("Owner: <@U0AGS6MDBL1>");
+    expect(messageOwnerLine("AINSLEY", {})).toBe("Owner: <@U0CE02REJCB>");
+    expect(messageOwnerLine("Drew", { SLACK_USER_ID_DREW: "U0OVERRIDE" })).toBe("Owner: <@U0OVERRIDE>");
+    expect(messageOwnerLine("Ainsley", { SLACK_USER_ID_AINSLEY: "W0AINSLEY" })).toBe("Owner: <@W0AINSLEY>");
+    expect(messageOwnerLine("Drew", { SLACK_USER_ID_DREW: "not an id" })).toBe("Owner: <@U0AGS6MDBL1>");
+    expect(messageOwnerLine("Drew", { SLACK_USER_ID_DREW: "" })).toBe("Owner: <@U0AGS6MDBL1>");
+    expect(messageOwnerLine(null, {})).toBe("Owner: unassigned");
+    expect(messageOwnerLine("   ", {})).toBe("Owner: unassigned");
+    expect(messageOwnerLine("Mike", {})).toBe("Owner: Mike");
+    expect(messageOwnerLine("Mike Gray", {})).toBe("Owner: Mike Gray");
+    expect(messageOwnerLine("Mike Gray", {})).not.toContain("<@");
+  });
+
+  it("formats a single destination from destination_json and a multi-stop load from the final stop", () => {
+    expect(messageDestinationLabel(pecosDestination, singleStops)).toBe("Pecos, TX");
+    expect(messageDestinationLabel(JSON.stringify({ city: "Midland", state: "TX" }), multiStops)).toBe("Pecos, TX");
+    expect(messageDestinationLabel(pecosDestination, null)).toBe("Pecos, TX");
+    expect(messageDestinationLabel(JSON.stringify({ city: "Pecos" }), null)).toBe("Pecos");
+    expect(messageDestinationLabel(JSON.stringify({ state: "tx" }), null)).toBe("TX");
+    expect(messageDestinationLabel("not json", "{")).toBe("");
+    expect(messageDestinationLabel(null, null)).toBe("");
+    const emptyFinal = JSON.stringify([
+      { kind: "pickup", place: { city: "Sheridan", state: "WY" } },
+      { kind: "drop", place: { city: "Midland", state: "TX" } },
+      { kind: "drop", place: { city: " ", state: "" } },
+    ]);
+    expect(messageDestinationLabel(pecosDestination, emptyFinal)).toBe("Pecos, TX");
+  });
+
+  it("keeps the sales order in caps and leaves pay and rate fields out of the Slack text", async () => {
+    const text = messageNoticeText(
+      {
+        authorName: "M. Gray",
+        authorEmail: "m.gray@emit.example",
+        loadNumber: "900196-1",
+        salesOrderNumber: "so2196",
+        destination: messageDestinationLabel(JSON.stringify({ city: "Midland", state: "TX", carrierPay: 8765 }), multiStops),
+        owner: "Drew",
+        preview: messagePreview("Dock is open. Carrier pay is $8,765.43. Rate confirmation attached."),
+        threadUrl: "https://portal.example.com/messages",
+      },
+      {},
+    );
+    expect(text).toBe(
+      [
+        "New portal message from M. Gray (m.gray@emit.example)",
+        "Load 900196-1 · SO2196",
+        "Destination: Pecos, TX",
+        "Owner: <@U0AGS6MDBL1>",
+        "Dock is open.",
+        "https://portal.example.com/messages",
+      ].join("\n"),
+    );
+    expect(text).not.toMatch(/8765|1500|4\.25|BLACKHAWK|carrier|line haul|\$|\brate\b|Midland|secret/i);
+
+    const unmapped = messageNoticeText(
+      {
+        authorName: "M. Gray",
+        authorEmail: "m.gray@emit.example",
+        loadNumber: null,
+        salesOrderNumber: null,
+        destination: "",
+        owner: "Mike",
+        preview: "Hi",
+        threadUrl: "https://portal.example.com/messages",
+      },
+      {},
+    );
+    expect(unmapped).toContain("Destination: not set");
+    expect(unmapped).toContain("Owner: Mike");
+    expect(unmapped).not.toContain("<@");
+    expect(messageNoticeText({
+      authorName: "M. Gray",
+      authorEmail: "m.gray@emit.example",
+      loadNumber: null,
+      salesOrderNumber: null,
+      preview: "Hi",
+      threadUrl: "/messages",
+    }, {})).toContain("Owner: unassigned");
+
+    const calls: string[] = [];
+    const sent = await notifySelectOfEmitMessage(
+      {
+        authorName: "M. Gray",
+        authorEmail: "m.gray@emit.example",
+        loadNumber: "900196-1",
+        salesOrderNumber: "SO2196",
+        destination: "Pecos, TX",
+        owner: "Ainsley",
+        preview: "Please confirm the dock.",
+        threadUrl: "https://portal.example.com/messages",
+      },
+      async (_url, init) => {
+        calls.push(String(init?.body ?? ""));
+        return new Response("ok", { status: 200 });
+      },
+      { SLACK_MESSAGES_WEBHOOK_URL: "https://hooks.slack.example/messages" },
+    );
+    expect(sent.slack).toBe(true);
+    expect(calls[0]).toContain("<@U0CE02REJCB>");
+    expect(calls[0]).not.toContain("\\u003c");
+    expect(calls[0]).not.toContain("&lt;");
+    expect(JSON.parse(calls[0])).toEqual({
+      text: [
+        "New portal message from M. Gray (m.gray@emit.example)",
+        "Load 900196-1 · SO2196",
+        "Destination: Pecos, TX",
+        "Owner: <@U0CE02REJCB>",
+        "Please confirm the dock.",
+        "https://portal.example.com/messages",
+      ].join("\n"),
+    });
+
+    const failed = await notifySelectOfEmitMessage(
+      {
+        authorName: "M. Gray",
+        authorEmail: "m.gray@emit.example",
+        loadNumber: null,
+        salesOrderNumber: null,
+        owner: "Mike",
+        preview: "Hi",
+        threadUrl: "/messages",
+      },
+      async () => {
+        throw new Error("slack down");
+      },
+      { SLACK_MESSAGES_WEBHOOK_URL: "https://hooks.slack.example/messages" },
+    );
+    expect(failed.slack).toBe(false);
   });
 });
