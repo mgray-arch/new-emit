@@ -510,8 +510,8 @@ export interface ReviewItem {
   loadId: string;
   salesOrderNumber: string;
   loadNumber: string | null;
-  /** document = a PDF page or upload. photo = a carrier photo held before EMIT can see it. */
-  source: "document" | "photo";
+  /** document = a PDF page or upload. photo = a carrier photo held before EMIT can see it. inbound = mail that did not match one order. */
+  source: "document" | "photo" | "inbound";
   kind: string;
   screenResult: "block" | "uncertain";
   screenReason: string;
@@ -521,6 +521,18 @@ export interface ReviewItem {
   pageIndex: number;
   pageCount: number;
   textExcerpt: string | null;
+  createdAt: string;
+}
+
+/** One inbound BOL email, as Select sees it. No message body and no carrier pay. */
+export interface InboundEmailLog {
+  id: string;
+  sender: string;
+  subject: string;
+  outcome: string;
+  loadNumber: string | null;
+  salesOrderNumber: string;
+  detail: string;
   createdAt: string;
 }
 

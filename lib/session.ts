@@ -153,6 +153,8 @@ export function isPublicPath(pathname: string): boolean {
   if (pathname === "/api/integrations/loads/import") return true;
   // The Load Builder bot posts the SAM load number. The handler requires LOAD_BUILDER_SECRET.
   if (pathname === "/api/integrations/sam-load") return true;
+  // Resend inbound BOL mail. The handler rejects any request without a valid webhook signature.
+  if (pathname === "/api/integrations/inbound-email") return true;
   return false;
 }
 
