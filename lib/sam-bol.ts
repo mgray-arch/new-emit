@@ -59,6 +59,43 @@ function foldMc(value: string | null | undefined): string {
   return (value ?? "").trim().replace(/^mc[\s#-]*/i, "").replace(/\s+/g, "");
 }
 
+const BOL_FILENAME =
+  /(?:^|[^A-Za-z0-9])(?:select[-_\s]*)?bol[-_\s]+(\d{4,10})[-_](\d{1,3})(?!\d)/i;
+
+/** Load number in Select-BOL-468322-1….pdf, BOL-468322-1.pdf, or bol_467623-1.txt. */
+export function bolLoadNumberFromFilename(filename: string): string | null {
+  const match = filename.match(BOL_FILENAME);
+  if (!match) return null;
+  return `${match[1]}-${match[2]}`;
+}
+
+/**
+ * A bill of lading names itself and its BOL number, and does not read as carrier pay.
+ * A rate confirmation that also says "bill of lading" is not this.
+ */
+export function recognizableBolText(text: string): boolean {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (flat.length < 20) return false;
+  if (sensitiveReason(text)) return false;
+  if (!/bill\s+of\s+lading/i.test(text)) return false;
+  return /(?:bol|load)\s*#\s*:?\s*\d{4,10}\s*-\s*\d{1,3}(?!\d)/i.test(text);
+}
+
+/**
+ * The slot the user picked, upgraded when the file is a Select bill of lading.
+ * Filename Select-BOL-<load> or BOL-<load>, or a BOL header in the text.
+ */
+export function customerUploadSlot(
+  requested: "attachment" | "bol",
+  filename: string,
+  text: string,
+): "attachment" | "bol" {
+  if (requested === "bol") return "bol";
+  if (bolLoadNumberFromFilename(filename)) return "bol";
+  if (recognizableBolText(text)) return "bol";
+  return "attachment";
+}
+
 /** True when the stored company and MC are the carrier printed on the BOL. */
 export function sameBolCarrier(
   bol: { carrierName: string | null; carrierMc: string | null },

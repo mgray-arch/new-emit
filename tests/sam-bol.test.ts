@@ -223,12 +223,18 @@ describe("released BOL covers the load", () => {
     expect((await orderFrom(heldOrder.id)).carrierName ?? null).toBeNull();
 
     const attachment = await makeLoad("SO-ATTACH-ONLY");
-    const file = await uploadText(attachment.id, "notes.txt", TETON, "attachment");
+    const file = await uploadText(
+      attachment.id,
+      "notes.txt",
+      "Dock notes. Four crates are staged at the Sheridan dock for pickup tomorrow.",
+      "attachment",
+    );
     expect(file.status).toBe(200);
     const attached = await orderFrom(attachment.id);
     expect(attached.trackingStage).toBe("submitted");
     expect(attached.carrierName ?? null).toBeNull();
     expect(attached.loadNumber).toBeNull();
+    expect(attached.documents.some((doc) => doc.filename === "notes.txt" && doc.kind === "attachment")).toBe(true);
 
     const kept = await makeLoad("SO-KEEP-NUMBER");
     await ctx.db.prepare(`UPDATE loads SET load_number = ? WHERE id = ?`).run("900001-1", kept.id);

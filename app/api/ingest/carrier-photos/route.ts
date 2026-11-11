@@ -103,6 +103,7 @@ export async function POST(req: Request) {
         duplicate: result.duplicate,
         visibleToCustomer: result.visibleToCustomer,
         heldReason: result.heldReason,
+        filedAsBol: result.filedAsBol === true,
       },
       result.duplicate ? 200 : 201,
     );

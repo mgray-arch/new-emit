@@ -38,6 +38,10 @@ export async function screenPageBytes(page: {
     const screened = screenPageText(page.text);
     return { ...screened, text: page.text };
   }
+  // A text layer that already says rate confirmation is a block even when OCR cannot read the pixels.
+  // An unclear read must not become something Mike can approve onto EMIT.
+  const layerSignal = page.text?.trim() ? sensitiveReason(page.text) : null;
+  if (layerSignal) return { decision: "block", reason: layerSignal, text: page.text };
   const visual =
     page.mediaType === "application/pdf"
       ? await readPdfPageText(page.bytes)
@@ -473,14 +477,25 @@ export async function reviewDocument(
       });
       return { reviewedBy: reviewer, reviewedAt: now, reviewStatus: "deleted" };
     }
+    const bytes = await readStoredBytes(String(row.storage_key));
+    let customerKind: "attachment" | "bol" = row.kind === "bol" ? "bol" : "attachment";
+    let coverText = "";
+    try {
+      const { classifyCustomerUpload } = await import("@/lib/customer-upload");
+      const classified = await classifyCustomerUpload(String(row.filename), bytes, customerKind);
+      if (classified.blocked) {
+        throw new PortalError("A rate confirmation cannot be released to EMIT.", 409);
+      }
+      if (classified.slot === "bol") {
+        customerKind = "bol";
+        coverText = classified.text;
+      }
+    } catch (error) {
+      if (error instanceof PortalError) throw error;
+    }
     const customerId = randomUUID();
-    const customerKey = await writeStoredBytes(
-      `customer-documents/${customerId}`,
-      await readStoredBytes(String(row.storage_key)),
-      String(row.media_type),
-    );
+    const customerKey = await writeStoredBytes(`customer-documents/${customerId}`, bytes, String(row.media_type));
     await withTransaction(ctx.db, async () => {
-      const customerKind = row.kind === "bol" ? "bol" : "attachment";
       await ctx.db
         .prepare(
           `INSERT INTO customer_documents (id, load_id, kind, filename, media_type, storage_key, created_at, uploaded_by)
@@ -496,6 +511,9 @@ export async function reviewDocument(
           now,
           row.uploaded_by == null ? null : String(row.uploaded_by),
         );
+      if (customerKind === "bol") {
+        await ctx.db.prepare(`UPDATE loads SET bol_changed_at = ? WHERE id = ?`).run(now, String(row.load_id));
+      }
       await ctx.db
         .prepare(
           `UPDATE internal_documents
@@ -505,6 +523,10 @@ export async function reviewDocument(
         .run(now, reviewer, id);
       await refreshLoadReviewCount(ctx.db, String(row.load_id));
     });
+    if (coverText && customerKind === "bol") {
+      const { coverLoadFromReleasedBol } = await import("@/lib/bol-coverage");
+      await coverLoadFromReleasedBol(ctx, String(row.load_id), coverText);
+    }
     return { reviewedBy: reviewer, reviewedAt: now, reviewStatus: "approved" };
   }
 

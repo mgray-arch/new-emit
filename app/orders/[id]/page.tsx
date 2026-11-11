@@ -360,7 +360,7 @@ export default function OrderPage() {
                 <div className="grid-2">
                   {allowBol ? (
                     <div className="field">
-                      <label className="btn secondary file-btn" htmlFor="detail-bol">
+                      <label className="btn file-btn" htmlFor="detail-bol">
                         Upload BOL
                         <input
                           id="detail-bol"
@@ -369,17 +369,38 @@ export default function OrderPage() {
                           onChange={(event) => event.target.files?.[0] && void uploadFile("bol", event.target.files[0])}
                         />
                       </label>
+                      <p className="mini">The bill of lading. This fills the load number, the carrier company, and the MC.</p>
                     </div>
                   ) : null}
                   {allowDocs ? (
                     <div className="field">
-                      <label htmlFor="detail-file">Upload another file</label>
-                      <input id="detail-file" type="file" onChange={(event) => event.target.files?.[0] && void uploadFile("attachment", event.target.files[0])} />
+                      <label className="btn secondary file-btn" htmlFor="detail-file">
+                        Other file
+                        <input
+                          id="detail-file"
+                          aria-label="Upload other file"
+                          type="file"
+                          onChange={(event) => event.target.files?.[0] && void uploadFile("attachment", event.target.files[0])}
+                        />
+                      </label>
+                      <p className="mini">A POD or other paperwork. A bill of lading goes in Upload BOL. A file that is a bill of lading is still filed as the BOL.</p>
                     </div>
                   ) : null}
                 </div>
               ) : null}
-              <PhotoGallery orderId={order.id} loadNumber={order.loadNumber} canUpload={allowPhotos} />
+              <PhotoGallery
+                orderId={order.id}
+                loadNumber={order.loadNumber}
+                canUpload={allowPhotos}
+                onOrder={(next) => {
+                  setOrder(next);
+                  setCarrierDraft({
+                    carrierName: next.carrierName ?? "",
+                    carrierMc: next.carrierMc ?? "",
+                    driverName: next.driverName ?? "",
+                  });
+                }}
+              />
             </section>
 
             <section className="detail-section">

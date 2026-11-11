@@ -13,11 +13,13 @@ import {
 import { PortalError } from "@/lib/http";
 import { salesOrderMatchKeys } from "@/lib/load-import";
 import { parseLegacySalesOrders } from "@/lib/sales-orders";
-import { textFromBolBytes } from "@/lib/sam-bol";
+import { recognizableBolText, textFromBolBytes } from "@/lib/sam-bol";
 import { parseSelectLoadNumber } from "@/lib/select-load";
 import { redactSensitiveText, sensitiveReason } from "@/lib/sensitive";
 import { writeStoredBytes } from "@/lib/storage";
 import type { InboundEmailLog } from "@/lib/types";
+
+export { recognizableBolText };
 
 /** Recorded on files this webhook stores. */
 export const INBOUND_UPLOADER = "Inbound email";
@@ -340,15 +342,6 @@ export async function matchInboundOrder(
     ...new Set([...salesOrderTokens(input.subject), ...salesOrderTokens(input.filename), ...salesOrderTokens(input.text)]),
   ];
   return matchSalesOrders(ctx, tokens);
-}
-
-/** A SAM bill of lading names itself and its BOL number, and does not read as carrier pay. */
-export function recognizableBolText(text: string): boolean {
-  const flat = text.replace(/\s+/g, " ").trim();
-  if (flat.length < 20) return false;
-  if (sensitiveReason(text)) return false;
-  if (!/bill\s+of\s+lading/i.test(text)) return false;
-  return /(?:bol|load)\s*#\s*:?\s*\d{4,10}\s*-\s*\d{1,3}(?!\d)/i.test(text);
 }
 
 /** Rate-con language blocks the file even when a page read failed closed as uncertain. */

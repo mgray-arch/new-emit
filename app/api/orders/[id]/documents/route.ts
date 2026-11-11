@@ -1,6 +1,5 @@
-import { coverLoadFromReleasedBol } from "@/lib/bol-coverage";
+import { fileCustomerDocument } from "@/lib/customer-upload";
 import { presentCustomerOrder } from "@/lib/customer-view";
-import { ingestDocument } from "@/lib/documents";
 import { isSession, rejectIfViewingAs, requireSession } from "@/lib/guard";
 import { errorResponse, json, PortalError } from "@/lib/http";
 import { getOrder } from "@/lib/orders";
@@ -26,10 +25,8 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
     if (!(await getOrder(ctx, id))) return json({ error: "Order not found" }, 404);
     if (!(file instanceof File)) throw new PortalError("Choose a file to upload");
     const bytes = new Uint8Array(await file.arrayBuffer());
-    const result = await ingestDocument(ctx, { loadId: id, filename: file.name, bytes, slot });
-    if (slot === "bol" && result.releasedIds.length > 0) {
-      await coverLoadFromReleasedBol(ctx, id, result.releasedTexts.join("\n"));
-    }
+    const uploadedBy = (session.name.trim() || session.email.trim()).slice(0, 80);
+    const result = await fileCustomerDocument(ctx, { loadId: id, filename: file.name, bytes, slot, uploadedBy });
     const order = await getOrder(ctx, id);
     const presented = order ? presentCustomerOrder(order, session) : null;
     if (session.role !== "admin" || session.viewAs) return json({ order: presented });

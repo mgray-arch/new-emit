@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { formatWhen } from "@/lib/dates";
+import type { CustomerOrder } from "@/lib/types";
 
 interface PhotoItem {
   id: string;
@@ -18,10 +19,12 @@ export default function PhotoGallery({
   orderId,
   loadNumber,
   canUpload,
+  onOrder,
 }: {
   orderId: string;
   loadNumber: string | null;
   canUpload: boolean;
+  onOrder?: (order: CustomerOrder) => void;
 }) {
   const [photos, setPhotos] = useState<PhotoItem[]>([]);
   const [error, setError] = useState("");
@@ -72,7 +75,14 @@ export default function PhotoGallery({
       const response = await fetch("/api/ingest/carrier-photos", { method: "POST", body: form });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "We couldn't add that photo. Try a JPEG or PNG.");
-      if (body.duplicate) setNotice("That image is already on this load.");
+      if (body.filedAsBol) {
+        setNotice(body.visibleToCustomer ? "Filed as the bill of lading." : "Held for review. EMIT cannot see it yet.");
+        const orderResponse = await fetch(`/api/orders/${orderId}`);
+        if (orderResponse.ok) {
+          const orderBody = await orderResponse.json();
+          if (orderBody.order) onOrder?.(orderBody.order);
+        }
+      } else if (body.duplicate) setNotice("That image is already on this load.");
       else if (!body.visibleToCustomer) setNotice("Held for Select. It is on the quarantine list and EMIT cannot see it.");
       else setNotice("Photo attached.");
       await refresh();
@@ -86,7 +96,7 @@ export default function PhotoGallery({
   return (
     <section className="photo-gallery" aria-label="Carrier photos">
       <div className="label">Carrier photos</div>
-      <p className="mini">Photos of the freight. PDFs and documents go in Documents, not here.</p>
+      <p className="mini">Photos of the freight. A bill of lading goes in Upload BOL, not here.</p>
       {error && <p className="error">{error}</p>}
       {notice && <p className="mini">{notice}</p>}
       {photos.length === 0 ? <p className="mini">No photos yet.</p> : null}
