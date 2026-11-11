@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import CarrierBadge from "@/components/carrier-badge";
+import CarrierBox from "@/components/carrier-box";
 import DocumentLinks from "@/components/document-links";
 import LoadForm, { draftFromCopy, draftFromOrder, draftSalesOrderErrors, emptyDraft, payloadFromDraft, useSites, type Draft } from "@/components/load-form";
 import BuildStatus from "@/components/build-status";
@@ -14,7 +15,6 @@ import SoNumber from "@/components/so-number";
 import StatusPill from "@/components/status-pill";
 import TrackLink from "@/components/track-link";
 import TrackingLinkField from "@/components/tracking-link-field";
-import { carrierIdentityLabel } from "@/lib/carrier";
 import { formatWhenBoise } from "@/lib/dates";
 import { reprintMessage } from "@/lib/reprint";
 import DeleteLoadButton from "@/components/delete-load";
@@ -662,7 +662,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                   </div>
                   <div className="load-meta">Entered by: {formatEnteredBy(order.enteredByName, order.enteredByEmail)}</div>
                   <BuildStatus status={order.buildStatus} />
-                  {showCarrier ? <div className="load-meta">{carrierIdentityLabel(order)}</div> : null}
+                  {showCarrier ? <CarrierBox order={order} /> : null}
                   {order.bolPrint?.reprint ? (
                     <div className="reprint-banner" role="status">
                       {reprintMessage({

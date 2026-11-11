@@ -1,22 +1,21 @@
 import CarrierBadge from "@/components/carrier-badge";
+import CarrierBox from "@/components/carrier-box";
 import { formatWhen } from "@/lib/dates";
-import type { HaulCallout } from "@/lib/types";
+import type { CustomerOrder } from "@/lib/types";
 
-/** The assigned company and MC. Highlighted on the load page. No pay. */
+/** The same carrier box as the load list, plus the unseen badge and the last update time. No pay. */
 export default function CarrierCallout({
-  haul,
+  order,
   badge,
 }: {
-  haul: HaulCallout;
+  order: Pick<CustomerOrder, "carrierName" | "carrierMc" | "driverName" | "notices" | "bolPrint" | "haulCallout">;
   badge?: "assigned" | "changed" | null;
 }) {
   return (
-    <section className="carrier-callout" data-kind={haul.kind} data-fresh={badge ? "true" : "false"} aria-label="Assigned carrier">
+    <section className="carrier-panel" aria-label="Assigned carrier">
       {badge ? <CarrierBadge kind={badge} /> : null}
-      <h2>Carrier</h2>
-      <p className="carrier-name">{haul.company || "Name not provided"}</p>
-      <p className="carrier-mc">MC {haul.mc || "not provided"}</p>
-      <p className="mini">Updated {formatWhen(haul.at)}</p>
+      <CarrierBox order={order} />
+      {order.haulCallout?.at ? <p className="mini">Updated {formatWhen(order.haulCallout.at)}</p> : null}
     </section>
   );
 }
