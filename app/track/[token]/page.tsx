@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { BrandLogo } from "@/components/brand-logo";
+import SoNumber from "@/components/so-number";
 import Timeline from "@/components/timeline";
 import TrackLink from "@/components/track-link";
 import { formatDay, formatWhen } from "@/lib/dates";
@@ -39,7 +40,9 @@ export default function TrackPage() {
       {data && (
         <>
           <h1 style={{ letterSpacing: "0.04em", fontSize: 22 }}>
-            {data.salesOrderNumber} · Select load {formatLoadNumber(data.loadNumber)}
+            <SoNumber>{data.salesOrderNumber}</SoNumber>
+            {" · Select load "}
+            {formatLoadNumber(data.loadNumber)}
           </h1>
           <p className="lede">
             {STAGE_LABEL[data.trackingStage]} · {STATUS_LABEL[data.portalStatus]}

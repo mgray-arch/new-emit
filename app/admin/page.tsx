@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Shell from "@/components/shell";
+import SoNumber from "@/components/so-number";
 import type { ReviewItem } from "@/lib/types";
 
 export default function ReviewPage() {
@@ -63,7 +64,9 @@ export default function ReviewPage() {
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <span className={`badge ${item.screenResult}`}>{item.screenResult === "block" ? "Rate confirmation" : "Uncertain"}</span>
                 <strong>
-                  {item.salesOrderNumber || "Order"} · {item.loadNumber ?? "Pending"}
+                  {item.salesOrderNumber ? <SoNumber>{item.salesOrderNumber}</SoNumber> : "Order"}
+                  {" · "}
+                  {item.loadNumber ?? "Pending"}
                 </strong>
                 <span className="mini">
                   {item.source === "photo" ? "Photo" : `Page ${item.pageIndex} of ${item.pageCount}`} · {item.filename}

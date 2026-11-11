@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Shell from "@/components/shell";
+import SoNumber from "@/components/so-number";
 import type { AssistantAnswer } from "@/lib/types";
 
 const SUGGESTIONS = ["What delivers this week?", "What's in transit?", "What's booked?"];
@@ -53,7 +54,10 @@ export default function AskPage() {
                 <div className="refs">
                   {turn.answer.references.map((ref) => (
                     <a key={ref.loadNumber + ref.salesOrderNumber} href={ref.trackingUrl}>
-                      {ref.salesOrderNumber} · Select load {ref.loadNumber ?? "Pending"} · {ref.originCity} to {ref.destinationCity}
+                      <SoNumber>{ref.salesOrderNumber}</SoNumber>
+                      {" · Select load "}
+                      {ref.loadNumber ?? "Pending"}
+                      {` · ${ref.originCity} to ${ref.destinationCity}`}
                     </a>
                   ))}
                 </div>

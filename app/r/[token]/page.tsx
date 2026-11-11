@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { BrandLogo } from "@/components/brand-logo";
+import SoNumber from "@/components/so-number";
 import Timeline from "@/components/timeline";
 import TrackLink from "@/components/track-link";
 import { formatDay, formatWhen } from "@/lib/dates";
@@ -36,7 +37,12 @@ export default async function ReceiverLinkPage({ params }: { params: Promise<{ t
             {load.stops.map((stop, stopIndex) => (
               <li key={`${stop.kind}-${stopIndex}`}>
                 {stop.kind === "pickup" ? "Pickup" : "Drop"} · {stop.city}, {stop.state}
-                {stop.salesOrders?.length ? ` · SO: ${stop.salesOrders.join(", ")}` : ""}
+                {stop.salesOrders?.length ? (
+                  <>
+                    {" · "}
+                    <SoNumber>SO: {stop.salesOrders.join(", ")}</SoNumber>
+                  </>
+                ) : null}
               </li>
             ))}
           </ol>

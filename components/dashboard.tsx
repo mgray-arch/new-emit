@@ -9,11 +9,13 @@ import BuildStatus from "@/components/build-status";
 import PhotoGallery from "@/components/photo-gallery";
 import PortalStatusControl from "@/components/portal-status-control";
 import SelectLoadField from "@/components/select-load-field";
+import ListStopNames from "@/components/list-stop-names";
+import SoNumber from "@/components/so-number";
 import StatusPill from "@/components/status-pill";
 import TrackLink from "@/components/track-link";
 import TrackingLinkField from "@/components/tracking-link-field";
 import { carrierIdentityLabel } from "@/lib/carrier";
-import { formatDay, formatWhenBoise } from "@/lib/dates";
+import { formatWhenBoise } from "@/lib/dates";
 import { reprintMessage } from "@/lib/reprint";
 import { deleteConfirmText } from "@/lib/delete-confirm";
 import { listStageChoice, stageBecomesReadyToShip, type ListPortalStatus } from "@/lib/load-stage";
@@ -673,18 +675,11 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                       <StatusPill status={displayStatus(order, today, { needsAttention: selectView })} />
                     </div>
                   </div>
-                  <div className="date-grid">
-                    <div className="date-pair">
-                      <span className="k">Pickup</span>
-                      <span>{order.shipDate ? `${formatDay(order.shipDate)}${order.shipTime ? `, ${order.shipTime}` : ""}` : "Not set"}</span>
-                    </div>
-                    <div className="date-pair">
-                      <span className="k">Delivery</span>
-                      <span>{order.mustDeliverDate ? formatDay(order.mustDeliverDate) : "Not set"}</span>
-                    </div>
-                  </div>
+                  <ListStopNames order={order} />
                   <div className="load-meta">
-                    {order.salesOrderNumber} · Select load {formatLoadNumber(order.loadNumber)}
+                    <SoNumber>{order.salesOrderNumber}</SoNumber>
+                    {" · Select load "}
+                    {formatLoadNumber(order.loadNumber)}
                     {order.stops.length > 2 ? ` · ${order.stops.length} stops` : ""} · {fileSummary({ ...order, pendingReviewCount: 0 })}
                   </div>
                   <div className="load-meta">Entered by: {formatEnteredBy(order.enteredByName, order.enteredByEmail)}</div>
@@ -802,7 +797,9 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
               <div className="confirm">
                 <strong>Order submitted</strong>
                 <div className="pair">
-                  <span>{submitted.salesOrderNumber}</span>
+                  <span>
+                    <SoNumber>{submitted.salesOrderNumber}</SoNumber>
+                  </span>
                   <span>→</span>
                   <b>Select load {formatLoadNumber(submitted.loadNumber)}</b>
                 </div>

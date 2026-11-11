@@ -289,6 +289,8 @@ describe("list card stage change", () => {
     expect(delivered.status).toBe(201);
     const page = renderToStaticMarkup(await ReceiverLinkPage({ params: Promise.resolve({ token: receiver.token }) }));
     expect(page).toContain("Ready to Ship");
+    expect(page).toContain('class="so-number"');
+    expect(page).toContain("SO-LIST-DOCK");
     expect(page).not.toContain("<select");
     expect(page).not.toContain("Save as Ready to Ship");
     expect(page).not.toMatch(/carrier pay|\$|Load Builder|\bSAM\b|\bTMS\b/i);

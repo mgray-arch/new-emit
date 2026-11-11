@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import SoNumber from "@/components/so-number";
 import { StopPlace, type DraftStop } from "@/components/stop-place";
 import Timeline from "@/components/timeline";
 import TrackLink from "@/components/track-link";
@@ -347,7 +348,11 @@ function StopsEditor({
               <option value="drop">Drop</option>
             </select>
           </div>
-          {stop.kind === "drop" && soLabel(draft, stop.id) ? <p className="mini">{soLabel(draft, stop.id)}</p> : null}
+          {stop.kind === "drop" && soLabel(draft, stop.id) ? (
+            <p className="mini">
+              <SoNumber>{soLabel(draft, stop.id)}</SoNumber>
+            </p>
+          ) : null}
           <StopPlace
             stop={stop}
             sites={stop.kind === "pickup" ? sites : []}
@@ -410,7 +415,7 @@ function SalesOrdersEditor({ draft, setDraft, readOnly }: { draft: Draft; setDra
             const dropIndex = draft.stops.findIndex((stop) => stop.id === row.stopId);
             return (
               <li key={row.number}>
-                {row.number}
+                <SoNumber>{row.number}</SoNumber>
                 {multiDrop ? ` · ${dropIndex >= 0 ? stopName(draft.stops[dropIndex], dropIndex) : "Drop not set"}` : ""}
               </li>
             );

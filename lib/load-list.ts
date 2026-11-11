@@ -96,6 +96,27 @@ export function displayStatus(
   return "pending";
 }
 
+/**
+ * Names shown on a loads-list card. First pickup and final delivery.
+ * Extra stops are the ones between those two. Company text is not rewritten.
+ */
+export function listEndpointNames(order: {
+  origin: { company?: string | null };
+  destination: { company?: string | null };
+  stops?: Array<{ kind: string; place?: { company?: string | null } | null }> | null;
+}): { pickup: string; delivery: string; extraStops: number } {
+  const stops = order.stops ?? [];
+  const firstPickup = stops.find((stop) => stop.kind === "pickup");
+  const finalDelivery = [...stops].reverse().find((stop) => stop.kind === "drop");
+  const pickup = (firstPickup ? firstPickup.place?.company : order.origin.company) ?? "";
+  const delivery = (finalDelivery ? finalDelivery.place?.company : order.destination.company) ?? "";
+  return {
+    pickup: pickup.trim(),
+    delivery: delivery.trim(),
+    extraStops: stops.length > 2 ? stops.length - 2 : 0,
+  };
+}
+
 export function fileSummary(order: Pick<CustomerOrder, "attachmentCount" | "bolCount" | "pendingReviewCount">): string {
   const files = order.attachmentCount + order.bolCount;
   const filePart = files === 0 ? "" : files === 1 ? "1 file" : `${files} files`;
