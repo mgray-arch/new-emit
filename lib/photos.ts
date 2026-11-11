@@ -1,10 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import { crc32, deflateSync } from "node:zlib";
+import { fileCustomerDocument } from "@/lib/customer-upload";
 import type { PortalContext } from "@/lib/db";
 import { refreshLoadReviewCount, safeFilename } from "@/lib/documents";
 import { PortalError } from "@/lib/http";
 import { OPEN_LOAD_SQL } from "@/lib/orders";
 import { readImageText } from "@/lib/ocr";
+import { bolLoadNumberFromFilename, recognizableBolText } from "@/lib/sam-bol";
 import { sensitiveReason } from "@/lib/sensitive";
 import { readStoredBytes, writeStoredBytes } from "@/lib/storage";
 
@@ -129,6 +131,8 @@ export interface IngestPhotoResult {
   duplicate: boolean;
   visibleToCustomer: boolean;
   heldReason: string | null;
+  /** The file was a bill of lading, so it was screened as a document instead of stored as a photo. */
+  filedAsBol?: boolean;
 }
 
 function classify(input: IngestPhotoInput): ImageKind {
@@ -172,6 +176,35 @@ interface PhotoRow {
   hold_reason: string | null;
 }
 
+async function fileBolInstead(
+  ctx: PortalContext,
+  input: IngestPhotoInput,
+  loadId: string,
+  loadNumber: string,
+): Promise<IngestPhotoResult> {
+  const filed = await fileCustomerDocument(ctx, {
+    loadId,
+    filename: input.filename,
+    bytes: input.bytes,
+    slot: "bol",
+    uploadedBy: input.source.trim().slice(0, 80),
+  });
+  const visible = filed.releasedIds.length > 0;
+  return {
+    id: filed.releasedIds[0] ?? filed.heldIds[0] ?? randomUUID(),
+    loadId,
+    loadNumber,
+    sha256: createHash("sha256").update(input.bytes).digest("hex"),
+    mediaType: "application/octet-stream",
+    source: input.source.trim(),
+    receivedAt: new Date(input.receivedAt).toISOString(),
+    duplicate: false,
+    visibleToCustomer: visible,
+    heldReason: visible ? null : "Held for review.",
+    filedAsBol: true,
+  };
+}
+
 function toPhoto(row: PhotoRow): CarrierPhoto {
   return {
     id: row.id,
@@ -195,12 +228,15 @@ export async function ingestCarrierPhoto(ctx: PortalContext, input: IngestPhotoI
   const received = new Date(input.receivedAt);
   if (Number.isNaN(received.getTime())) throw new PortalError("receivedAt must be an ISO-8601 timestamp");
   const subject = input.subject?.trim() ? input.subject.trim().slice(0, 500) : null;
-  const kind = classify(input);
   const filename = safeFilename(input.filename);
-  const mediaType = MEDIA[kind];
-  const sha256 = createHash("sha256").update(input.bytes).digest("hex");
   const load = await ctx.db.prepare(`SELECT id, load_number FROM loads WHERE load_number = ? AND ${OPEN_LOAD_SQL}`).get(loadNumber);
   if (!load) throw new PortalError(`No load with SAM load number ${loadNumber}.`, 404);
+  if (bolLoadNumberFromFilename(filename)) {
+    return fileBolInstead(ctx, input, String(load.id), String(load.load_number));
+  }
+  const kind = classify(input);
+  const mediaType = MEDIA[kind];
+  const sha256 = createHash("sha256").update(input.bytes).digest("hex");
 
   const existing = await ctx.db
     .prepare(
@@ -224,6 +260,10 @@ export async function ingestCarrierPhoto(ctx: PortalContext, input: IngestPhotoI
   }
   const metaReason = photoHoldReason({ filename, source, subject, bytes: input.bytes });
   const visual = await readImageText(input.bytes);
+  const header = [printableStrings(input.bytes), visual.ok ? visual.text : ""].filter(Boolean).join("\n");
+  if (recognizableBolText(header)) {
+    return fileBolInstead(ctx, input, String(load.id), String(load.load_number));
+  }
   const pixelReason = visual.ok ? sensitiveReason(visual.text) : null;
   const unclear = !visual.ok
     ? visual.reason

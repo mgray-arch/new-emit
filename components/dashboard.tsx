@@ -812,19 +812,12 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
             {editing && (
               <div className="grid-2">
                 <div className="field">
-                  <label>Attachments</label>
-                  <label className="btn secondary file-btn">
-                    Upload attachment
-                    <input aria-label="Upload attachment" type="file" onChange={(event) => event.target.files?.[0] && upload("attachment", event.target.files[0])} />
-                  </label>
-                  <FileList docs={editing.documents.filter((doc) => doc.kind === "attachment")} />
-                </div>
-                <div className="field">
                   <label>BOL</label>
-                  <label className="btn secondary file-btn">
+                  <label className="btn file-btn">
                     Upload BOL
                     <input aria-label="Upload BOL" type="file" onChange={(event) => event.target.files?.[0] && upload("bol", event.target.files[0])} />
                   </label>
+                  <p className="mini">The bill of lading. This fills the load number, the carrier company, and the MC.</p>
                   <FileList
                     docs={editing.documents.filter((doc) => doc.kind === "bol")}
                     order={editing}
@@ -832,12 +825,31 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                     onPrinted={replaceOrder}
                   />
                 </div>
+                <div className="field">
+                  <label>Other files</label>
+                  <label className="btn secondary file-btn">
+                    Other file
+                    <input aria-label="Upload other file" type="file" onChange={(event) => event.target.files?.[0] && upload("attachment", event.target.files[0])} />
+                  </label>
+                  <p className="mini">A POD or other paperwork. A bill of lading goes in Upload BOL. A file that is a bill of lading is still filed as the BOL.</p>
+                  <FileList docs={editing.documents.filter((doc) => doc.kind === "attachment")} />
+                </div>
               </div>
             )}
             {selectView && editing && (editing.pendingReviewCount ?? 0) > 0 && (
               <p className="hold">{editing.pendingReviewCount} in review</p>
             )}
-            {editing && <PhotoGallery orderId={editing.id} loadNumber={editing.loadNumber} canUpload={selectView} />}
+            {editing && (
+              <PhotoGallery
+                orderId={editing.id}
+                loadNumber={editing.loadNumber}
+                canUpload={selectView}
+                onOrder={(order) => {
+                  setEditing(order);
+                  replaceOrder(order);
+                }}
+              />
+            )}
             <div className="actions">
               <button className="btn secondary" type="button" onClick={() => { setCreating(false); setEditing(null); }}>
                 Close
