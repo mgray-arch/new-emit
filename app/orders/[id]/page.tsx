@@ -19,7 +19,6 @@ import StatusPill from "@/components/status-pill";
 import Timeline from "@/components/timeline";
 import TrackLink from "@/components/track-link";
 import TrackingLinkField from "@/components/tracking-link-field";
-import { carrierIdentityLabel } from "@/lib/carrier";
 import { denverDate, formatDay, formatWhen, formatWhenBoise } from "@/lib/dates";
 import { formatStopSchedule } from "@/lib/stop-schedule";
 import { formatEnteredBy } from "@/lib/entered-by";
@@ -195,8 +194,7 @@ export default function OrderPage() {
             </p>
             <StageField order={order} canEdit={allowLoads && !readOnly} />
             <BuildStatus status={order.buildStatus} />
-            {showCarrier ? <p className="load-meta">{carrierIdentityLabel(order)}</p> : null}
-            {order.haulCallout ? <CarrierCallout haul={order.haulCallout} badge={order.carrierBadge} /> : null}
+            {showCarrier ? <CarrierCallout order={order} badge={order.carrierBadge} /> : null}
             {order.bolPrint?.reprint ? (
               <div className="reprint-banner" role="status">
                 {reprintMessage({

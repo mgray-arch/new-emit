@@ -1214,6 +1214,58 @@ html[data-theme="light"] .carrier-badge[data-kind="tracking"] { background: #e4e
   letter-spacing: -0.02em;
 }
 .carrier-callout .carrier-mc { margin: 2px 0 0; font-size: 16px; font-weight: 650; }
+.carrier-panel { display: grid; gap: 8px; min-width: 0; max-width: 100%; }
+.carrier-box-block { display: grid; gap: 6px; min-width: 0; max-width: 100%; }
+.carrier-box {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 10px 12px;
+  max-width: 100%;
+  min-width: 0;
+}
+.carrier-box-flag {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.carrier-box-name {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.carrier-box-mc { margin: 2px 0 0; font-size: 16px; font-weight: 650; overflow-wrap: anywhere; }
+.carrier-box-was { margin: 6px 0 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
+.carrier-box[data-tone="assigned"] {
+  background: #143d28;
+  color: #d8f5e4;
+  border-color: #3cba6c;
+}
+.carrier-box[data-tone="changed"] {
+  background: #4a1820;
+  color: #ffd6d9;
+  border-color: #e15b64;
+}
+.carrier-box[data-tone="none"] {
+  background: var(--bg);
+  color: var(--muted);
+  border-color: var(--line);
+}
+.carrier-box[data-tone="none"] .carrier-box-name { font-size: 18px; font-weight: 700; }
+html[data-theme="light"] .carrier-box[data-tone="assigned"] {
+  background: #e5f6ec;
+  color: #0f5c32;
+  border-color: #8dceb0;
+}
+html[data-theme="light"] .carrier-box[data-tone="changed"] {
+  background: #fde8ea;
+  color: #8f1522;
+  border-color: #e15b64;
+}
 .update-banner {
   display: flex;
   align-items: center;
@@ -1307,7 +1359,8 @@ html[data-theme="light"] .update-banner { background: #fbf3df; color: #5c4310; }
     font-weight: 700;
   }
   .photo-card figcaption .btn { width: 100%; min-height: 48px; }
-  .carrier-callout .carrier-name { font-size: 24px; }
+  .carrier-callout .carrier-name, .carrier-box-name { font-size: 24px; }
+  .carrier-box[data-tone="none"] .carrier-box-name { font-size: 18px; }
   .page.messages-page { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
 }
 

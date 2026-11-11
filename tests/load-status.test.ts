@@ -117,13 +117,28 @@ describe("build status label", () => {
     expect(history).not.toMatch(/pay|rate|\$|email/i);
     const callout = renderToStaticMarkup(
       createElement(CarrierCallout, {
-        haul: { company: "Northline Freight", mc: "445566", at: "2026-11-03T16:00:00.000Z", kind: "assigned" },
+        order: {
+          carrierName: "Northline Freight",
+          carrierMc: "445566",
+          driverName: null,
+          notices: [
+            {
+              at: "2026-11-03T16:00:00.000Z",
+              kind: "assigned",
+              text: "Carrier assigned: Northline Freight. MC 445566.",
+              company: "Northline Freight",
+              mc: "445566",
+            },
+          ],
+          haulCallout: { company: "Northline Freight", mc: "445566", at: "2026-11-03T16:00:00.000Z", kind: "assigned" },
+        },
         badge: "assigned",
       }),
     );
     expect(callout).toContain("Northline Freight");
     expect(callout).toContain("MC 445566");
     expect(callout).toContain("Carrier assigned");
+    expect(callout).toContain('data-tone="assigned"');
     expect(callout).not.toMatch(/pay|rate|\$/i);
     expect(renderToStaticMarkup(createElement(CarrierBadge, { kind: "changed" }))).toContain("Carrier changed");
     expect(renderToStaticMarkup(createElement(UpdateBanner, { count: 2 }))).toContain("2 orders updated since your last visit");
