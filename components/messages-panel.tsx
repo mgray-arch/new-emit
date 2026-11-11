@@ -1,80 +1,52 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Shell from "@/components/shell";
 import SoNumber from "@/components/so-number";
+import { MessageComposer, MessageList } from "@/components/message-thread";
 import { formatWhen } from "@/lib/dates";
-import { splitMessageMentions, type LoadOption, type MessageLoadRef, type MessageView } from "@/lib/message-types";
+import type { LoadOption, MessageView, ThreadLoadRef, ThreadSummary } from "@/lib/message-types";
 
 const POLL_MS = 15_000;
 
-function laneText(originCity: string, originState: string, destinationCity: string, destinationState: string): string {
-  if (!originCity || !destinationCity) return "";
-  return ` · ${originCity}, ${originState} → ${destinationCity}, ${destinationState}`;
+function placeLabel(city: string, state: string): string {
+  if (city && state) return `${city}, ${state}`;
+  return city || state;
 }
 
-function LoadLabel({ load }: { load: MessageLoadRef }) {
-  const lane = laneText(load.originCity, load.originState, load.destinationCity, load.destinationState);
-  if (load.loadNumber) {
-    return (
-      <>
-        {`Load ${load.loadNumber}`}
-        {load.salesOrderNumber ? (
-          <>
-            {" · "}
-            <SoNumber>{load.salesOrderNumber}</SoNumber>
-          </>
-        ) : null}
-        {lane}
-      </>
-    );
-  }
-  return (
-    <>
-      {load.salesOrderNumber ? <SoNumber>{load.salesOrderNumber}</SoNumber> : "Load"}
-      {lane}
-    </>
-  );
+function laneLabel(load: ThreadLoadRef): string {
+  const origin = placeLabel(load.originCity, load.originState);
+  const destination = placeLabel(load.destinationCity, load.destinationState);
+  if (origin && destination) return `${origin} → ${destination}`;
+  return origin || destination;
 }
 
 function OptionLabel({ load }: { load: LoadOption }) {
+  const lane = laneLabel({
+    id: load.id,
+    loadNumber: load.loadNumber,
+    salesOrderNumber: load.salesOrderNumber,
+    originCity: load.originCity,
+    originState: load.originState,
+    destinationCity: load.destinationCity,
+    destinationState: load.destinationState,
+    owner: null,
+  });
   return (
     <>
       {`${load.loadNumber || "Pending"} · `}
       <SoNumber>{load.salesOrderNumber}</SoNumber>
-      {laneText(load.originCity, load.originState, load.destinationCity, load.destinationState)}
+      {lane ? ` · ${lane}` : ""}
     </>
   );
 }
 
-function mergeMessages(current: MessageView[], incoming: MessageView[]): MessageView[] {
-  const byId = new Map<string, MessageView>();
-  for (const message of current) byId.set(message.id, message);
-  for (const message of incoming) byId.set(message.id, message);
-  return [...byId.values()].sort((left, right) => left.seq - right.seq);
-}
-
-function MessageText({ message }: { message: MessageView }) {
-  const parts = splitMessageMentions(message.body, message.mentions);
-  return (
-    <p className="msg-body">
-      {parts.map((part, index) =>
-        part.orderId ? (
-          <Link key={`${part.orderId}-${index}`} href={`/orders/${part.orderId}`} className="text-link">
-            {part.text}
-          </Link>
-        ) : (
-          <span key={index}>{part.text}</span>
-        ),
-      )}
-    </p>
-  );
-}
-
 export default function MessagesPanel() {
+  const [threads, setThreads] = useState<ThreadSummary[]>([]);
   const [messages, setMessages] = useState<MessageView[]>([]);
-  const [hasMore, setHasMore] = useState(false);
+  const [openSummary, setOpenSummary] = useState<ThreadSummary | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [pinnedLoadId, setPinnedLoadId] = useState<string | null>(null);
   const [problem, setProblem] = useState("");
   const [formError, setFormError] = useState("");
   const [body, setBody] = useState("");
@@ -82,20 +54,23 @@ export default function MessagesPanel() {
   const [loading, setLoading] = useState(true);
   const [readOnly, setReadOnly] = useState(false);
   const [accessKnown, setAccessKnown] = useState(false);
+  const [chatOn, setChatOn] = useState<boolean | null>(null);
+  const [query, setQuery] = useState("");
+  const [unreadOnly, setUnreadOnly] = useState(false);
+  const [mineOnly, setMineOnly] = useState(false);
+  const [side, setSide] = useState<"" | "emit" | "select">("");
+  const [showNew, setShowNew] = useState(false);
   const [loadId, setLoadId] = useState("");
   const [loadQuery, setLoadQuery] = useState("");
   const [loads, setLoads] = useState<LoadOption[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [chatOn, setChatOn] = useState<boolean | null>(null);
-  const scroller = useRef<HTMLDivElement>(null);
-  const readOnlyRef = useRef(false);
-  const markReadRef = useRef(false);
-  const seeded = useRef(false);
-  const newest = messages[messages.length - 1]?.seq ?? 0;
 
   useEffect(() => {
-    const id = new URLSearchParams(window.location.search).get("load");
-    if (id) setLoadId(id);
+    const params = new URLSearchParams(window.location.search);
+    const thread = params.get("thread");
+    const load = params.get("load");
+    if (thread) setOpenId(thread);
+    if (load) setPinnedLoadId(load);
   }, []);
 
   useEffect(() => {
@@ -106,8 +81,6 @@ export default function MessagesPanel() {
         if (cancel) return;
         const next = Boolean(me?.readOnly);
         const enabled = Boolean(me?.chatEnabled);
-        readOnlyRef.current = next;
-        markReadRef.current = Boolean(me) && enabled && !next;
         setReadOnly(next);
         setChatOn(me ? enabled : null);
         setAccessKnown(true);
@@ -121,7 +94,7 @@ export default function MessagesPanel() {
   }, []);
 
   useEffect(() => {
-    if (chatOn !== true) return;
+    if (chatOn !== true || !showNew) return;
     const timer = window.setTimeout(() => {
       const params = new URLSearchParams();
       if (loadQuery.trim()) params.set("q", loadQuery.trim());
@@ -134,13 +107,22 @@ export default function MessagesPanel() {
         .catch(() => undefined);
     }, 200);
     return () => window.clearTimeout(timer);
-  }, [loadQuery, loadId, chatOn]);
+  }, [loadQuery, loadId, chatOn, showNew]);
 
   useEffect(() => {
+    if (!accessKnown || chatOn !== true) {
+      if (chatOn === false) setLoading(false);
+      return;
+    }
     let cancel = false;
-    async function pull() {
+    async function pullBoard() {
+      const params = new URLSearchParams();
+      if (query.trim()) params.set("q", query.trim());
+      if (unreadOnly) params.set("unread", "1");
+      if (mineOnly) params.set("mine", "1");
+      if (side) params.set("side", side);
       try {
-        const response = await fetch("/api/messages");
+        const response = await fetch(`/api/messages?${params}`);
         if (response.status === 403) {
           if (!cancel) {
             setChatOn(false);
@@ -149,46 +131,68 @@ export default function MessagesPanel() {
           return;
         }
         if (!response.ok) {
-          if (!cancel) setProblem("We couldn't load messages. Refresh the page and try again.");
+          if (!cancel) setProblem("We couldn't load threads. Refresh the page and try again.");
           return;
         }
-        const payload = (await response.json()) as { messages: MessageView[]; hasMore: boolean };
+        const payload = (await response.json()) as { threads: ThreadSummary[] };
         if (cancel) return;
-        setMessages((current) => mergeMessages(current, payload.messages));
-        if (!seeded.current) {
-          setHasMore(payload.hasMore);
-          seeded.current = true;
-        }
+        setThreads(payload.threads);
         setProblem("");
-        if (markReadRef.current) {
-          const marked = await fetch("/api/messages/read", { method: "POST" });
-          if (marked.ok) window.dispatchEvent(new Event("emit-messages-read"));
-        }
       } catch {
-        if (!cancel) setProblem("We couldn't load messages. Refresh the page and try again.");
+        if (!cancel) setProblem("We couldn't load threads. Refresh the page and try again.");
       } finally {
         if (!cancel) setLoading(false);
       }
     }
-    if (!accessKnown || chatOn !== true) {
-      if (chatOn === false && !cancel) setLoading(false);
-      return;
-    }
-    void pull();
-    const timer = window.setInterval(() => void pull(), POLL_MS);
+    const timer = window.setTimeout(() => void pullBoard(), 200);
+    const poll = window.setInterval(() => void pullBoard(), POLL_MS);
     return () => {
       cancel = true;
-      window.clearInterval(timer);
+      window.clearTimeout(timer);
+      window.clearInterval(poll);
     };
-  }, [accessKnown, chatOn]);
+  }, [accessKnown, chatOn, query, unreadOnly, mineOnly, side]);
 
   useEffect(() => {
-    const el = scroller.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [newest]);
+    if (chatOn !== true) return;
+    if (!openId && !pinnedLoadId) return;
+    let cancel = false;
+    async function pullThread() {
+      const params = new URLSearchParams();
+      if (openId) params.set("thread", openId);
+      else if (pinnedLoadId) params.set("load", pinnedLoadId);
+      try {
+        const response = await fetch(`/api/messages?${params}`);
+        if (!response.ok) return;
+        const payload = (await response.json()) as { thread: ThreadSummary | null; messages: MessageView[] };
+        if (cancel) return;
+        setMessages(payload.messages);
+        setOpenSummary(payload.thread);
+        if (payload.thread) {
+          setOpenId(payload.thread.id);
+          if (!readOnly) {
+            const marked = await fetch("/api/messages/read", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ threadId: payload.thread.id }),
+            });
+            if (marked.ok) window.dispatchEvent(new Event("emit-messages-read"));
+          }
+        }
+      } catch {
+        /* The board list still shows when one thread cannot be opened. */
+      }
+    }
+    void pullThread();
+    const poll = window.setInterval(() => void pullThread(), POLL_MS);
+    return () => {
+      cancel = true;
+      window.clearInterval(poll);
+    };
+  }, [chatOn, openId, pinnedLoadId, readOnly]);
 
   useEffect(() => {
+    if (!openId && !pinnedLoadId) return;
     const root = document.documentElement;
     const viewport = window.visualViewport;
     if (!viewport) return;
@@ -212,20 +216,9 @@ export default function MessagesPanel() {
       root.style.removeProperty("--vv-offset");
       root.style.removeProperty("--keyboard-inset");
     };
-  }, []);
+  }, [openId, pinnedLoadId]);
 
-  async function loadEarlier() {
-    const oldest = messages[0];
-    if (!oldest) return;
-    const response = await fetch(`/api/messages?beforeSeq=${oldest.seq}`);
-    if (!response.ok) return;
-    const payload = (await response.json()) as { messages: MessageView[]; hasMore: boolean };
-    setMessages((current) => mergeMessages(current, payload.messages));
-    setHasMore(payload.hasMore);
-  }
-
-  async function send(event: React.FormEvent) {
-    event.preventDefault();
+  async function send(target: { threadId?: string | null; loadId?: string | null }) {
     const text = body.trim();
     if (!text || sending || readOnly) return;
     setSending(true);
@@ -233,7 +226,7 @@ export default function MessagesPanel() {
     const response = await fetch("/api/messages", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ body: text, loadId: loadId || null }),
+      body: JSON.stringify({ body: text, threadId: target.threadId || null, loadId: target.loadId || null }),
     });
     const payload = (await response.json().catch(() => null)) as { message?: MessageView; error?: string } | null;
     setSending(false);
@@ -242,19 +235,40 @@ export default function MessagesPanel() {
       return;
     }
     setBody("");
-    setMessages((current) => mergeMessages(current, [payload.message!]));
-    if (markReadRef.current) {
-      const marked = await fetch("/api/messages/read", { method: "POST" });
+    setShowNew(false);
+    setOpenId(payload.message.threadId);
+    setPinnedLoadId(payload.message.load?.id ?? target.loadId ?? null);
+    setMessages((current) => {
+      if (current.some((message) => message.id === payload.message!.id)) return current;
+      if (openId && payload.message!.threadId !== openId) return [payload.message!];
+      return [...current, payload.message!];
+    });
+    if (!readOnly && payload.message.threadId) {
+      const marked = await fetch("/api/messages/read", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ threadId: payload.message.threadId }),
+      });
       if (marked.ok) window.dispatchEvent(new Event("emit-messages-read"));
     }
   }
 
-  const selectedLoad = loads.find((load) => load.id === loadId) ?? null;
-
-  function chooseLoad(id: string) {
-    setLoadId(id);
-    setPickerOpen(false);
+  function closeThread() {
+    setOpenId(null);
+    setPinnedLoadId(null);
+    setOpenSummary(null);
+    setMessages([]);
+    setBody("");
+    setFormError("");
+    const url = new URL(window.location.href);
+    url.searchParams.delete("thread");
+    url.searchParams.delete("load");
+    window.history.replaceState(null, "", url.pathname);
   }
+
+  const openThread = openSummary ?? threads.find((thread) => thread.id === openId) ?? null;
+  const threadOpen = Boolean(openId || pinnedLoadId);
+  const selectedLoad = loads.find((load) => load.id === loadId) ?? null;
 
   if (chatOn === false) {
     return (
@@ -269,117 +283,215 @@ export default function MessagesPanel() {
 
   return (
     <Shell>
-      <main className="page messages-page">
+      <main className={threadOpen ? "page messages-page thread-open" : "page messages-page"}>
         <h1>Messages</h1>
-        <p className="lede">
-          One thread for EMIT and Select. Pick a load or type its number. People reply here. The assistant does not. Carrier
-          pay and rate confirmations stay off this thread.
-        </p>
-        {problem ? <p className="warn">{problem}</p> : null}
-        <div className="thread" ref={scroller} role="log" aria-label="Messages">
-          {hasMore ? (
-            <button className="btn secondary" type="button" onClick={() => void loadEarlier()}>
-              Earlier messages
+        {threadOpen ? (
+          <section className="thread-pane" aria-label="Thread">
+            <button className="btn secondary thread-back" type="button" onClick={closeThread}>
+              All threads
             </button>
-          ) : null}
-          {loading ? <p className="mini">Loading messages…</p> : null}
-          {!loading && messages.length === 0 ? (
-            <p className="empty">No messages yet. Write the note here. Add a load if it is about one.</p>
-          ) : null}
-          {messages.map((message) => (
-            <article key={message.id} className={message.mine ? "msg mine" : "msg"}>
-              <div className="msg-meta">
-                <span>
-                  {message.authorName} ({message.authorEmail}) · {message.side === "select" ? "Select" : "EMIT"}
-                </span>
-                <time dateTime={message.createdAt}>{formatWhen(message.createdAt)}</time>
-              </div>
-              <MessageText message={message} />
-              {message.load ? (
-                <div className="msg-load">
-                  {message.load.id ? (
-                    <Link href={`/orders/${message.load.id}`} className="text-link">
-                      <LoadLabel load={message.load} />
-                    </Link>
-                  ) : (
-                    <span>
-                      <LoadLabel load={message.load} />
-                    </span>
-                  )}
-                </div>
-              ) : null}
-            </article>
-          ))}
-        </div>
-        {readOnly ? (
-          <p className="mini">View-as is read-only. Switch back to Select view to send a message.</p>
+            <ThreadHeading thread={openThread} />
+            <div className="thread" role="log" aria-label="Replies">
+              {messages.length === 0 ? <p className="empty">No replies yet. The first note starts this thread.</p> : null}
+              <MessageList messages={messages} />
+            </div>
+            <MessageComposer
+              body={body}
+              setBody={setBody}
+              sending={sending}
+              error={formError}
+              readOnly={readOnly}
+              placeholder={openThread?.kind === "general" ? "Reply in General" : "Reply on this load"}
+              onSubmit={() => void send({ threadId: openId, loadId: openId ? null : pinnedLoadId })}
+            />
+          </section>
         ) : (
-          <form className="composer" onSubmit={(event) => void send(event)}>
-            <div className="load-picker">
-              <span className="label" id="load-picker-label">
-                Load, if this is about one
-              </span>
-              <button
-                type="button"
-                className="load-picker-toggle"
-                aria-expanded={pickerOpen}
-                aria-controls="load-picker-list"
-                aria-labelledby="load-picker-label"
-                onClick={() => setPickerOpen((open) => !open)}
-              >
-                <span>{selectedLoad ? <OptionLabel load={selectedLoad} /> : loadId ? "Selected load" : "No specific load"}</span>
-                <span className="load-picker-action">{pickerOpen ? "Close" : "Choose"}</span>
-              </button>
-              {pickerOpen ? (
-                <div id="load-picker-list" className="load-picker-panel">
-                  <input
-                    aria-label="Search loads"
-                    placeholder="Search load number, SO, or city"
-                    value={loadQuery}
-                    onChange={(event) => setLoadQuery(event.target.value)}
-                  />
-                  <button type="button" className={loadId ? "load-picker-option" : "load-picker-option on"} onClick={() => chooseLoad("")}>
-                    No specific load
-                  </button>
-                  {loads.map((load) => (
-                    <button
-                      key={load.id}
-                      type="button"
-                      className={load.id === loadId ? "load-picker-option on" : "load-picker-option"}
-                      onClick={() => chooseLoad(load.id)}
-                    >
-                      <OptionLabel load={load} />
-                    </button>
-                  ))}
-                  {loads.length === 0 ? <p className="mini">No loads match that search.</p> : null}
-                </div>
-              ) : null}
-            </div>
-            <label className="field">
-              <span>Message</span>
-              <textarea
-                aria-label="Message"
-                maxLength={2000}
-                placeholder="Write to EMIT and Select."
-                value={body}
-                onChange={(event) => setBody(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                    event.preventDefault();
-                    event.currentTarget.form?.requestSubmit();
-                  }
-                }}
+          <>
+            <p className="lede">
+              Each load has one thread. Reply there and the load stays attached, so you do not type the load number again. Carrier
+              pay and rate confirmations stay off these threads.
+            </p>
+            {problem ? <p className="warn">{problem}</p> : null}
+            <div className="thread-tools">
+              <input
+                aria-label="Search threads"
+                placeholder="Search SO, load, city, or reply"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
               />
-            </label>
-            {formError ? <p className="warn">{formError}</p> : null}
-            <div className="composer-actions">
-              <button className="btn" type="submit" disabled={sending || !body.trim()}>
-                {sending ? "Sending…" : "Send"}
+              <div className="thread-filters" role="group" aria-label="Filter threads">
+                <button type="button" aria-pressed={unreadOnly} title="Threads with replies you have not read" onClick={() => setUnreadOnly((on) => !on)}>
+                  Unread
+                </button>
+                <button type="button" aria-pressed={mineOnly} title="Loads you own" onClick={() => setMineOnly((on) => !on)}>
+                  My loads
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={side === "emit"}
+                  title="Latest reply is from EMIT"
+                  onClick={() => setSide((current) => (current === "emit" ? "" : "emit"))}
+                >
+                  EMIT
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={side === "select"}
+                  title="Latest reply is from Select"
+                  onClick={() => setSide((current) => (current === "select" ? "" : "select"))}
+                >
+                  Select
+                </button>
+              </div>
+            </div>
+            <div className="composer-actions thread-new-action">
+              <button className="btn secondary" type="button" onClick={() => setShowNew((open) => !open)}>
+                {showNew ? "Close" : "New message"}
               </button>
             </div>
-          </form>
+            {showNew ? (
+              <form
+                className="composer"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void send({ loadId: loadId || null });
+                }}
+              >
+                <div className="load-picker">
+                  <span className="label" id="load-picker-label">
+                    Load
+                  </span>
+                  <button
+                    type="button"
+                    className="load-picker-toggle"
+                    aria-expanded={pickerOpen}
+                    aria-controls="load-picker-list"
+                    aria-labelledby="load-picker-label"
+                    onClick={() => setPickerOpen((open) => !open)}
+                  >
+                    <span>{selectedLoad ? <OptionLabel load={selectedLoad} /> : "General — not about one load"}</span>
+                    <span className="load-picker-action">{pickerOpen ? "Close" : "Choose"}</span>
+                  </button>
+                  {pickerOpen ? (
+                    <div id="load-picker-list" className="load-picker-panel">
+                      <input
+                        aria-label="Search loads"
+                        placeholder="Search load number, SO, or city"
+                        value={loadQuery}
+                        onChange={(event) => setLoadQuery(event.target.value)}
+                      />
+                      <button type="button" className={loadId ? "load-picker-option" : "load-picker-option on"} onClick={() => { setLoadId(""); setPickerOpen(false); }}>
+                        General — not about one load
+                      </button>
+                      {loads.map((load) => (
+                        <button
+                          key={load.id}
+                          type="button"
+                          className={load.id === loadId ? "load-picker-option on" : "load-picker-option"}
+                          onClick={() => {
+                            setLoadId(load.id);
+                            setPickerOpen(false);
+                          }}
+                        >
+                          <OptionLabel load={load} />
+                        </button>
+                      ))}
+                      {loads.length === 0 ? <p className="mini">No loads match that search.</p> : null}
+                    </div>
+                  ) : null}
+                </div>
+                <label className="field">
+                  <span>Message</span>
+                  <textarea
+                    aria-label="Message"
+                    maxLength={2000}
+                    placeholder="Write the first note. Replies stay in this thread."
+                    value={body}
+                    onChange={(event) => setBody(event.target.value)}
+                  />
+                </label>
+                {formError ? <p className="warn">{formError}</p> : null}
+                <div className="composer-actions">
+                  <button className="btn" type="submit" disabled={sending || !body.trim() || readOnly}>
+                    {sending ? "Sending…" : "Send"}
+                  </button>
+                </div>
+                {readOnly ? <p className="mini">View-as is read-only. Switch back to Select view to send a message.</p> : null}
+              </form>
+            ) : null}
+            {loading ? <p className="mini">Loading threads…</p> : null}
+            {!loading && threads.length === 0 ? (
+              <p className="empty">
+                {query || unreadOnly || mineOnly || side
+                  ? "No threads match those filters."
+                  : "No messages yet. Start one on a load, or write a general note."}
+              </p>
+            ) : null}
+            <ul className="thread-board">
+              {threads.map((thread) => (
+                <li key={thread.id}>
+                  <button
+                    type="button"
+                    className={thread.unread > 0 ? "thread-row unread" : "thread-row"}
+                    onClick={() => {
+                      setOpenSummary(thread);
+                      setOpenId(thread.id);
+                      setPinnedLoadId(thread.load?.id ?? null);
+                      setMessages([]);
+                      setFormError("");
+                    }}
+                  >
+                    <span className="thread-row-top">
+                      {thread.kind === "general" || !thread.load?.salesOrderNumber ? (
+                        <strong>General</strong>
+                      ) : (
+                        <SoNumber>{thread.load.salesOrderNumber}</SoNumber>
+                      )}
+                      {thread.load ? <span>{thread.load.loadNumber ? `Load ${thread.load.loadNumber}` : "Load number pending"}</span> : null}
+                      {thread.unread > 0 ? (
+                        <span className="nav-count" aria-label={`${thread.unread} unread`}>
+                          {thread.unread > 99 ? "99+" : thread.unread}
+                        </span>
+                      ) : null}
+                    </span>
+                    {thread.load ? (
+                      <span className="thread-lane">
+                        {laneLabel(thread.load) || "Lane not set"}
+                        {` · Owner ${thread.load.owner || "unassigned"}`}
+                      </span>
+                    ) : (
+                      <span className="thread-lane">Notes that are not about one load</span>
+                    )}
+                    <span className="thread-preview">
+                      <span>
+                        {thread.latest.authorName} · {thread.latest.side === "select" ? "Select" : "EMIT"} ·{" "}
+                        <time dateTime={thread.latest.createdAt}>{formatWhen(thread.latest.createdAt)}</time>
+                      </span>
+                      <span className="thread-preview-text">{thread.latest.preview}</span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </main>
     </Shell>
+  );
+}
+
+function ThreadHeading({ thread }: { thread: ThreadSummary | null }) {
+  if (!thread) return <p className="lede">This load does not have a note yet.</p>;
+  if (thread.kind === "general" || !thread.load) {
+    return <p className="lede">General. Notes that are not about one load.</p>;
+  }
+  const lane = laneLabel(thread.load);
+  return (
+    <p className="lede">
+      <SoNumber>{thread.load.salesOrderNumber || "Load"}</SoNumber>
+      {thread.load.loadNumber ? ` · Load ${thread.load.loadNumber}` : " · Load number pending"}
+      {lane ? ` · ${lane}` : ""}
+      {` · Owner ${thread.load.owner || "unassigned"}`}
+    </p>
   );
 }
