@@ -2,6 +2,7 @@ import { joinSalesOrders, parseLegacySalesOrders, resolveSalesOrders } from "@/l
 import type {
   BolPrintRecord,
   BolPrintSummary,
+  AuditEvent,
   CustomerDocument,
   CustomerOrder,
   HaulCallout,
@@ -268,6 +269,8 @@ export function presentCustomerOrder(order: CustomerOrder, viewer: Viewer, optio
   view.notices = presentNotices(order.notices);
   const stages = presentStageEvents(order.stageEvents);
   if (stages.length) view.stageEvents = stages;
+  const audit = presentAuditEvents(order.auditEvents);
+  if (audit.length) view.auditEvents = audit;
   const tracking = presentTrackingEvents(order.trackingEvents);
   if (tracking.length) view.trackingEvents = tracking;
   if (access.select) {
@@ -311,6 +314,11 @@ function scrubCustomerCopy(view: CustomerOrder): void {
       .map((event) => ({ ...event, text: customerFacingText(event.text) }))
       .filter((event) => event.text);
   }
+  if (view.auditEvents) {
+    view.auditEvents = view.auditEvents
+      .map((event) => ({ ...event, text: customerFacingText(event.text) }))
+      .filter((event) => event.text);
+  }
 }
 
 function cleanLabel(value: string | undefined): string {
@@ -343,6 +351,18 @@ function presentTrackingEvents(events: TrackingEvent[] | undefined): TrackingEve
     const text = redactSensitiveText(event.text);
     if (!text || !event.at) continue;
     safe.push({ at: event.at, text });
+  }
+  return safe;
+}
+
+function presentAuditEvents(events: AuditEvent[] | undefined): AuditEvent[] {
+  if (!events?.length) return [];
+  const safe: AuditEvent[] = [];
+  for (const event of events) {
+    if (event.kind !== "deleted" && event.kind !== "restored") continue;
+    const text = redactSensitiveText(event.text);
+    if (!text || !event.at) continue;
+    safe.push({ at: event.at, kind: event.kind, text });
   }
   return safe;
 }

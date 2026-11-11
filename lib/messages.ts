@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { PortalContext } from "@/lib/db";
 import { withTransaction } from "@/lib/db";
 import { PortalError } from "@/lib/http";
-import { likeContains } from "@/lib/orders";
+import { likeContains, OPEN_LOAD_SQL } from "@/lib/orders";
 import { chatEnabledFor } from "@/lib/users";
 import {
   messagePreview,
@@ -120,7 +120,7 @@ function toLoadRef(load: LoadOption): MessageLoadRef {
 }
 
 async function loadCatalog(ctx: PortalContext): Promise<LoadOption[]> {
-  const rows = (await ctx.db.prepare(`SELECT ${LOAD_REF_COLUMNS} FROM loads`).all()) as unknown as LoadRow[];
+  const rows = (await ctx.db.prepare(`SELECT ${LOAD_REF_COLUMNS} FROM loads WHERE ${OPEN_LOAD_SQL}`).all()) as unknown as LoadRow[];
   return rows.map(toLoadOption);
 }
 
@@ -239,20 +239,21 @@ export async function searchMessageLoads(ctx: PortalContext, session: Session, q
     ? ((await ctx.db
         .prepare(
           `SELECT ${LOAD_REF_COLUMNS} FROM loads
-           WHERE IFNULL(load_number, '') LIKE ? ESCAPE '\\'
+           WHERE ${OPEN_LOAD_SQL}
+             AND (IFNULL(load_number, '') LIKE ? ESCAPE '\\'
               OR sales_order_number LIKE ? ESCAPE '\\'
               OR origin_json LIKE ? ESCAPE '\\'
-              OR destination_json LIKE ? ESCAPE '\\'
+              OR destination_json LIKE ? ESCAPE '\\')
            ORDER BY updated_at DESC
            LIMIT 30`,
         )
         .all(likeContains(q), likeContains(q), likeContains(q), likeContains(q))) as unknown as LoadRow[])
     : ((await ctx.db
-        .prepare(`SELECT ${LOAD_REF_COLUMNS} FROM loads ORDER BY updated_at DESC LIMIT 30`)
+        .prepare(`SELECT ${LOAD_REF_COLUMNS} FROM loads WHERE ${OPEN_LOAD_SQL} ORDER BY updated_at DESC LIMIT 30`)
         .all()) as unknown as LoadRow[]);
   const loads = rows.map(toLoadOption);
   if (includeId && !loads.some((load) => load.id === includeId)) {
-    const extra = (await ctx.db.prepare(`SELECT ${LOAD_REF_COLUMNS} FROM loads WHERE id = ?`).get(includeId)) as
+    const extra = (await ctx.db.prepare(`SELECT ${LOAD_REF_COLUMNS} FROM loads WHERE id = ? AND ${OPEN_LOAD_SQL}`).get(includeId)) as
       | LoadRow
       | undefined;
     if (extra) loads.unshift(toLoadOption(extra));
@@ -261,7 +262,7 @@ export async function searchMessageLoads(ctx: PortalContext, session: Session, q
 }
 
 async function requireLoad(ctx: PortalContext, loadId: string): Promise<LoadOption> {
-  const row = (await ctx.db.prepare(`SELECT ${LOAD_REF_COLUMNS} FROM loads WHERE id = ?`).get(loadId)) as LoadRow | undefined;
+  const row = (await ctx.db.prepare(`SELECT ${LOAD_REF_COLUMNS} FROM loads WHERE id = ? AND ${OPEN_LOAD_SQL}`).get(loadId)) as LoadRow | undefined;
   if (!row) throw new PortalError("That load is not in this portal.", 400);
   return toLoadOption(row);
 }

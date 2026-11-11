@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
+import DeleteLoadButton from "@/components/delete-load";
 import CarrierCallout from "@/components/carrier-callout";
 import DocumentLinks from "@/components/document-links";
 import LoadOwnerField from "@/components/load-owner-field";
@@ -28,6 +29,7 @@ import { salesOrdersForStop } from "@/lib/sales-orders";
 import { toast } from "@/lib/toast";
 import {
   canAddLoads,
+  canDeleteLoad,
   canPrintBol,
   canSeeCarrierIdentity,
   canSeePricing,
@@ -52,6 +54,7 @@ interface Me {
 
 export default function OrderPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const [order, setOrder] = useState<CustomerOrder | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const [problem, setProblem] = useState("");
@@ -77,6 +80,7 @@ export default function OrderPage() {
   const allowDocs = canUploadDocs(me) && !readOnly;
   const allowBol = canUploadBol(me) && !readOnly;
   const allowPhotos = canUploadPhotos(me) && !readOnly;
+  const canDelete = canDeleteLoad(me) && !readOnly;
 
   async function uploadFile(slot: "attachment" | "bol", file: File) {
     if (!order) return;
@@ -257,6 +261,17 @@ export default function OrderPage() {
                   Copy load
                 </Link>
               ) : null}
+              {canDelete ? (
+                <DeleteLoadButton
+                  orderId={order.id}
+                  salesOrderNumber={order.salesOrderNumber}
+                  loadNumber={order.loadNumber}
+                  onDeleted={() => {
+                    toast("Deleted.");
+                    router.push("/");
+                  }}
+                />
+              ) : null}
             </div>
 
             <section className="detail-section">
@@ -265,7 +280,7 @@ export default function OrderPage() {
               <p className="mini">Latest ETA: {order.latestEta ? formatWhen(order.latestEta) : "Not posted yet"}</p>
             </section>
 
-            <OrderHistory notices={order.notices} stages={order.stageEvents} tracking={order.trackingEvents} />
+            <OrderHistory notices={order.notices} stages={order.stageEvents} tracking={order.trackingEvents} audit={order.auditEvents} />
 
             <section className="detail-section">
               <h2>Stops</h2>

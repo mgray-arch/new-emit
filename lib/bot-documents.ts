@@ -4,6 +4,7 @@ import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { PortalContext } from "@/lib/db";
 import { ingestDocument, MAX_UPLOAD_BYTES, safeFilename, sniffUpload } from "@/lib/documents";
 import { PortalError } from "@/lib/http";
+import { OPEN_LOAD_SQL } from "@/lib/orders";
 import { assignTrackingLink, parseSelectLoadNumber } from "@/lib/select-load";
 import { parseTrackingLink } from "@/lib/tracking-link";
 
@@ -100,14 +101,14 @@ export async function findBotLoad(
   const byNumber = loadNumber
     ? (
         await ctx.db
-          .prepare(`SELECT id, load_number, sales_order_number FROM loads WHERE load_number = ?`)
+          .prepare(`SELECT id, load_number, sales_order_number FROM loads WHERE load_number = ? AND ${OPEN_LOAD_SQL}`)
           .all(loadNumber)
       ).map((row) => asLoadMatch(row))
     : null;
   const byOrder = salesOrderNumber
     ? (
         await ctx.db
-          .prepare(`SELECT id, load_number, sales_order_number FROM loads WHERE ${SALES_ORDER_MATCH_SQL}`)
+          .prepare(`SELECT id, load_number, sales_order_number FROM loads WHERE ${OPEN_LOAD_SQL} AND ${SALES_ORDER_MATCH_SQL}`)
           .all(...salesOrderMatchArgs(salesOrderNumber))
       ).map((row) => asLoadMatch(row))
     : null;

@@ -17,7 +17,7 @@ import TrackingLinkField from "@/components/tracking-link-field";
 import { carrierIdentityLabel } from "@/lib/carrier";
 import { formatWhenBoise } from "@/lib/dates";
 import { reprintMessage } from "@/lib/reprint";
-import { deleteConfirmText } from "@/lib/delete-confirm";
+import DeleteLoadButton from "@/components/delete-load";
 import { listStageChoice, stageBecomesReadyToShip, type ListPortalStatus } from "@/lib/load-stage";
 import { formatEnteredBy } from "@/lib/entered-by";
 import {
@@ -35,6 +35,7 @@ import { toast } from "@/lib/toast";
 import {
   STATUS_LABEL,
   canAddLoads,
+  canDeleteLoad,
   canPrintBol,
   canSeeCarrierIdentity,
   canSeePricing,
@@ -121,12 +122,10 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
   const [soWarning, setSoWarning] = useState("");
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [confirmReady, setConfirmReady] = useState(false);
   const [pendingReadyId, setPendingReadyId] = useState<string | null>(null);
   const [stageBusyId, setStageBusyId] = useState<string | null>(null);
   const [stageError, setStageError] = useState<{ id: string; message: string } | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
   const stageBusyRef = useRef(new Set<string>());
   const updatedRef = useRef(updatedOnly);
 
@@ -171,6 +170,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   const allowPrint = canPrintBol(me);
   const selectView = role === "admin" && !readOnly;
   const canChangeStage = allowLoads && !readOnly;
+  const canDelete = canDeleteLoad(me) && !readOnly;
 
   useEffect(() => {
     if (!allowLoads || readOnly) setCreating(false);
@@ -271,29 +271,6 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     setFormError("");
     setSoWarning("");
     setCreating(false);
-  }
-
-  async function removeOrder(id: string) {
-    setDeletingId(id);
-    setError("");
-    try {
-      const response = await fetch(`/api/admin/orders/${id}`, { method: "DELETE" });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        setError(typeof body.error === "string" ? body.error : "Could not delete that order");
-        return;
-      }
-      setConfirmDeleteId(null);
-      setRows((current) => current.filter((order) => order.id !== id));
-      setEditing((current) => (current?.id === id ? null : current));
-      setPage(1);
-      setReload((value) => value + 1);
-      toast("Deleted.");
-    } catch {
-      setError("Could not delete that order");
-    } finally {
-      setDeletingId(null);
-    }
   }
 
   function clearStagePrompt(id: string) {
@@ -722,35 +699,21 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                         Copy load
                       </button>
                     ) : null}
-                    {selectView && confirmDeleteId !== order.id ? (
-                      <button className="btn danger" type="button" onClick={() => setConfirmDeleteId(order.id)}>
-                        Delete
-                      </button>
+                    {canDelete ? (
+                      <DeleteLoadButton
+                        orderId={order.id}
+                        salesOrderNumber={order.salesOrderNumber}
+                        loadNumber={order.loadNumber}
+                        onDeleted={() => {
+                          setRows((current) => current.filter((item) => item.id !== order.id));
+                          setEditing((current) => (current?.id === order.id ? null : current));
+                          setPage(1);
+                          setReload((value) => value + 1);
+                          toast("Deleted.");
+                        }}
+                      />
                     ) : null}
                   </div>
-                  {selectView && confirmDeleteId === order.id ? (
-                    <div className="confirm-box" onClick={(event) => event.stopPropagation()}>
-                      <p>{deleteConfirmText(order.loadNumber)}</p>
-                      <div className="actions">
-                        <button
-                          className="btn danger"
-                          type="button"
-                          disabled={deletingId === order.id}
-                          onClick={() => void removeOrder(order.id)}
-                        >
-                          {deletingId === order.id ? "Deleting…" : "Delete"}
-                        </button>
-                        <button
-                          className="btn secondary"
-                          type="button"
-                          disabled={deletingId === order.id}
-                          onClick={() => setConfirmDeleteId(null)}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
                 </article>
         );
         })}

@@ -116,6 +116,13 @@ export interface StageEvent {
   text: string;
 }
 
+/** Who removed or put back a load. The text names the person. It has no pay. */
+export interface AuditEvent {
+  at: string;
+  kind: "deleted" | "restored";
+  text: string;
+}
+
 /** Tracking started or the customer link changed. The text has no pay and no carrier rate. */
 export interface TrackingEvent {
   at: string;
@@ -210,6 +217,8 @@ export interface CustomerOrder {
   notices?: OrderNotice[];
   /** Stage changes for this order. Empty until one is recorded. */
   stageEvents?: StageEvent[];
+  /** Delete and restore lines. Empty until one is recorded. */
+  auditEvents?: AuditEvent[];
   /** Tracking-link history. Empty until a customer share link is stored. */
   trackingEvents?: TrackingEvent[];
   /** Set when this person has not opened the order since tracking started. */
@@ -384,6 +393,17 @@ export function canUploadDocs(viewer: Viewer): boolean {
  */
 export function canUploadBol(viewer: Viewer): boolean {
   return canUploadDocs(viewer);
+}
+
+/**
+ * Soft-delete a load. Every Select user and every EMIT admin.
+ * A regular EMIT user, Sales, and Loader cannot. View-as cannot.
+ */
+export function canDeleteLoad(viewer: Viewer): boolean {
+  const access = resolveAccess(viewer);
+  if (access.viewAs) return false;
+  if (access.select) return true;
+  return access.role === "emit_admin";
 }
 
 /** Freight photos. Select, Sales, and Loader. Not a pricing permission. */
