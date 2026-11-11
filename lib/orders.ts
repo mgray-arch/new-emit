@@ -16,19 +16,19 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { SqlArg } from "@/lib/db";
 import type { PortalContext } from "@/lib/db";
 import { CUSTOMER_LOAD_COLUMNS, withTransaction } from "@/lib/db";
-import { buildStatusLabel, parseOrderNotices, parseStageEvents, stageHistoryText } from "@/lib/build-status";
+import { buildStatusLabel, parseAuditEvents, parseOrderNotices, parseStageEvents, stageHistoryText } from "@/lib/build-status";
 import { parseTrackingEvents } from "@/lib/tracking-link";
 import { serializeCustomerOrder, trackingUrlFor } from "@/lib/customer-view";
 import { addDaysISO, denverDate, weekRange } from "@/lib/dates";
 import type { LoadTab, LoadTabCounts } from "@/lib/load-list";
 import { listCustomerDocuments } from "@/lib/documents";
 import { PortalError } from "@/lib/http";
-import { deleteStoredBytes } from "@/lib/storage";
-import type { CustomerOrder, PortalStatus, Session, StageEvent, TimelineEvent, TrackingStage } from "@/lib/types";
+import type { AuditEvent, CustomerOrder, PortalStatus, Session, StageEvent, TimelineEvent, TrackingStage } from "@/lib/types";
 import { STAGE_LABEL, TRACKING_STAGES, canAddLoads, canEditLoad, canSeePricing, type Stop } from "@/lib/types";
 import { syncStopLocations } from "@/lib/locations";
 import { assignLoadOwner, type LoadOwner } from "@/lib/load-owner";
 import { notifyNewLoad, notifyReadyToShip } from "@/lib/slack-new-load";
+import { formatEnteredBy } from "@/lib/entered-by";
 import { legacyStops, resolvedRoute } from "@/lib/stops";
 import type { OrderInput, OrderPatch } from "@/lib/validate";
 
@@ -48,7 +48,10 @@ export interface OrderFilter {
    * loads stay on Active or Delivered and the attention count is omitted.
    */
   includeAttention?: boolean;
-  /** Group by pickup date. The dashboard uses this. Other callers keep the older order. */
+  /**
+   * Loads list and CSV. Soonest ship date first, with shipped and later loads at the bottom.
+   * Other callers keep created time.
+   */
   grouped?: boolean;
   /** Internal. The CSV export asks for every matching row. */
   exportAll?: boolean;
@@ -116,7 +119,11 @@ interface LoadRow {
   carrier_notice_log: string | null;
   stage_log: string | null;
   tracking_event_log: string | null;
+  audit_log: string | null;
 }
+
+/** A load still shown in the portal. Soft-deleted rows stay in the table. */
+export const OPEN_LOAD_SQL = `(deleted_at IS NULL OR trim(deleted_at) = '')`;
 
 const LIST_SQL_HEAD = `
 SELECT ${CUSTOMER_LOAD_COLUMNS},
@@ -213,6 +220,7 @@ async function rowToOrder(ctx: PortalContext, row: LoadRow, withDocuments: boole
     notices: parseOrderNotices(row.carrier_notice_log),
     stageEvents: parseStageEvents(row.stage_log),
     trackingEvents: parseTrackingEvents(row.tracking_event_log),
+    auditEvents: parseAuditEvents(row.audit_log),
     buildStatus: buildStatusLabel(order.loadNumber, slackNotifiedAt),
   };
 }
@@ -314,7 +322,7 @@ function tabClause(tab: LoadTab, today: string, includeAttention = true): { sql:
 }
 
 function buildWhere(filter: OrderFilter, today: string): { sql: string; params: SqlArg[] } {
-  const clauses: string[] = [];
+  const clauses: string[] = [OPEN_LOAD_SQL];
   const params: SqlArg[] = [];
   if (filter.status) {
     clauses.push("portal_status = ?");
@@ -366,9 +374,30 @@ function buildWhere(filter: OrderFilter, today: string): { sql: string; params: 
   return { sql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
 }
 
-/** Newest orders first. Created time is the default order on the loads page. */
-function listOrderSql(): string {
-  return `ORDER BY loads.created_at DESC, loads.sales_order_number ASC`;
+const FINISHED_LIST_SQL = `(portal_status IN ('shipped', 'cancelled') OR tracking_stage = 'delivered')`;
+
+/**
+ * Loads list order.
+ * Open loads with a ship date: soonest date, then soonest time. A missing time
+ * sorts after timed loads on that day.
+ * Open loads with no ship date come next, by sales order.
+ * Shipped, Delivered, and Cancelled come last. Among those, the latest ship
+ * date and time come first. A missing time sorts as the start of that day, and
+ * a missing date sorts last.
+ */
+function listOrderSql(byShipDate: boolean): string {
+  if (!byShipDate) return `ORDER BY loads.created_at DESC, loads.sales_order_number ASC`;
+  return `ORDER BY
+    CASE WHEN ${FINISHED_LIST_SQL} THEN 2 WHEN NULLIF(trim(ship_date), '') IS NULL THEN 1 ELSE 0 END ASC,
+    CASE WHEN NOT ${FINISHED_LIST_SQL} THEN NULLIF(trim(ship_date), '') END ASC,
+    CASE
+      WHEN NOT ${FINISHED_LIST_SQL} AND NULLIF(trim(ship_date), '') IS NOT NULL
+      THEN COALESCE(NULLIF(trim(ship_time), ''), '24:00')
+    END ASC,
+    CASE WHEN ${FINISHED_LIST_SQL} THEN NULLIF(trim(ship_date), '') END DESC,
+    CASE WHEN ${FINISHED_LIST_SQL} THEN COALESCE(NULLIF(trim(ship_time), ''), '00:00') END DESC,
+    loads.sales_order_number ASC,
+    loads.id ASC`;
 }
 
 export async function listOrders(ctx: PortalContext, filter: OrderFilter = {}): Promise<OrderPage> {
@@ -379,7 +408,7 @@ export async function listOrders(ctx: PortalContext, filter: OrderFilter = {}): 
   const where = buildWhere(filter, today);
   const totalRow = await ctx.db.prepare(`SELECT COUNT(*) AS n FROM loads ${where.sql}`).get(...where.params);
   const rows = (await ctx.db
-    .prepare(`${LIST_SQL_HEAD} ${where.sql} ${listOrderSql()} LIMIT ? OFFSET ?`)
+    .prepare(`${LIST_SQL_HEAD} ${where.sql} ${listOrderSql(filter.grouped === true)} LIMIT ? OFFSET ?`)
     .all(...where.params, pageSize, (page - 1) * pageSize)) as unknown as LoadRow[];
   return {
     orders: await Promise.all(rows.map((row) => rowToOrder(ctx, row, false))),
@@ -462,7 +491,7 @@ export async function listBoard(ctx: PortalContext, filter: OrderFilter & { tab?
 
 export async function listAllOrders(ctx: PortalContext, receiverCompany?: string | null): Promise<CustomerOrder[]> {
   const where = receiverCompany
-    ? `WHERE (
+    ? `WHERE ${OPEN_LOAD_SQL} AND (
         LOWER(json_extract(destination_json, '$.company')) = LOWER(?)
         OR EXISTS (
           SELECT 1 FROM json_each(stops_json) AS stop
@@ -470,7 +499,7 @@ export async function listAllOrders(ctx: PortalContext, receiverCompany?: string
             AND LOWER(json_extract(stop.value, '$.place.company')) = LOWER(?)
         )
       )`
-    : "";
+    : `WHERE ${OPEN_LOAD_SQL}`;
   const rows = (await ctx.db
     .prepare(`${LIST_SQL_HEAD} ${where} ORDER BY ship_date IS NULL, ship_date ASC`)
     .all(...(receiverCompany ? [receiverCompany, receiverCompany] : []))) as unknown as LoadRow[];
@@ -478,21 +507,21 @@ export async function listAllOrders(ctx: PortalContext, receiverCompany?: string
 }
 
 export async function getOrder(ctx: PortalContext, id: string, receiverCompany?: string | null): Promise<CustomerOrder | null> {
-  const row = (await ctx.db.prepare(`${LIST_SQL_HEAD} WHERE id = ?`).get(id)) as LoadRow | undefined;
+  const row = (await ctx.db.prepare(`${LIST_SQL_HEAD} WHERE id = ? AND ${OPEN_LOAD_SQL}`).get(id)) as LoadRow | undefined;
   if (!row) return null;
   if (receiverCompany && !deliversTo(row, receiverCompany)) return null;
   return rowToOrder(ctx, row, true);
 }
 
 export async function getOrderByToken(ctx: PortalContext, token: string): Promise<CustomerOrder | null> {
-  const row = (await ctx.db.prepare(`${LIST_SQL_HEAD} WHERE tracking_token = ?`).get(token)) as LoadRow | undefined;
+  const row = (await ctx.db.prepare(`${LIST_SQL_HEAD} WHERE tracking_token = ? AND ${OPEN_LOAD_SQL}`).get(token)) as LoadRow | undefined;
   if (!row) return null;
   return rowToOrder(ctx, row, false);
 }
 
 export async function orderStats(ctx: PortalContext, receiverCompany?: string | null): Promise<OrderStats> {
   const where = receiverCompany
-    ? `WHERE (
+    ? `WHERE ${OPEN_LOAD_SQL} AND (
         LOWER(json_extract(destination_json, '$.company')) = LOWER(?)
         OR EXISTS (
           SELECT 1 FROM json_each(stops_json) AS stop
@@ -500,7 +529,7 @@ export async function orderStats(ctx: PortalContext, receiverCompany?: string | 
             AND LOWER(json_extract(stop.value, '$.place.company')) = LOWER(?)
         )
       )`
-    : "";
+    : `WHERE ${OPEN_LOAD_SQL}`;
   const rows = await ctx.db
     .prepare(`SELECT portal_status, COUNT(*) AS n FROM loads ${where} GROUP BY portal_status`)
     .all(...(receiverCompany ? [receiverCompany, receiverCompany] : []));
@@ -575,8 +604,9 @@ export async function salesOrdersSharingBase(ctx: PortalContext, raw: string): P
   const rows = await ctx.db
     .prepare(
       `SELECT sales_order_number, sales_orders_json FROM loads
-       WHERE UPPER(sales_order_number) LIKE ? ESCAPE '\\'
-          OR UPPER(IFNULL(sales_orders_json, '')) LIKE ? ESCAPE '\\'`,
+       WHERE ${OPEN_LOAD_SQL}
+         AND (UPPER(sales_order_number) LIKE ? ESCAPE '\\'
+          OR UPPER(IFNULL(sales_orders_json, '')) LIKE ? ESCAPE '\\')`,
     )
     .all(like, like);
   const numbers: string[] = [];
@@ -608,7 +638,7 @@ export async function salesOrderDuplicateWarnings(
   for (const line of lines) {
     const params = salesOrderMatchArgs(line.number);
     const row = await ctx.db
-      .prepare(`SELECT id FROM loads WHERE ${SALES_ORDER_MATCH_SQL}${exceptLoadId ? " AND id <> ?" : ""} LIMIT 1`)
+      .prepare(`SELECT id FROM loads WHERE ${OPEN_LOAD_SQL} AND ${SALES_ORDER_MATCH_SQL}${exceptLoadId ? " AND id <> ?" : ""} LIMIT 1`)
       .get(...params, ...(exceptLoadId ? [exceptLoadId] : []));
     if (!row) continue;
     warnings.push({ number: line.number, message: `${line.number} is already on another load.` });
@@ -819,7 +849,7 @@ export async function updateOrder(
 ): Promise<{ order: CustomerOrder; warnings: SalesOrderWarning[] }> {
   if (actor.viewAs) throw new PortalError("View-as is read-only. Switch back to Select view to change anything.", 403);
   if (!canEditLoad(actor)) throw new PortalError("This account can view loads but cannot change them.", 403);
-  const existing = (await ctx.db.prepare(`${LIST_SQL_HEAD} WHERE id = ?`).get(id)) as LoadRow | undefined;
+  const existing = (await ctx.db.prepare(`${LIST_SQL_HEAD} WHERE id = ? AND ${OPEN_LOAD_SQL}`).get(id)) as LoadRow | undefined;
   if (!existing) throw new PortalError("Order not found", 404);
   const current = await rowToOrder(ctx, existing, false);
   const portalStatus = patch.portalStatus ?? current.portalStatus;
@@ -900,38 +930,69 @@ export async function updateOrder(
   return { order: updated, warnings };
 }
 
+export interface DeletedLoad {
+  id: string;
+  salesOrderNumber: string;
+  loadNumber: string | null;
+  deletedAt: string;
+  deletedBy: string;
+}
+
+async function appendAudit(ctx: PortalContext, id: string, event: AuditEvent): Promise<void> {
+  const row = await ctx.db.prepare(`SELECT audit_log FROM loads WHERE id = ?`).get(id);
+  const events = parseAuditEvents(typeof row?.audit_log === "string" ? row.audit_log : null);
+  events.push(event);
+  await ctx.db.prepare(`UPDATE loads SET audit_log = ? WHERE id = ?`).run(JSON.stringify(events), id);
+}
+
 /**
- * Removes one portal order and the rows that belong to it: stops (stored on the
- * order), documents, photos, and their stored bytes. It does not call SAM or Load Builder.
+ * Hides one portal load. The row, documents, and photos stay so it can be restored.
+ * Nothing outside the portal is called.
  */
-export async function deleteOrder(ctx: PortalContext, id: string): Promise<void> {
-  const existing = await ctx.db.prepare(`SELECT id FROM loads WHERE id = ?`).get(id);
-  if (!existing) throw new PortalError("Order not found", 404);
-
-  const locators = (
-    await Promise.all([
-      ctx.db.prepare(`SELECT storage_key FROM customer_documents WHERE load_id = ?`).all(id),
-      ctx.db.prepare(`SELECT storage_key FROM internal_documents WHERE load_id = ?`).all(id),
-      ctx.db.prepare(`SELECT storage_key FROM carrier_photos WHERE load_id = ?`).all(id),
-    ])
-  )
-    .flat()
-    .map((row) => String(row.storage_key ?? ""))
-    .filter((locator) => locator.length > 0);
-
-  for (const locator of locators) {
-    await deleteStoredBytes(locator);
-  }
-
+export async function deleteOrder(ctx: PortalContext, id: string, actor: { name: string; email: string }): Promise<void> {
+  const existing = await ctx.db.prepare(`SELECT id, deleted_at FROM loads WHERE id = ?`).get(id);
+  if (!existing || String(existing.deleted_at ?? "").trim()) throw new PortalError("Order not found", 404);
+  const now = ctx.now().toISOString();
+  const who = formatEnteredBy(actor.name, actor.email);
   await withTransaction(ctx.db, async () => {
-    await ctx.db.prepare(`DELETE FROM bol_prints WHERE load_id = ?`).run(id);
-    await ctx.db.prepare(`DELETE FROM customer_documents WHERE load_id = ?`).run(id);
-    await ctx.db.prepare(`DELETE FROM internal_documents WHERE load_id = ?`).run(id);
-    await ctx.db.prepare(`DELETE FROM document_uploads WHERE load_id = ?`).run(id);
-    await ctx.db.prepare(`DELETE FROM carrier_photos WHERE load_id = ?`).run(id);
-    const removed = await ctx.db.prepare(`DELETE FROM loads WHERE id = ?`).run(id);
+    await appendAudit(ctx, id, { at: now, kind: "deleted", text: `Deleted by ${who}.` });
+    const removed = await ctx.db
+      .prepare(`UPDATE loads SET deleted_at = ?, deleted_by = ?, updated_at = ? WHERE id = ? AND ${OPEN_LOAD_SQL}`)
+      .run(now, who, now, id);
     if (!removed.changes) throw new PortalError("Order not found", 404);
   });
+}
+
+/** Select staff put a soft-deleted load back on the lists. */
+export async function restoreOrder(ctx: PortalContext, id: string, actor: { name: string; email: string }): Promise<void> {
+  const existing = await ctx.db.prepare(`SELECT id, deleted_at FROM loads WHERE id = ?`).get(id);
+  if (!existing || !String(existing.deleted_at ?? "").trim()) throw new PortalError("Order not found", 404);
+  const now = ctx.now().toISOString();
+  const who = formatEnteredBy(actor.name, actor.email);
+  await withTransaction(ctx.db, async () => {
+    await appendAudit(ctx, id, { at: now, kind: "restored", text: `Restored by ${who}.` });
+    await ctx.db
+      .prepare(`UPDATE loads SET deleted_at = NULL, deleted_by = NULL, updated_at = ? WHERE id = ?`)
+      .run(now, id);
+  });
+}
+
+export async function listDeletedLoads(ctx: PortalContext): Promise<DeletedLoad[]> {
+  const rows = await ctx.db
+    .prepare(
+      `SELECT id, sales_order_number, load_number, deleted_at, deleted_by
+       FROM loads
+       WHERE deleted_at IS NOT NULL AND trim(deleted_at) != ''
+       ORDER BY deleted_at DESC, sales_order_number ASC`,
+    )
+    .all();
+  return rows.map((row) => ({
+    id: String(row.id),
+    salesOrderNumber: String(row.sales_order_number ?? ""),
+    loadNumber: row.load_number == null || String(row.load_number).trim() === "" ? null : String(row.load_number),
+    deletedAt: String(row.deleted_at ?? ""),
+    deletedBy: String(row.deleted_by ?? ""),
+  }));
 }
 
 /**

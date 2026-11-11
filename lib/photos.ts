@@ -3,6 +3,7 @@ import { crc32, deflateSync } from "node:zlib";
 import type { PortalContext } from "@/lib/db";
 import { refreshLoadReviewCount, safeFilename } from "@/lib/documents";
 import { PortalError } from "@/lib/http";
+import { OPEN_LOAD_SQL } from "@/lib/orders";
 import { readImageText } from "@/lib/ocr";
 import { sensitiveReason } from "@/lib/sensitive";
 import { readStoredBytes, writeStoredBytes } from "@/lib/storage";
@@ -198,7 +199,7 @@ export async function ingestCarrierPhoto(ctx: PortalContext, input: IngestPhotoI
   const filename = safeFilename(input.filename);
   const mediaType = MEDIA[kind];
   const sha256 = createHash("sha256").update(input.bytes).digest("hex");
-  const load = await ctx.db.prepare(`SELECT id, load_number FROM loads WHERE load_number = ?`).get(loadNumber);
+  const load = await ctx.db.prepare(`SELECT id, load_number FROM loads WHERE load_number = ? AND ${OPEN_LOAD_SQL}`).get(loadNumber);
   if (!load) throw new PortalError(`No load with SAM load number ${loadNumber}.`, 404);
 
   const existing = await ctx.db

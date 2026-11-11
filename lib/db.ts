@@ -98,7 +98,10 @@ CREATE TABLE IF NOT EXISTS loads (
   copied_from_id TEXT,
   carrier_notice_log TEXT,
   stage_log TEXT,
-  tracking_event_log TEXT
+  tracking_event_log TEXT,
+  audit_log TEXT,
+  deleted_at TEXT,
+  deleted_by TEXT
 );
 
 CREATE TABLE IF NOT EXISTS bol_prints (
@@ -273,7 +276,7 @@ export const CUSTOMER_LOAD_COLUMNS = `
   rate_reason, comments, created_by, entered_by_name, entered_by_email, owner, owner_needs_check, created_at, updated_at, pending_review_count,
   sam_build_status, sam_build_error, sam_build_at, slack_notified_at,
   carrier_name, carrier_mc, driver_name, carrier_updated_at, bol_changed_at, copied_from_id,
-  carrier_notice_log, stage_log, tracking_event_log
+  carrier_notice_log, stage_log, tracking_event_log, audit_log, deleted_at, deleted_by
 `;
 
 function coerce(value: unknown): unknown {
@@ -451,6 +454,7 @@ export async function openDatabase(file?: string): Promise<SqlDatabase> {
   await ensureColumn(db, "loads", "driver_name", "TEXT");
   await migrateBolPrintColumns(db);
   await migrateUnassignedBooked(db);
+  await migrateSoftDelete(db);
   await db.exec(`DROP TABLE IF EXISTS outbox`);
   return db;
 }
@@ -523,9 +527,17 @@ async function ensureColumn(db: SqlDatabase, table: string, column: string, defi
   }
 }
 
+/** Soft delete. Null deleted_at means the load is still in the portal. */
+export async function migrateSoftDelete(db: SqlDatabase): Promise<void> {
+  await ensureColumn(db, "loads", "audit_log", "TEXT");
+  await ensureColumn(db, "loads", "deleted_at", "TEXT");
+  await ensureColumn(db, "loads", "deleted_by", "TEXT");
+}
+
 /** Columns and the per-user seen table the loads list reads. Safe to call on every request. */
 export async function ensureLoadListColumns(db: SqlDatabase): Promise<void> {
   await migrateLoadStatus(db);
+  await migrateSoftDelete(db);
   await db.exec(`CREATE TABLE IF NOT EXISTS order_seen (
     user_id TEXT NOT NULL,
     load_id TEXT NOT NULL,

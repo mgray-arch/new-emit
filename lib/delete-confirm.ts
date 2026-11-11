@@ -1,6 +1,9 @@
-/** Confirm copy for deleting a portal order. Deleting here does not change SAM. */
-export function deleteConfirmText(loadNumber: string | null | undefined): string {
-  const base = "Delete this order? This cannot be undone. It does not change SAM.";
-  if (loadNumber?.trim()) return `${base} The SAM load must be voided separately in SAM.`;
-  return base;
+/** Confirm copy for removing a portal load. It does not name an outside system. */
+export function deleteConfirmText(order: {
+  salesOrderNumber?: string | null;
+  loadNumber?: string | null;
+}): string {
+  const sales = order.salesOrderNumber?.trim() || "No sales order";
+  const load = order.loadNumber?.trim() || "no load number yet";
+  return `Delete ${sales} (Select load ${load})? This removes the load from the portal. Confirm to delete it.`;
 }

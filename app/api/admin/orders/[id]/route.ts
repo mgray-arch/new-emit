@@ -1,4 +1,4 @@
-import { isSession, requireAdmin } from "@/lib/guard";
+import { isSession, rejectIfViewingAs, requireAdmin } from "@/lib/guard";
 import { errorResponse, json } from "@/lib/http";
 import { deleteOrder } from "@/lib/orders";
 import { readyPortal } from "@/lib/portal";
@@ -10,8 +10,10 @@ export async function DELETE(req: Request, context: { params: Promise<{ id: stri
   try {
     const session = await requireAdmin(req);
     if (!isSession(session)) return session;
+    const readonly = rejectIfViewingAs(session);
+    if (readonly) return readonly;
     const { id } = await context.params;
-    await deleteOrder(await readyPortal(), id);
+    await deleteOrder(await readyPortal(), id, { name: session.name, email: session.email });
     return json({ ok: true });
   } catch (error) {
     return errorResponse(error);

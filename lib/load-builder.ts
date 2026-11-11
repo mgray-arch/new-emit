@@ -9,7 +9,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { recordCarrierAssignment, type CarrierNoticeResult, type CarrierUpdate } from "@/lib/carrier-notice";
 import type { PortalContext } from "@/lib/db";
 import { PortalError } from "@/lib/http";
-import { getOrder } from "@/lib/orders";
+import { getOrder, OPEN_LOAD_SQL } from "@/lib/orders";
 import { assignSelectLoadNumber, parseSelectLoadNumber } from "@/lib/select-load";
 import { recordCustomerShareLink } from "@/lib/tracking-link";
 import { assignLoadOwner, type LoadOwner } from "@/lib/load-owner";
@@ -156,13 +156,13 @@ export async function consumeLoadBuilderCallback(
 
 async function orderIdForCallback(ctx: PortalContext, orderId: string, salesOrderNumber: string): Promise<string> {
   if (orderId) {
-    const row = await ctx.db.prepare(`SELECT id FROM loads WHERE id = ?`).get(orderId);
+    const row = await ctx.db.prepare(`SELECT id FROM loads WHERE id = ? AND ${OPEN_LOAD_SQL}`).get(orderId);
     if (!row) throw new PortalError("No portal load with that id.", 404);
     return String(row.id);
   }
   const matches = await ctx.db
     .prepare(
-      `SELECT id FROM loads WHERE LOWER(TRIM(sales_order_number)) = LOWER(TRIM(?)) OR ${SALES_ORDER_MATCH_SQL}`,
+      `SELECT id FROM loads WHERE ${OPEN_LOAD_SQL} AND (LOWER(TRIM(sales_order_number)) = LOWER(TRIM(?)) OR ${SALES_ORDER_MATCH_SQL})`,
     )
     .all(salesOrderNumber, ...salesOrderMatchArgs(salesOrderNumber));
   if (matches.length === 0) throw new PortalError(`No load with sales order ${salesOrderNumber}.`, 404);

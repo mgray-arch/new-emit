@@ -1,4 +1,4 @@
-import { PORTAL_STATUSES, STATUS_LABEL, type OrderNotice, type PortalStatus, type StageEvent } from "@/lib/types";
+import { PORTAL_STATUSES, STATUS_LABEL, type AuditEvent, type OrderNotice, type PortalStatus, type StageEvent } from "@/lib/types";
 
 /** Read-only label for the list and the load page. */
 export function buildStatusLabel(
@@ -64,6 +64,27 @@ export function stageHistoryText(from: PortalStatus | null, to: PortalStatus): s
   const next = STATUS_LABEL[to];
   if (!from) return `Stage set to ${next}.`;
   return `Stage changed from ${STATUS_LABEL[from]} to ${next}.`;
+}
+
+export function parseAuditEvents(raw: string | null | undefined): AuditEvent[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    const events: AuditEvent[] = [];
+    for (const item of parsed) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as Record<string, unknown>;
+      const kind = row.kind === "deleted" || row.kind === "restored" ? row.kind : null;
+      const text = typeof row.text === "string" ? row.text.trim() : "";
+      const at = typeof row.at === "string" ? row.at : "";
+      if (!kind || !text) continue;
+      events.push({ at, kind, text });
+    }
+    return events;
+  } catch {
+    return [];
+  }
 }
 
 export function parseStageEvents(raw: string | null | undefined): StageEvent[] {

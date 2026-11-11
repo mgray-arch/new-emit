@@ -1,9 +1,10 @@
 import { badgeForOrder, latestNotice, markCarrierSeen, seenMap } from "@/lib/carrier-seen";
 import { countBolPrints } from "@/lib/bol-print";
 import { presentCustomerOrder } from "@/lib/customer-view";
-import { errorResponse, json } from "@/lib/http";
-import { isSession, requireSession } from "@/lib/guard";
-import { getOrder, updateOrder } from "@/lib/orders";
+import { errorResponse, forbidden, json } from "@/lib/http";
+import { isSession, rejectIfViewingAs, requireSession } from "@/lib/guard";
+import { deleteOrder, getOrder, updateOrder } from "@/lib/orders";
+import { canDeleteLoad } from "@/lib/types";
 import { readyPortal } from "@/lib/portal";
 import { latestTrackingAt, trackingIsUnseen } from "@/lib/tracking-link";
 import { orderPatchSchema } from "@/lib/validate";
@@ -43,6 +44,21 @@ export async function PATCH(req: Request, context: { params: Promise<{ id: strin
     const patch = orderPatchSchema.parse(await req.json());
     const result = await updateOrder(ctx, id, patch, session);
     return json({ order: presentCustomerOrder(result.order, session), warnings: result.warnings });
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function DELETE(req: Request, context: { params: Promise<{ id: string }> }) {
+  try {
+    const session = await requireSession(req);
+    if (!isSession(session)) return session;
+    const readonly = rejectIfViewingAs(session);
+    if (readonly) return readonly;
+    if (!canDeleteLoad(session)) return forbidden();
+    const { id } = await context.params;
+    await deleteOrder(await readyPortal(), id, { name: session.name, email: session.email });
+    return json({ ok: true });
   } catch (error) {
     return errorResponse(error);
   }

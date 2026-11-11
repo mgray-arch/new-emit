@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
+import DeleteLoadButton from "@/components/delete-load";
 import CarrierCallout from "@/components/carrier-callout";
 import DocumentLinks from "@/components/document-links";
 import LoadOwnerField from "@/components/load-owner-field";
@@ -28,9 +29,11 @@ import { salesOrdersForStop } from "@/lib/sales-orders";
 import { toast } from "@/lib/toast";
 import {
   canAddLoads,
+  canDeleteLoad,
   canPrintBol,
   canSeeCarrierIdentity,
   canSeePricing,
+  canUploadBol,
   canUploadDocs,
   canUploadPhotos,
   formatLoadNumber,
@@ -51,6 +54,7 @@ interface Me {
 
 export default function OrderPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const [order, setOrder] = useState<CustomerOrder | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const [problem, setProblem] = useState("");
@@ -74,7 +78,9 @@ export default function OrderPage() {
   const showCarrier = canSeeCarrierIdentity(me);
   const allowPrint = canPrintBol(me) && !readOnly;
   const allowDocs = canUploadDocs(me) && !readOnly;
+  const allowBol = canUploadBol(me) && !readOnly;
   const allowPhotos = canUploadPhotos(me) && !readOnly;
+  const canDelete = canDeleteLoad(me) && !readOnly;
 
   async function uploadFile(slot: "attachment" | "bol", file: File) {
     if (!order) return;
@@ -255,6 +261,17 @@ export default function OrderPage() {
                   Copy load
                 </Link>
               ) : null}
+              {canDelete ? (
+                <DeleteLoadButton
+                  orderId={order.id}
+                  salesOrderNumber={order.salesOrderNumber}
+                  loadNumber={order.loadNumber}
+                  onDeleted={() => {
+                    toast("Deleted.");
+                    router.push("/");
+                  }}
+                />
+              ) : null}
             </div>
 
             <section className="detail-section">
@@ -263,7 +280,7 @@ export default function OrderPage() {
               <p className="mini">Latest ETA: {order.latestEta ? formatWhen(order.latestEta) : "Not posted yet"}</p>
             </section>
 
-            <OrderHistory notices={order.notices} stages={order.stageEvents} tracking={order.trackingEvents} />
+            <OrderHistory notices={order.notices} stages={order.stageEvents} tracking={order.trackingEvents} audit={order.auditEvents} />
 
             <section className="detail-section">
               <h2>Stops</h2>
@@ -298,7 +315,9 @@ export default function OrderPage() {
               </p>
               {selectView && (order.pendingReviewCount ?? 0) > 0 && <p className="hold">{order.pendingReviewCount} in review</p>}
               {order.documents.length === 0 ? (
-                <p className="empty">No documents yet. Add a BOL or another file from Edit load.</p>
+                <p className="empty">
+                  {allowBol || allowDocs ? "No documents yet." : "No documents yet. Add a BOL or another file from Edit load."}
+                </p>
               ) : (
                 <div className="refs">
                   {order.bolPrint ? (
@@ -337,16 +356,27 @@ export default function OrderPage() {
                   ) : null}
                 </div>
               )}
-              {allowDocs ? (
+              {allowBol || allowDocs ? (
                 <div className="grid-2">
-                  <div className="field">
-                    <label htmlFor="detail-bol">Upload BOL</label>
-                    <input id="detail-bol" type="file" onChange={(event) => event.target.files?.[0] && void uploadFile("bol", event.target.files[0])} />
-                  </div>
-                  <div className="field">
-                    <label htmlFor="detail-file">Upload another file</label>
-                    <input id="detail-file" type="file" onChange={(event) => event.target.files?.[0] && void uploadFile("attachment", event.target.files[0])} />
-                  </div>
+                  {allowBol ? (
+                    <div className="field">
+                      <label className="btn secondary file-btn" htmlFor="detail-bol">
+                        Upload BOL
+                        <input
+                          id="detail-bol"
+                          aria-label="Upload BOL"
+                          type="file"
+                          onChange={(event) => event.target.files?.[0] && void uploadFile("bol", event.target.files[0])}
+                        />
+                      </label>
+                    </div>
+                  ) : null}
+                  {allowDocs ? (
+                    <div className="field">
+                      <label htmlFor="detail-file">Upload another file</label>
+                      <input id="detail-file" type="file" onChange={(event) => event.target.files?.[0] && void uploadFile("attachment", event.target.files[0])} />
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
               <PhotoGallery orderId={order.id} loadNumber={order.loadNumber} canUpload={allowPhotos} />

@@ -1,10 +1,14 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { DELETE as deleteOrderRoute } from "@/app/api/admin/orders/[id]/route";
+import { DELETE as deleteOrderRoute } from "@/app/api/orders/[id]/route";
+import { POST as restoreOrderRoute } from "@/app/api/admin/orders/[id]/restore/route";
 import { PATCH as setLoadNumber } from "@/app/api/admin/orders/[id]/load-number/route";
 import { POST as createOrderRoute } from "@/app/api/orders/route";
+import { findBotLoad } from "@/lib/bot-documents";
 import { deleteConfirmText } from "@/lib/delete-confirm";
 import type { PortalContext } from "@/lib/db";
+import { applyLoadStatus } from "@/lib/load-builder";
+import { getOrder, getOrderByToken, listOrders } from "@/lib/orders";
 import { readStoredBytes, writeStoredBytes } from "@/lib/storage";
 import type { Session } from "@/lib/types";
 import { adminSession, customerSession, seededPortal, sessionCookie } from "./helpers";
@@ -93,25 +97,30 @@ async function countFor(table: string, loadId: string) {
   return Number(row?.n ?? 0);
 }
 
-function deleteRequest(id: string, cookie: string) {
+function deleteRequest(id: string, cookie?: string) {
   return deleteOrderRoute(
-    new Request(`http://portal.test/api/admin/orders/${id}`, { method: "DELETE", headers: headers(cookie) }),
+    new Request(`http://portal.test/api/orders/${id}`, {
+      method: "DELETE",
+      headers: cookie ? headers(cookie) : { host: "portal.test", origin: "http://portal.test" },
+    }),
     { params: Promise.resolve({ id }) },
   );
 }
 
 describe("delete confirm copy", () => {
-  it("warns that SAM is unchanged, and names a separate void when a SAM load number is stored", () => {
-    expect(deleteConfirmText(null)).toBe("Delete this order? This cannot be undone. It does not change SAM.");
-    expect(deleteConfirmText("")).toBe("Delete this order? This cannot be undone. It does not change SAM.");
-    expect(deleteConfirmText("458990-1")).toBe(
-      "Delete this order? This cannot be undone. It does not change SAM. The SAM load must be voided separately in SAM.",
+  it("names the sales order and the load number and does not mention an outside system", () => {
+    expect(deleteConfirmText({ salesOrderNumber: "SO123", loadNumber: null })).toBe(
+      "Delete SO123 (Select load no load number yet)? This removes the load from the portal. Confirm to delete it.",
     );
+    expect(deleteConfirmText({ salesOrderNumber: "SO123 and SO456", loadNumber: "458990-1" })).toBe(
+      "Delete SO123 and SO456 (Select load 458990-1)? This removes the load from the portal. Confirm to delete it.",
+    );
+    expect(deleteConfirmText({ salesOrderNumber: "SO123", loadNumber: "458990-1" })).not.toMatch(/SAM/);
   });
 });
 
-describe("DELETE /api/admin/orders/[id]", () => {
-  it("lets a Select admin delete an order, its stops, documents, photos, and blobs, without calling SAM", async () => {
+describe("DELETE /api/orders/[id]", () => {
+  it("soft-deletes a load for Select, keeps the files, and drops it from lists and intake", async () => {
     const customer = await sessionCookie(customerSession());
     const admin = await sessionCookie(adminSession());
     const target = await createOrder("SO-DELETE-1", customer);
@@ -143,37 +152,62 @@ describe("DELETE /api/admin/orders/[id]", () => {
     expect(await removed.json()).toEqual({ ok: true });
     expect(calls).toEqual([]);
 
-    expect(await ctx.db.prepare(`SELECT id FROM loads WHERE id = ?`).get(target.id)).toBeUndefined();
+    const stored = (await ctx.db.prepare(`SELECT id, deleted_at, deleted_by, audit_log, stops_json FROM loads WHERE id = ?`).get(target.id)) as {
+      deleted_at: string;
+      deleted_by: string;
+      audit_log: string;
+      stops_json: string;
+    };
+    expect(stored.deleted_at).toBeTruthy();
+    expect(stored.deleted_by).toContain("Mike Gray");
+    expect(stored.audit_log).toContain("Deleted by Mike Gray");
+    expect(stored.stops_json).toContain("pickup");
     for (const table of ["customer_documents", "internal_documents", "document_uploads", "carrier_photos"]) {
-      expect(await countFor(table, target.id)).toBe(0);
+      expect(await countFor(table, target.id)).toBe(1);
       expect(await countFor(table, keeper.id)).toBe(1);
     }
-    await expect(readStoredBytes(targetFiles.customerKey)).rejects.toThrow(/missing/i);
-    await expect(readStoredBytes(targetFiles.internalKey)).rejects.toThrow(/missing/i);
-    await expect(readStoredBytes(targetFiles.photoKey)).rejects.toThrow(/missing/i);
+    expect(await readStoredBytes(targetFiles.customerKey)).toEqual(new TextEncoder().encode("bol-bytes"));
     expect(await readStoredBytes(keeperFiles.customerKey)).toEqual(new TextEncoder().encode("bol-bytes"));
-    expect(await ctx.db.prepare(`SELECT id, stops_json FROM loads WHERE id = ?`).get(keeper.id)).toBeTruthy();
-
-    const pending = await deleteRequest(keeper.id, admin);
-    expect(pending.status).toBe(200);
-    expect(await ctx.db.prepare(`SELECT id FROM loads WHERE id = ?`).get(keeper.id)).toBeUndefined();
+    expect(await getOrder(ctx, target.id)).toBeNull();
+    const token = (await ctx.db.prepare(`SELECT tracking_token FROM loads WHERE id = ?`).get(target.id)) as { tracking_token: string };
+    expect(await getOrderByToken(ctx, token.tracking_token)).toBeNull();
+    expect((await listOrders(ctx, { q: "SO-DELETE-1", pageSize: 10 })).total).toBe(0);
+    expect((await listOrders(ctx, { q: "458990-1", pageSize: 10 })).orders.some((order) => order.id === target.id)).toBe(false);
+    await expect(findBotLoad(ctx, { loadNumber: "458990-1" })).rejects.toThrow(/No load matches/);
+    await expect(findBotLoad(ctx, { salesOrderNumber: "SO-DELETE-1" })).rejects.toThrow(/No load matches/);
+    await expect(applyLoadStatus(ctx, { orderId: target.id, carrier: null })).rejects.toThrow(/No portal load/);
     expect(calls).toEqual([]);
+
+    const restored = await restoreOrderRoute(
+      new Request(`http://portal.test/api/admin/orders/${target.id}/restore`, { method: "POST", headers: headers(admin) }),
+      { params: Promise.resolve({ id: target.id }) },
+    );
+    expect(restored.status).toBe(200);
+    expect((await listOrders(ctx, { q: "SO-DELETE-1", pageSize: 10 })).orders.some((order) => order.id === target.id)).toBe(true);
+    const broughtBack = await getOrder(ctx, target.id);
+    expect(broughtBack?.auditEvents?.some((event) => event.kind === "deleted" && event.text.includes("Mike Gray"))).toBe(true);
+    expect(broughtBack?.auditEvents?.some((event) => event.kind === "restored")).toBe(true);
   });
 
-  it("rejects an EMIT user and an EMIT admin", async () => {
+  it("lets an EMIT admin delete, and refuses a regular EMIT user, view-as, and a signed-out request", async () => {
     const customer = await sessionCookie(customerSession());
     const emitAdmin = await sessionCookie(emitAdminSession());
     const admin = await sessionCookie(adminSession());
     const order = await createOrder("SO-DELETE-FORBIDDEN", customer);
 
+    const signedOut = await deleteRequest(order.id);
+    expect(signedOut.status).toBe(401);
     const asCustomer = await deleteRequest(order.id, customer);
     expect(asCustomer.status).toBe(403);
-    const asEmitAdmin = await deleteRequest(order.id, emitAdmin);
-    expect(asEmitAdmin.status).toBe(403);
-    expect(await ctx.db.prepare(`SELECT id FROM loads WHERE id = ?`).get(order.id)).toBeTruthy();
+    const preview = await deleteRequest(order.id, `${admin}; portal_view_as=admin:full`);
+    expect(preview.status).toBe(403);
+    expect(await ctx.db.prepare(`SELECT deleted_at FROM loads WHERE id = ?`).get(order.id)).toMatchObject({ deleted_at: null });
 
-    const removed = await deleteRequest(order.id, admin);
-    expect(removed.status).toBe(200);
+    const asEmitAdmin = await deleteRequest(order.id, emitAdmin);
+    expect(asEmitAdmin.status).toBe(200);
+    const hidden = (await ctx.db.prepare(`SELECT deleted_by FROM loads WHERE id = ?`).get(order.id)) as { deleted_by: string };
+    expect(hidden.deleted_by).toContain("Emit Lead");
+    expect((await listOrders(ctx, { q: "SO-DELETE-FORBIDDEN", pageSize: 10 })).total).toBe(0);
   });
 
   it("returns 404 for an unknown id", async () => {
@@ -183,13 +217,20 @@ describe("DELETE /api/admin/orders/[id]", () => {
     expect(await missing.json()).toMatchObject({ error: "Order not found" });
   });
 
-  it("uses the Select admin check and does not import SAM or Load Builder", () => {
-    const routeSource = readFileSync("app/api/admin/orders/[id]/route.ts", "utf8");
-    expect(routeSource).toContain("requireAdmin");
+  it("checks delete permission on the order route and does not call an outside system", () => {
+    const routeSource = readFileSync("app/api/orders/[id]/route.ts", "utf8");
+    expect(routeSource).toContain("canDeleteLoad");
+    expect(routeSource).toContain("rejectIfViewingAs");
     expect(routeSource).not.toMatch(/load-builder|@\/lib\/sam|requestLoadBuild|LOAD_BUILDER/);
+    const page = readFileSync("app/orders/[id]/page.tsx", "utf8");
+    expect(page).toContain("canDeleteLoad");
+    expect(page).toContain("<DeleteLoadButton");
     const ui = readFileSync("components/dashboard.tsx", "utf8");
-    expect(ui).toMatch(/selectView && confirmDeleteId !== order\.id \? \([\s\S]*?btn danger[\s\S]*?Delete/);
-    expect(ui).toMatch(/selectView && confirmDeleteId === order\.id \? \([\s\S]*?deleteConfirmText\(order\.loadNumber\)[\s\S]*?btn danger/);
-    expect(ui).toContain('fetch(`/api/admin/orders/${id}`, { method: "DELETE" })');
+    expect(ui).toContain("canDeleteLoad");
+    expect(ui).toContain("<DeleteLoadButton");
+    expect(ui).not.toContain("api/admin/orders");
+    const deleter = readFileSync("lib/orders.ts", "utf8");
+    const body = deleter.slice(deleter.indexOf("export async function deleteOrder"));
+    expect(body.slice(0, 900)).not.toMatch(/fetch\(|load-builder|from \"@\/lib\/sam\"/);
   });
 });
