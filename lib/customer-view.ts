@@ -269,7 +269,7 @@ export function presentCustomerOrder(order: CustomerOrder, viewer: Viewer, optio
   view.notices = presentNotices(order.notices);
   const stages = presentStageEvents(order.stageEvents);
   if (stages.length) view.stageEvents = stages;
-  const audit = presentAuditEvents(order.auditEvents);
+  const audit = presentAuditEvents(order.auditEvents, canSeePricing(access));
   if (audit.length) view.auditEvents = audit;
   const tracking = presentTrackingEvents(order.trackingEvents);
   if (tracking.length) view.trackingEvents = tracking;
@@ -355,11 +355,15 @@ function presentTrackingEvents(events: TrackingEvent[] | undefined): TrackingEve
   return safe;
 }
 
-function presentAuditEvents(events: AuditEvent[] | undefined): AuditEvent[] {
+function presentAuditEvents(events: AuditEvent[] | undefined, includeCost: boolean): AuditEvent[] {
   if (!events?.length) return [];
   const safe: AuditEvent[] = [];
   for (const event of events) {
-    if (event.kind !== "deleted" && event.kind !== "restored") continue;
+    if (event.kind === "cost") {
+      if (!includeCost) continue;
+    } else if (event.kind !== "deleted" && event.kind !== "restored") {
+      continue;
+    }
     const text = redactSensitiveText(event.text);
     if (!text || !event.at) continue;
     safe.push({ at: event.at, kind: event.kind, text });

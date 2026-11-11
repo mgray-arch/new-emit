@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
+import CostField from "@/components/cost-field";
 import DeleteLoadButton from "@/components/delete-load";
 import CarrierCallout from "@/components/carrier-callout";
 import DocumentLinks from "@/components/document-links";
@@ -454,12 +455,26 @@ export default function OrderPage() {
             {showPricing && (
               <section className="detail-section">
                 <h2>EMIT cost</h2>
-                <p>
-                  {order.customerCost == null
-                    ? "Not set yet."
-                    : order.customerCost.toLocaleString("en-US", { style: "currency", currency: "USD" })}
-                  {order.rateReason ? ` · ${order.rateReason}` : ""}
-                </p>
+                {readOnly ? (
+                  <p>
+                    {order.customerCost == null
+                      ? "Not set yet."
+                      : order.customerCost.toLocaleString("en-US", { style: "currency", currency: "USD" })}
+                    {order.rateReason ? ` · ${order.rateReason}` : ""}
+                  </p>
+                ) : (
+                  <>
+                    <CostField
+                      orderId={order.id}
+                      customerCost={order.customerCost ?? null}
+                      onUpdated={(next) => {
+                        setOrder(next);
+                        toast("Cost saved.");
+                      }}
+                    />
+                    {order.rateReason ? <p className="mini">{order.rateReason}</p> : null}
+                  </>
+                )}
               </section>
             )}
           </>

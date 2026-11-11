@@ -31,6 +31,7 @@ import {
   type LoadTab,
   type LoadTabCounts,
 } from "@/lib/load-list";
+import { parseCustomerCost } from "@/lib/cost";
 import { toast } from "@/lib/toast";
 import {
   STATUS_LABEL,
@@ -352,6 +353,14 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       setFormError("");
       return;
     }
+    if (showPricing) {
+      const parsed = parseCustomerCost(draft.customerCost);
+      if ("error" in parsed) {
+        setConfirmReady(false);
+        setFormError(parsed.error);
+        return;
+      }
+    }
     setConfirmReady(false);
     setSaving(true);
     setFormError("");
@@ -421,6 +430,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
         setEditing(body.order);
         setDraft(draftFromOrder(body.order));
       }
+      replaceOrder(body.order);
       setPage(1);
       setReload((value) => value + 1);
       toast(warningText || (editing ? "Load saved." : "Load submitted. Select will add the load number."));

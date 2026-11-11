@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { parseCustomerCost } from "@/lib/cost";
 import { salesOrderLineErrors, SALES_ORDERS_MAX } from "@/lib/sales-orders";
 import { HH_MM } from "@/lib/ship-time";
 import { PORTAL_STATUSES, RATE_REASONS, TRANSIT_OPTIONS } from "@/lib/types";
@@ -51,7 +52,14 @@ const orderFields = {
   shipTime: z.string().regex(HH_MM, "Use HH:MM").nullable().optional(),
   mustDeliverDate: dateField,
   truckEta: dateField,
-  customerCost: z.number().min(0).max(1_000_000).nullable().optional(),
+  customerCost: z
+    .number()
+    .superRefine((value, ctx) => {
+      const parsed = parseCustomerCost(value);
+      if ("error" in parsed) ctx.addIssue({ code: z.ZodIssueCode.custom, message: parsed.error });
+    })
+    .nullable()
+    .optional(),
   rateReason: z.enum(RATE_REASONS).nullable().optional(),
   comments: z.string().max(2000).optional(),
   /** Set by the copy form. Stored for audit. Ignored when it does not match a load. */

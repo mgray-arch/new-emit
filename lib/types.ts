@@ -116,10 +116,14 @@ export interface StageEvent {
   text: string;
 }
 
-/** Who removed or put back a load. The text names the person. It has no pay. */
+/**
+ * Who removed or put back a load, or who changed EMIT's cost.
+ * A cost line names the old and new amounts and the person. It is omitted for
+ * viewers who cannot see cost. It has no carrier pay.
+ */
 export interface AuditEvent {
   at: string;
-  kind: "deleted" | "restored";
+  kind: "deleted" | "restored" | "cost";
   text: string;
 }
 

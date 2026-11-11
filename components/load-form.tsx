@@ -5,6 +5,7 @@ import SoNumber from "@/components/so-number";
 import { StopPlace, type DraftStop } from "@/components/stop-place";
 import Timeline from "@/components/timeline";
 import TrackLink from "@/components/track-link";
+import { parseCustomerCost } from "@/lib/cost";
 import { formatWhen } from "@/lib/dates";
 import { applyStopOrder, type RoutePlan } from "@/lib/route-optimize";
 import { normalizeSalesOrder, parseLegacySalesOrders, salesOrderError, salesOrderLineErrors } from "@/lib/sales-orders";
@@ -201,14 +202,18 @@ export function payloadFromDraft(draft: Draft, options?: { includePricing?: bool
     shipTime: draft.shipTime || null,
     mustDeliverDate: draft.mustDeliverDate || null,
     truckEta: draft.truckEta || null,
-    ...(includePricing
-      ? {
-          customerCost: draft.customerCost === "" ? null : Number(draft.customerCost),
-          rateReason: draft.rateReason || null,
-        }
-      : {}),
+    ...(includePricing ? pricingFromDraft(draft) : {}),
     comments: draft.comments,
     ...(draft.copiedFromId ? { copiedFromId: draft.copiedFromId } : {}),
+  };
+}
+
+function pricingFromDraft(draft: Draft): { customerCost: number | null; rateReason: string | null } {
+  const parsed = parseCustomerCost(draft.customerCost);
+  if ("error" in parsed) throw new Error(parsed.error);
+  return {
+    customerCost: parsed.cents == null ? null : parsed.cents / 100,
+    rateReason: draft.rateReason || null,
   };
 }
 
@@ -707,17 +712,21 @@ export default function LoadForm({
       {!hideCommercial && (
         <div className="grid-2">
           <div className="field">
-            <label>Cost (optional)</label>
+            <label htmlFor="load-form-cost">EMIT cost (optional)</label>
             <input
+              id="load-form-cost"
+              aria-label="EMIT cost"
               inputMode="decimal"
-              placeholder="e.g., 1500.00"
+              placeholder="1500.00"
+              disabled={readOnly}
               value={draft.customerCost}
               onChange={(event) => setDraft({ ...draft, customerCost: event.target.value })}
             />
+            <p className="mini">What EMIT pays Select for this load.</p>
           </div>
           <div className="field">
             <label>Rate Reason Code (optional)</label>
-            <select value={draft.rateReason} onChange={(event) => setDraft({ ...draft, rateReason: event.target.value })}>
+            <select value={draft.rateReason} disabled={readOnly} onChange={(event) => setDraft({ ...draft, rateReason: event.target.value })}>
               <option value="">Select reason code</option>
               {RATE_REASONS.map((reason) => (
                 <option key={reason}>{reason}</option>
