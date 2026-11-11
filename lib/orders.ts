@@ -1,4 +1,5 @@
 import { bolPrintState } from "@/lib/bol-prints";
+import { costHistoryText, parseCustomerCost } from "@/lib/cost";
 import { normalizeCarrierMc, normalizeCarrierName, normalizeDriverName } from "@/lib/carrier";
 import { recordCarrierAssignment } from "@/lib/carrier-notice";
 import {
@@ -872,6 +873,13 @@ export async function updateOrder(
       });
   const now = ctx.now().toISOString();
   const seePricing = canSeePricing(actor);
+  const previousCents = existing.customer_cost_cents == null ? null : Number(existing.customer_cost_cents);
+  let nextCents = previousCents;
+  if (seePricing && patch.customerCost !== undefined) {
+    const parsed = parseCustomerCost(patch.customerCost);
+    if ("error" in parsed) throw new PortalError(parsed.error);
+    nextCents = parsed.cents;
+  }
   let route = drafted;
   let warnings: SalesOrderWarning[] = [];
   await withTransaction(ctx.db, async () => {
@@ -909,16 +917,15 @@ export async function updateOrder(
       patch.shipTime === undefined ? current.shipTime : patch.shipTime,
       patch.mustDeliverDate === undefined ? current.mustDeliverDate : patch.mustDeliverDate,
       patch.truckEta === undefined ? current.truckEta : patch.truckEta,
-      !seePricing || patch.customerCost === undefined
-        ? existing.customer_cost_cents
-        : patch.customerCost == null
-          ? null
-          : Math.round(patch.customerCost * 100),
+      nextCents,
       (!seePricing || patch.rateReason === undefined ? current.rateReason : patch.rateReason) ?? null,
       patch.comments === undefined ? current.comments : patch.comments,
       now,
       id,
     );
+    if (nextCents !== previousCents) {
+      await recordCostChange(ctx, id, previousCents, nextCents, actor, now);
+    }
   });
   if (portalStatus !== current.portalStatus) {
     await writeStage(ctx, id, current.portalStatus, portalStatus, now);
@@ -936,6 +943,43 @@ export interface DeletedLoad {
   loadNumber: string | null;
   deletedAt: string;
   deletedBy: string;
+}
+
+async function recordCostChange(
+  ctx: PortalContext,
+  id: string,
+  fromCents: number | null,
+  toCents: number | null,
+  actor: { name: string; email: string },
+  at: string,
+): Promise<void> {
+  if (fromCents === toCents) return;
+  const who = formatEnteredBy(actor.name, actor.email);
+  await appendAudit(ctx, id, { at, kind: "cost", text: costHistoryText(fromCents, toCents, who) });
+}
+
+/**
+ * Set EMIT's cost without changing the rest of the load.
+ * The same people who can see the cost can change it. Sales, Loader, a regular
+ * EMIT user, and a view-as preview cannot. Carrier pay is not a field.
+ */
+export async function updateCustomerCost(ctx: PortalContext, id: string, rawCost: unknown, actor: Session): Promise<CustomerOrder> {
+  if (actor.viewAs) throw new PortalError("View-as is read-only. Switch back to Select view to change anything.", 403);
+  if (!canSeePricing(actor)) throw new PortalError("This account cannot change the cost.", 403);
+  const parsed = parseCustomerCost(rawCost);
+  if ("error" in parsed) throw new PortalError(parsed.error);
+  const existing = await ctx.db.prepare(`SELECT id, customer_cost_cents FROM loads WHERE id = ? AND ${OPEN_LOAD_SQL}`).get(id);
+  if (!existing) throw new PortalError("Order not found", 404);
+  const previousCents = existing.customer_cost_cents == null ? null : Number(existing.customer_cost_cents);
+  const nextCents = parsed.cents;
+  const now = ctx.now().toISOString();
+  await withTransaction(ctx.db, async () => {
+    await ctx.db.prepare(`UPDATE loads SET customer_cost_cents = ?, updated_at = ? WHERE id = ? AND ${OPEN_LOAD_SQL}`).run(nextCents, now, id);
+    await recordCostChange(ctx, id, previousCents, nextCents, actor, now);
+  });
+  const updated = await getOrder(ctx, id);
+  if (!updated) throw new PortalError("Order not found", 404);
+  return updated;
 }
 
 async function appendAudit(ctx: PortalContext, id: string, event: AuditEvent): Promise<void> {

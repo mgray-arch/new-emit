@@ -75,7 +75,7 @@ export function parseAuditEvents(raw: string | null | undefined): AuditEvent[] {
     for (const item of parsed) {
       if (!item || typeof item !== "object") continue;
       const row = item as Record<string, unknown>;
-      const kind = row.kind === "deleted" || row.kind === "restored" ? row.kind : null;
+      const kind = row.kind === "deleted" || row.kind === "restored" || row.kind === "cost" ? row.kind : null;
       const text = typeof row.text === "string" ? row.text.trim() : "";
       const at = typeof row.at === "string" ? row.at : "";
       if (!kind || !text) continue;
