@@ -1060,6 +1060,87 @@ html[data-theme="light"] .pill.status-cancelled { background: #efe8dc; color: #3
 html[data-theme="light"] .msg.mine { background: #f8efe4; }
 html[data-theme="light"] .load-picker-option.on { background: #f8efe4; }
 
+.thread-tools { display: grid; gap: 8px; margin: 8px 0 12px; min-width: 0; }
+.thread-tools input,
+.load-thread input,
+.thread-tools textarea {
+  width: 100%;
+  max-width: 100%;
+  font-size: 16px;
+}
+.thread-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.thread-filters button {
+  min-height: 44px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  font-weight: 700;
+}
+.thread-filters button[aria-pressed="true"] {
+  background: var(--tab-on);
+  border-color: var(--orange);
+  color: var(--text);
+}
+.thread-board {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.thread-row {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  font: inherit;
+}
+.thread-row.unread { border-color: var(--orange); }
+.thread-row-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-width: 0;
+}
+.thread-lane, .thread-preview {
+  color: var(--muted);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.thread-preview { display: grid; gap: 2px; }
+.thread-preview-text { color: var(--text); }
+.thread-back { min-height: 44px; justify-self: start; }
+.thread-new-action { justify-content: flex-start; margin-bottom: 8px; }
+.thread-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.load-thread {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 18px;
+  min-width: 0;
+}
+.load-thread h2 { margin: 0; font-size: 18px; }
+.load-thread .thread { max-height: 320px; }
+.load-thread .composer textarea { min-height: 72px; font-size: 16px; }
+html[data-theme="light"] .thread-filters button[aria-pressed="true"] { background: #f8efe4; }
+
+@media (max-width: 420px) {
+  .thread-filters button { flex: 1 1 calc(50% - 8px); }
+  .thread-row-top { align-items: flex-start; }
+  .messages-page .composer-actions .btn,
+  .load-thread .composer-actions .btn { width: 100%; min-height: 44px; }
+}
+
 @media (max-width: 520px) {
   .tabs { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
   .tab { justify-content: center; }
@@ -1091,21 +1172,21 @@ html[data-theme="light"] .load-picker-option.on { background: #f8efe4; }
     padding-top: max(16px, env(safe-area-inset-top));
     padding-bottom: max(16px, env(safe-area-inset-bottom));
   }
-  body:has(.messages-page) { overflow: hidden; }
-  .app-shell:has(.messages-page) {
+  body:has(.messages-page.thread-open) { overflow: hidden; }
+  .app-shell:has(.messages-page.thread-open) {
     height: var(--vv-height, 100dvh);
     min-height: 0;
     overflow: hidden;
     transform: translateY(var(--vv-offset, 0px));
   }
-  .app-main:has(.messages-page) {
+  .app-main:has(.messages-page.thread-open) {
     display: flex;
     flex-direction: column;
     min-height: 0;
     height: 100%;
     overflow: hidden;
   }
-  .page.messages-page {
+  .page.messages-page.thread-open {
     flex: 1 1 auto;
     min-height: 0;
     display: flex;
@@ -1118,6 +1199,7 @@ html[data-theme="light"] .load-picker-option.on { background: #f8efe4; }
   }
   .messages-page h1 { font-size: 22px; }
   .messages-page .lede { margin: 4px 0 8px; }
+  .messages-page.thread-open .thread-pane { flex: 1 1 auto; min-height: 0; }
   .messages-page .thread {
     flex: 1 1 auto;
     min-height: 0;

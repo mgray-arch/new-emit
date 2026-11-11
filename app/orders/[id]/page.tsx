@@ -7,6 +7,7 @@ import DeleteLoadButton from "@/components/delete-load";
 import CarrierCallout from "@/components/carrier-callout";
 import DocumentLinks from "@/components/document-links";
 import LoadOwnerField from "@/components/load-owner-field";
+import LoadThread from "@/components/load-thread";
 import PhotoGallery from "@/components/photo-gallery";
 import BuildStatus from "@/components/build-status";
 import OrderHistory from "@/components/order-history";
@@ -211,13 +212,7 @@ export default function OrderPage() {
             {order.trackingLink && trackingStarted ? (
               <TrackingCallout at={trackingStarted.at} href={order.trackingLink} fresh={Boolean(order.trackingBadge)} />
             ) : null}
-            {me?.chatEnabled ? (
-              <p>
-                <Link href={`/messages?load=${order.id}`} className="text-link">
-                  Message about this load
-                </Link>
-              </p>
-            ) : null}
+            {me?.chatEnabled ? <LoadThread loadId={order.id} readOnly={readOnly} /> : null}
             <div className="date-grid">
               <div className="date-pair">
                 <span className="k">Pickup</span>

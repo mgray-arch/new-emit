@@ -26,6 +26,8 @@ let ctx: PortalContext;
 const savedEnv: Record<string, string | undefined> = {};
 const ENV_KEYS = [
   "SLACK_MESSAGES_WEBHOOK_URL",
+  "SLACK_BOT_TOKEN",
+  "SLACK_MESSAGES_CHANNEL_ID",
   "SLACK_USER_ID_DREW",
   "SLACK_USER_ID_AINSLEY",
   "MESSAGE_NOTIFY_EMAILS",
@@ -187,16 +189,24 @@ describe("message authorization", () => {
     const viewerBody = await asViewer.json();
     const selectBody = await asSelect.json();
     const drewBody = await asDrew.json();
-    expect(viewerBody.messages.map((message: { id: string }) => message.id)).toEqual([posted.id]);
-    expect(selectBody.messages.map((message: { id: string }) => message.id)).toEqual([posted.id]);
-    expect(drewBody.messages.map((message: { id: string }) => message.id)).toEqual([posted.id]);
-    expect(viewerBody.messages[0].mine).toBe(false);
-    expect(selectBody.messages[0].side).toBe("emit");
+    expect(viewerBody.threads).toHaveLength(1);
+    expect(viewerBody.threads[0].kind).toBe("general");
+    expect(viewerBody.threads[0].latest.id).toBe(posted.id);
+    expect(selectBody.threads[0].latest.id).toBe(posted.id);
+    expect(drewBody.threads[0].latest.id).toBe(posted.id);
+    const opened = await listMessagesRoute(
+      new Request(`http://portal.test/api/messages?thread=${viewerBody.threads[0].id}`, { headers: headers(viewer) }),
+    );
+    const openedBody = await opened.json();
+    expect(openedBody.messages.map((message: { id: string }) => message.id)).toEqual([posted.id]);
+    expect(openedBody.messages[0].mine).toBe(false);
+    expect(openedBody.messages[0].side).toBe("emit");
+    expect(openedBody.messages[0].threadId).toBe(viewerBody.threads[0].id);
 
     const preview = `${select}; portal_view_as=regular:view`;
     const looked = await listMessagesRoute(new Request("http://portal.test/api/messages", { headers: headers(preview) }));
     expect(looked.status).toBe(200);
-    expect((await looked.json()).messages).toHaveLength(1);
+    expect((await looked.json()).threads).toHaveLength(1);
     const denied = await postMessageRoute(
       new Request("http://portal.test/api/messages", {
         method: "POST",
@@ -454,7 +464,7 @@ describe("carrier pay stays out of the thread", () => {
   });
 
   it("has no carrier columns on the message tables", async () => {
-    for (const table of ["messages", "message_reads"]) {
+    for (const table of ["messages", "message_threads", "message_thread_reads"]) {
       const columns = (await ctx.db.prepare(`PRAGMA table_info(${table})`).all()) as Array<{ name: string }>;
       for (const column of columns) {
         expect(column.name.toLowerCase()).not.toMatch(/carrier|customer_cost|rate_reason|staff_notes/);
