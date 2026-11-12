@@ -182,6 +182,22 @@ export function replaceListedOrder<T extends LoadListSortKey>(rows: T[], next: T
   return sortLoadList(rows.map((row) => (row.id === next.id ? next : row)));
 }
 
+/**
+ * A focus refresh can still be in flight when a cost save returns. The older
+ * response must not replace the order the save just wrote.
+ * Server timestamps are ISO-8601, so string order matches time order.
+ */
+export function preferNewerOrder<T extends { updatedAt?: string | null }>(current: T | null | undefined, incoming: T): T {
+  if (!current?.updatedAt || !incoming.updatedAt) return incoming;
+  return incoming.updatedAt >= current.updatedAt ? incoming : current;
+}
+
+/** Page-1 list refresh. Keeps a card whose save is newer than this response. */
+export function mergeListedOrders<T extends { id: string; updatedAt?: string | null }>(current: T[], incoming: T[]): T[] {
+  const local = new Map(current.map((order) => [order.id, order]));
+  return incoming.map((order) => preferNewerOrder(local.get(order.id), order));
+}
+
 export function fileSummary(order: Pick<CustomerOrder, "attachmentCount" | "bolCount" | "pendingReviewCount">): string {
   const files = order.attachmentCount + order.bolCount;
   const filePart = files === 0 ? "" : files === 1 ? "1 file" : `${files} files`;

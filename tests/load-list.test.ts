@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { GET as exportOrders } from "@/app/api/orders/export/route";
 import { GET as listOrdersRoute } from "@/app/api/orders/route";
-import { DISPLAY_STATUS_LABEL, SIMPLE_STEPS, attentionReasons, compareLoadList, displayStatus, emptyListMessage, fileSummary, loadsToCsv, pickupGroup, replaceListedOrder, simpleStepIndex, sortLoadList, tripCaption } from "@/lib/load-list";
+import { DISPLAY_STATUS_LABEL, SIMPLE_STEPS, attentionReasons, compareLoadList, displayStatus, emptyListMessage, fileSummary, loadsToCsv, mergeListedOrders, pickupGroup, preferNewerOrder, replaceListedOrder, simpleStepIndex, sortLoadList, tripCaption } from "@/lib/load-list";
 import { listBoard, listOrders } from "@/lib/orders";
 import type { PortalContext } from "@/lib/db";
 import type { CustomerOrder } from "@/lib/types";
@@ -346,5 +346,18 @@ describe("load lists", () => {
       dropped.findIndex((order) => order.salesOrderNumber === "SO-SORT-D"),
     );
     expect(compareLoadList({ portalStatus: "ready_to_ship", shipDate: "2026-11-02", shipTime: "08:00" }, { portalStatus: "shipped", shipDate: "2026-11-02", shipTime: "08:00" })).toBeLessThan(0);
+  });
+
+  it("keeps a cost save when an older list refresh arrives", () => {
+    type Row = { id: string; updatedAt: string; customerCost: number | null };
+    const saved: Row = { id: "load-1", updatedAt: "2026-11-11T18:05:00.000Z", customerCost: 1750 };
+    const stale: Row = { id: "load-1", updatedAt: "2026-11-11T18:04:00.000Z", customerCost: null };
+    const other: Row = { id: "load-2", updatedAt: "2026-11-11T18:00:00.000Z", customerCost: 10 };
+    const changed: Row = { ...saved, customerCost: 1800 };
+    expect(preferNewerOrder(saved, stale)).toEqual(saved);
+    expect(preferNewerOrder(stale, saved)).toEqual(saved);
+    expect(preferNewerOrder(null, saved)).toEqual(saved);
+    expect(mergeListedOrders([saved, other], [stale])).toEqual([saved]);
+    expect(mergeListedOrders([stale], [changed])).toEqual([changed]);
   });
 });

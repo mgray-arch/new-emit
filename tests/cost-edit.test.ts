@@ -1,14 +1,14 @@
 import { createElement } from "react";
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { POST as ask } from "@/app/api/ask/route";
 import { PATCH as patchCost } from "@/app/api/orders/[id]/cost/route";
 import { GET as getOrderRoute, PATCH as patchOrder } from "@/app/api/orders/[id]/route";
 import { GET as exportOrders } from "@/app/api/orders/export/route";
 import { GET as listOrdersRoute, POST as createOrderRoute } from "@/app/api/orders/route";
 import { GET as publicTrack } from "@/app/api/track/[token]/route";
-import CostField from "@/components/cost-field";
+import CostField, { ListCostEditor, requestCostSave } from "@/components/cost-field";
 import LoadForm, { emptyDraft, payloadFromDraft } from "@/components/load-form";
 import { answerQuestion } from "@/lib/assistant";
 import { findRateField } from "@/lib/carrier-notice";
@@ -349,5 +349,65 @@ describe("editing EMIT cost", () => {
     const page = readFileSync("app/orders/[id]/page.tsx", "utf8");
     expect(page).toContain("CostField");
     expect(page).toContain("showPricing");
+    expect(page).toContain("preferNewerOrder");
+    const field = readFileSync("components/cost-field.tsx", "utf8");
+    expect(field).toContain('event.key !== "Enter"');
+    expect(field).toContain('event.key === "Enter"');
+    const formSource = readFileSync("components/load-form.tsx", "utf8");
+    expect(formSource).toContain("onEnterCost");
+  });
+
+  it("shows an editable cost on the list card and posts the typed amount", async () => {
+    const idle = renderToStaticMarkup(createElement(ListCostEditor, { orderId: "load-1", customerCost: null, onUpdated: () => {} }));
+    expect(idle).toContain("Cost not set");
+    expect(idle).toContain('aria-label="Edit EMIT cost"');
+    expect(idle).not.toMatch(/carrier pay|carrier rate|rate confirmation|SAM/i);
+    const priced = renderToStaticMarkup(createElement(ListCostEditor, { orderId: "load-1", customerCost: 1750, onUpdated: () => {} }));
+    expect(priced).toContain("$1,750.00");
+    expect(priced).not.toContain("Cost not set");
+
+    const dashboard = readFileSync("components/dashboard.tsx", "utf8");
+    expect(dashboard).toContain("ListCostEditor");
+    expect(dashboard.indexOf("showPricing ? (")).toBeLessThan(dashboard.indexOf("<ListCostEditor"));
+    expect(dashboard).toContain("mergeListedOrders");
+    const editorBlock = dashboard.slice(dashboard.indexOf("showPricing ? ("), dashboard.indexOf("Copy load"));
+    expect(editorBlock).toContain("readOnly ? (");
+    expect(editorBlock).toContain("formatCustomerCost");
+    expect(editorBlock).not.toMatch(/\bSAM\b/);
+
+    const calls: Array<{ url: string; body: string }> = [];
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), body: String(init?.body ?? "") });
+      return new Response(JSON.stringify({ order: { id: "load-1", customerCost: 1500, updatedAt: "2026-11-11T18:00:00.000Z" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    try {
+      await requestCostSave("load-1", "$1,500.00");
+      await requestCostSave("load-1", "1500.50");
+      await requestCostSave("load-1", "  ");
+      expect(calls.map((call) => call.url)).toEqual([
+        "/api/orders/load-1/cost",
+        "/api/orders/load-1/cost",
+        "/api/orders/load-1/cost",
+      ]);
+      expect(calls.map((call) => JSON.parse(call.body))).toEqual([
+        { customerCost: "$1,500.00" },
+        { customerCost: "1500.50" },
+        { customerCost: null },
+      ]);
+      await expect(requestCostSave("load-1", "nope")).rejects.toThrow(/dollar amount/);
+      expect(calls).toHaveLength(3);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ error: "This account cannot change the cost." }), { status: 403 }));
+    try {
+      await expect(requestCostSave("load-1", "10")).rejects.toThrow(/cannot change the cost/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

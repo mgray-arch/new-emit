@@ -6,6 +6,7 @@ import CarrierBadge from "@/components/carrier-badge";
 import CarrierBox from "@/components/carrier-box";
 import DocumentLinks from "@/components/document-links";
 import LoadForm, { draftFromCopy, draftFromOrder, draftSalesOrderErrors, emptyDraft, payloadFromDraft, useSites, type Draft } from "@/components/load-form";
+import { ListCostEditor, formatCustomerCost } from "@/components/cost-field";
 import BuildStatus from "@/components/build-status";
 import PhotoGallery from "@/components/photo-gallery";
 import PortalStatusControl from "@/components/portal-status-control";
@@ -26,6 +27,8 @@ import {
   displayStatus,
   emptyListMessage,
   fileSummary,
+  mergeListedOrders,
+  preferNewerOrder,
   replaceListedOrder,
   visibleLoadTabs,
   type LoadTab,
@@ -215,9 +218,12 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       .then((body: ListResponse) => {
         setData(body);
         setRows((current) => {
-          if (page === 1) return body.orders;
+          if (page === 1) return mergeListedOrders(current, body.orders);
           const incoming = new Map(body.orders.map((order) => [order.id, order]));
-          const merged = current.map((order) => incoming.get(order.id) ?? order);
+          const merged = current.map((order) => {
+            const next = incoming.get(order.id);
+            return next ? preferNewerOrder(order, next) : order;
+          });
           const seen = new Set(merged.map((order) => order.id));
           return [...merged, ...body.orders.filter((order) => !seen.has(order.id))];
         });
@@ -329,6 +335,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   }
 
   async function save(forceReady = false) {
+    if (saving) return;
     if (readOnly) {
       setFormError("View-as is read-only. Switch back to Select view to change anything.");
       return;
@@ -631,7 +638,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                   aria-label={`Open ${order.salesOrderNumber}`}
                   onClick={(event) => {
                     const target = event.target as HTMLElement;
-                    if (target.closest("a, button, select, input, label, option, .stage-menu, .confirm-box")) return;
+                    if (target.closest("a, button, select, input, label, option, .stage-menu, .confirm-box, .list-cost")) return;
                     router.push(`/orders/${order.id}`);
                   }}
                   onKeyDown={(event) => {
@@ -699,11 +706,20 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                   {order.comments ? <Note text={order.comments} /> : null}
                   <div className="load-row-actions">
                     <TrackLink href={order.trackingLink} label="Track shipment" />
-                    {showPricing && (
-                      <span className="load-meta">
-                        {order.customerCost == null ? "Cost not set" : order.customerCost.toLocaleString("en-US", { style: "currency", currency: "USD" })}
-                      </span>
-                    )}
+                    {showPricing ? (
+                      readOnly ? (
+                        <span className="load-meta">{formatCustomerCost(order.customerCost)}</span>
+                      ) : (
+                        <ListCostEditor
+                          orderId={order.id}
+                          customerCost={order.customerCost ?? null}
+                          onUpdated={(next) => {
+                            replaceOrder(next);
+                            toast("Cost saved.");
+                          }}
+                        />
+                      )
+                    ) : null}
                     {allowLoads && !readOnly ? (
                       <button className="btn secondary" type="button" onClick={() => void openCopy(order.id)}>
                         Copy load
@@ -808,7 +824,15 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
             )}
             {formError && <p className="error">{formError}</p>}
             {soWarning && <p className="warn">{soWarning}</p>}
-            <LoadForm draft={draft} setDraft={setDraft} order={editing} sites={sites} hideCommercial={!showPricing} readOnly={readOnly} />
+            <LoadForm
+              draft={draft}
+              setDraft={setDraft}
+              order={editing}
+              sites={sites}
+              hideCommercial={!showPricing}
+              readOnly={readOnly}
+              onEnterCost={() => void save()}
+            />
             {confirmReady ? (
               <div className="confirm-box ready-confirm" role="status">
                 <button className="btn" type="button" disabled={saving} onClick={() => void save(true)}>

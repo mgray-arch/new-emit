@@ -637,6 +637,7 @@ export default function LoadForm({
   sites,
   hideCommercial = false,
   readOnly = false,
+  onEnterCost,
 }: {
   draft: Draft;
   setDraft: (draft: Draft) => void;
@@ -644,6 +645,8 @@ export default function LoadForm({
   sites: Site[];
   hideCommercial?: boolean;
   readOnly?: boolean;
+  /** Enter in the cost field saves the load. The list card has its own editor. */
+  onEnterCost?: () => void;
 }) {
   const shipTimeId = useId();
   return (
@@ -721,6 +724,11 @@ export default function LoadForm({
               disabled={readOnly}
               value={draft.customerCost}
               onChange={(event) => setDraft({ ...draft, customerCost: event.target.value })}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" || readOnly || !onEnterCost) return;
+                event.preventDefault();
+                onEnterCost();
+              }}
             />
             <p className="mini">What EMIT pays Select for this load.</p>
           </div>

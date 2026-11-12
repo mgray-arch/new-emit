@@ -139,7 +139,12 @@ html[data-theme="light"] .brand-logo .logo-for-light { display: block; }
   font-weight: 600;
 }
 .btn.danger { color: #ffb4b8; border-color: #6a3036; }
+.btn.compact { padding: 6px 10px; font-size: 14px; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.cost-edit { font-size: 15px; text-align: left; }
+.list-cost { min-width: 0; max-width: 100%; }
+.list-cost .inline-field { margin: 0; }
+.list-cost .error { margin: 4px 0 0; }
 
 .table-wrap { overflow-x: auto; border-top: 1px solid var(--line); }
 table { width: 100%; border-collapse: collapse; min-width: 1180px; }

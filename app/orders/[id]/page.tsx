@@ -23,7 +23,7 @@ import TrackingLinkField from "@/components/tracking-link-field";
 import { denverDate, formatDay, formatWhen, formatWhenBoise } from "@/lib/dates";
 import { formatStopSchedule } from "@/lib/stop-schedule";
 import { formatEnteredBy } from "@/lib/entered-by";
-import { displayStatus, fileSummary } from "@/lib/load-list";
+import { displayStatus, fileSummary, preferNewerOrder } from "@/lib/load-list";
 import { reprintMessage } from "@/lib/reprint";
 import { salesOrdersForStop } from "@/lib/sales-orders";
 import { toast } from "@/lib/toast";
@@ -133,8 +133,14 @@ export default function OrderPage() {
           return;
         }
         const body = await response.json();
-        if (cancelled) return;
-        setOrder(body.order);
+        if (cancelled || !body.order) return;
+        let applied = false;
+        setOrder((current) => {
+          const next = preferNewerOrder(current, body.order);
+          applied = next === body.order;
+          return next;
+        });
+        if (!applied) return;
         setCarrierDraft({
           carrierName: body.order.carrierName ?? "",
           carrierMc: body.order.carrierMc ?? "",
