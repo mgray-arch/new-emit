@@ -104,7 +104,7 @@ describe("Select admin session after password sign-in", () => {
     );
     const board = await orders.json();
     expect(orders.status, JSON.stringify(board)).toBe(200);
-    expect(board.tab).toBe("attention");
+    expect(board.tab).toBe("being_prepared");
     expect(board.orders.length).toBeGreaterThan(0);
     expect(JSON.stringify(board)).not.toMatch(/carrierPay|carrier_pay|staffNotes/);
   });

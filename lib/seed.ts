@@ -584,7 +584,7 @@ export const DEMO_SAMPLE_DOCS = [
     slot: "bol" as const,
     title: "BILL OF LADING",
     consignee: "Spitzer Industries, Inc.",
-    tab: "active" as const,
+    tab: "ready_to_ship" as const,
   },
   {
     salesOrderNumber: "so-003108_T16",
@@ -592,7 +592,7 @@ export const DEMO_SAMPLE_DOCS = [
     slot: "attachment" as const,
     title: "PROOF OF DELIVERY",
     consignee: "Enchanted Rock LLC",
-    tab: "active" as const,
+    tab: "shipped" as const,
   },
   {
     salesOrderNumber: "SO4422",
@@ -600,7 +600,7 @@ export const DEMO_SAMPLE_DOCS = [
     slot: "bol" as const,
     title: "BILL OF LADING",
     consignee: "Enchanted Rock LLC",
-    tab: "active" as const,
+    tab: "shipped" as const,
   },
   {
     salesOrderNumber: "SO-002722",
@@ -608,7 +608,7 @@ export const DEMO_SAMPLE_DOCS = [
     slot: "attachment" as const,
     title: "PROOF OF DELIVERY",
     consignee: "Kodiak Gas Services",
-    tab: "delivered" as const,
+    tab: "shipped" as const,
   },
   {
     salesOrderNumber: "SO4418",
@@ -616,7 +616,7 @@ export const DEMO_SAMPLE_DOCS = [
     slot: "bol" as const,
     title: "BILL OF LADING",
     consignee: "Johnson Thermal Systems LLC",
-    tab: "delivered" as const,
+    tab: "shipped" as const,
   },
   {
     salesOrderNumber: "SO4540",
@@ -624,7 +624,7 @@ export const DEMO_SAMPLE_DOCS = [
     slot: "attachment" as const,
     title: "PROOF OF DELIVERY",
     consignee: "Encore Oilfield Services LLC",
-    tab: "history" as const,
+    tab: "shipped" as const,
   },
 ];
 

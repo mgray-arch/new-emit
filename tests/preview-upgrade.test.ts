@@ -128,12 +128,12 @@ describe("preview database upgrade", () => {
       expect.arrayContaining(["sam_build_status", "sam_build_error", "sam_build_at", "slack_notified_at", "carrier_name", "carrier_mc", "carrier_notice_log"]),
     );
     const ctx: PortalContext = { db, now: () => new Date("2026-10-21T18:00:00Z") };
-    for (const tab of ["attention", "active", "delivered", "history"] as const) {
+    for (const tab of ["being_prepared", "ready_to_ship", "shipped"] as const) {
       const board = await listBoard(ctx, { tab, page: 1, pageSize: 25 });
-      expect((board.counts.attention ?? 0) + board.counts.active + board.counts.delivered + board.counts.history).toBe(1);
+      expect(board.counts.being_prepared + board.counts.ready_to_ship + board.counts.shipped).toBe(1);
     }
-    const attention = await listBoard(ctx, { tab: "attention", page: 1, pageSize: 25 });
-    expect(attention.orders.map((order) => order.salesOrderNumber)).toEqual(["SO2196"]);
+    const shipped = await listBoard(ctx, { tab: "shipped", page: 1, pageSize: 25 });
+    expect(shipped.orders.map((order) => order.salesOrderNumber)).toEqual(["SO2196"]);
     const saved = await db.prepare(`SELECT email, role FROM users ORDER BY email`).all();
     expect(saved).toEqual([
       { email: "lead@emit.example", role: "emit_admin" },
@@ -223,7 +223,7 @@ describe("preview database upgrade", () => {
       const cookie = await sessionCookie(session);
       const view = item.viewAs ? `; portal_view_as=${item.viewAs}` : "";
       const response = await listOrdersRoute(
-        new Request("http://portal.test/api/orders?tab=attention&page=1&pageSize=25", {
+        new Request("http://portal.test/api/orders?tab=shipped&page=1&pageSize=25", {
           headers: { cookie: `${cookie}${view}`, host: "portal.test" },
         }),
       );
@@ -231,14 +231,10 @@ describe("preview database upgrade", () => {
       expect(response.status, JSON.stringify(body)).toBe(200);
       expect(body.orders).toHaveLength(1);
       expect(body.orders[0].salesOrderNumber).toBe("SO2196");
-      if (item.role === "admin" && !item.viewAs) {
-        expect(body.tab).toBe("attention");
-        expect(body.counts.attention).toBe(1);
-      } else {
-        expect(body.tab).toBe("active");
-        expect(body.counts).not.toHaveProperty("attention");
-        expect(body.counts.active).toBe(1);
-      }
+      expect(body.tab).toBe("shipped");
+      expect(body.counts).not.toHaveProperty("attention");
+      expect(body.counts.shipped).toBe(1);
+      expect(body.counts.being_prepared).toBe(0);
       expect(Object.prototype.hasOwnProperty.call(body.orders[0], "customerCost")).toBe(item.pricing);
       expect(Object.prototype.hasOwnProperty.call(body.orders[0], "pendingReviewCount")).toBe(item.review);
       expect(Object.prototype.hasOwnProperty.call(body.orders[0], "samBuildStatus")).toBe(false);

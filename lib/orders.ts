@@ -21,7 +21,7 @@ import { buildStatusLabel, parseAuditEvents, parseOrderNotices, parseStageEvents
 import { parseTrackingEvents } from "@/lib/tracking-link";
 import { serializeCustomerOrder, trackingUrlFor } from "@/lib/customer-view";
 import { addDaysISO, denverDate, weekRange } from "@/lib/dates";
-import type { LoadTab, LoadTabCounts } from "@/lib/load-list";
+import { LOAD_TABS, type LoadTab, type LoadTabCounts } from "@/lib/load-list";
 import { listCustomerDocuments } from "@/lib/documents";
 import { PortalError } from "@/lib/http";
 import type { AuditEvent, CustomerOrder, PortalStatus, Session, StageEvent, TimelineEvent, TrackingStage } from "@/lib/types";
@@ -45,8 +45,8 @@ export interface OrderFilter {
   pickup?: string | null;
   tab?: LoadTab | null;
   /**
-   * Select staff get the Needs Attention list. EMIT and view-as pass false so those
-   * loads stay on Active or Delivered and the attention count is omitted.
+   * Unused. Status tabs are the same for every viewer. Needs Attention stays a
+   * marker on the card, not its own list.
    */
   includeAttention?: boolean;
   /**
@@ -259,70 +259,22 @@ function deliversTo(row: { destination_json: string; stops_json: string | null }
   }
 }
 
-const DELIVERED_ON = `COALESCE(NULLIF(must_deliver_date, ''), NULLIF(ship_date, ''), substr(updated_at, 1, 10))`;
+/**
+ * Shipped is the old History list plus every shipped or delivered load.
+ * Cancelled has no tab of its own, so it stays here with History.
+ * A delivered load stays here even if its portal status is still an earlier stage.
+ */
+const SHIPPED_TAB_SQL = `(portal_status IN ('shipped', 'cancelled') OR tracking_stage = 'delivered')`;
 
-function attentionReasonSql(): { sql: string; params: (today: string) => SqlArg[] } {
-  return {
-    sql: `(
-      load_number IS NULL OR trim(load_number) = ''
-      OR pending_review_count > 0
-      OR (tracking_stage IN ('at_pickup', 'in_transit') AND (tracking_link IS NULL OR trim(tracking_link) = ''))
-      OR (tracking_stage != 'delivered' AND NULLIF(must_deliver_date, '') IS NOT NULL AND must_deliver_date < ?)
-    )`,
-    params: (today) => [today],
-  };
+function tabClause(tab: LoadTab): { sql: string; params: SqlArg[] } {
+  if (tab === "shipped") return { sql: SHIPPED_TAB_SQL, params: [] };
+  if (tab === "ready_to_ship") {
+    return { sql: `(portal_status = 'ready_to_ship' AND tracking_stage != 'delivered')`, params: [] };
+  }
+  return { sql: `(portal_status = 'being_prepared' AND tracking_stage != 'delivered')`, params: [] };
 }
 
-function includeAttentionList(filter: { includeAttention?: boolean }): boolean {
-  return filter.includeAttention !== false;
-}
-
-/** EMIT has no attention bucket. A request for that tab is the active list. */
-function resolvedTab(tab: LoadTab, includeAttention: boolean): LoadTab {
-  if (!includeAttention && tab === "attention") return "active";
-  return tab;
-}
-
-function tabClause(tab: LoadTab, today: string, includeAttention = true): { sql: string; params: SqlArg[] } {
-  const reasons = attentionReasonSql();
-  const list = resolvedTab(tab, includeAttention);
-  if (list === "history") {
-    return {
-      sql: `(portal_status = 'cancelled' OR (tracking_stage = 'delivered' AND ${DELIVERED_ON} < date(?, '-6 days')))`,
-      params: [today],
-    };
-  }
-  if (!includeAttention) {
-    if (list === "delivered") {
-      return {
-        sql: `(portal_status != 'cancelled' AND tracking_stage = 'delivered' AND ${DELIVERED_ON} >= date(?, '-6 days'))`,
-        params: [today],
-      };
-    }
-    return {
-      sql: `(portal_status != 'cancelled' AND tracking_stage != 'delivered')`,
-      params: [],
-    };
-  }
-  if (list === "attention") {
-    return {
-      sql: `(portal_status != 'cancelled' AND NOT (tracking_stage = 'delivered' AND ${DELIVERED_ON} < date(?, '-6 days')) AND ${reasons.sql})`,
-      params: [today, ...reasons.params(today)],
-    };
-  }
-  if (list === "delivered") {
-    return {
-      sql: `(portal_status != 'cancelled' AND tracking_stage = 'delivered' AND ${DELIVERED_ON} >= date(?, '-6 days') AND NOT ${reasons.sql})`,
-      params: [today, ...reasons.params(today)],
-    };
-  }
-  return {
-    sql: `(portal_status != 'cancelled' AND tracking_stage != 'delivered' AND NOT ${reasons.sql})`,
-    params: reasons.params(today),
-  };
-}
-
-function buildWhere(filter: OrderFilter, today: string): { sql: string; params: SqlArg[] } {
+function buildWhere(filter: OrderFilter): { sql: string; params: SqlArg[] } {
   const clauses: string[] = [OPEN_LOAD_SQL];
   const params: SqlArg[] = [];
   if (filter.status) {
@@ -342,7 +294,7 @@ function buildWhere(filter: OrderFilter, today: string): { sql: string; params: 
     params.push(filter.pickup.trim());
   }
   if (filter.tab) {
-    const tab = tabClause(filter.tab, today, includeAttentionList(filter));
+    const tab = tabClause(filter.tab);
     clauses.push(tab.sql);
     params.push(...tab.params);
   }
@@ -405,8 +357,7 @@ export async function listOrders(ctx: PortalContext, filter: OrderFilter = {}): 
   const cap = filter.exportAll ? 5000 : 50;
   const pageSize = Math.min(cap, Math.max(1, filter.pageSize ?? 8));
   const page = Math.max(1, filter.page ?? 1);
-  const today = denverDate(ctx.now());
-  const where = buildWhere(filter, today);
+  const where = buildWhere(filter);
   const totalRow = await ctx.db.prepare(`SELECT COUNT(*) AS n FROM loads ${where.sql}`).get(...where.params);
   const rows = (await ctx.db
     .prepare(`${LIST_SQL_HEAD} ${where.sql} ${listOrderSql(filter.grouped === true)} LIMIT ? OFFSET ?`)
@@ -433,26 +384,20 @@ export interface LoadBoard {
   receivers: string[];
 }
 
-async function countTabs(ctx: PortalContext, filter: OrderFilter, today: string): Promise<LoadTabCounts> {
-  const includeAttention = includeAttentionList(filter);
-  const tabs: LoadTab[] = includeAttention
-    ? ["attention", "active", "delivered", "history"]
-    : ["active", "delivered", "history"];
-  const pieces = tabs.map((tab) => {
-    const clause = tabClause(tab, today, includeAttention);
+async function countTabs(ctx: PortalContext, filter: OrderFilter): Promise<LoadTabCounts> {
+  const pieces = LOAD_TABS.map((tab) => {
+    const clause = tabClause(tab);
     return { sql: `SUM(CASE WHEN ${clause.sql} THEN 1 ELSE 0 END) AS ${tab}`, params: clause.params };
   });
-  const where = buildWhere({ ...filter, tab: null }, today);
+  const where = buildWhere({ ...filter, tab: null });
   const row = await ctx.db
     .prepare(`SELECT ${pieces.map((piece) => piece.sql).join(", ")} FROM loads ${where.sql}`)
     .get(...pieces.flatMap((piece) => piece.params), ...where.params);
-  const counts: LoadTabCounts = {
-    active: Number(row?.active ?? 0),
-    delivered: Number(row?.delivered ?? 0),
-    history: Number(row?.history ?? 0),
+  return {
+    being_prepared: Number(row?.being_prepared ?? 0),
+    ready_to_ship: Number(row?.ready_to_ship ?? 0),
+    shipped: Number(row?.shipped ?? 0),
   };
-  if (includeAttention) counts.attention = Number(row?.attention ?? 0);
-  return counts;
 }
 
 /** Dashboard list. A search ignores the selected tab so one box finds any load. */
@@ -460,13 +405,11 @@ export async function listBoard(ctx: PortalContext, filter: OrderFilter & { tab?
   const today = denverDate(ctx.now());
   const tomorrow = addDaysISO(today, 1);
   const { end: weekEnd } = weekRange(ctx.now());
-  const includeAttention = includeAttentionList(filter);
-  const tab: LoadTab = resolvedTab(filter.tab ?? (includeAttention ? "attention" : "active"), includeAttention);
+  const tab: LoadTab = filter.tab ?? "being_prepared";
   const searching = Boolean(filter.q && filter.q.trim());
   const across = searching || filter.acrossTabs === true;
   const page = await listOrders(ctx, {
     ...filter,
-    includeAttention,
     tab: across ? null : tab,
     grouped: true,
   });
@@ -480,7 +423,7 @@ export async function listBoard(ctx: PortalContext, filter: OrderFilter & { tab?
     .all();
   return {
     ...page,
-    counts: await countTabs(ctx, { ...filter, ids: undefined, acrossTabs: undefined }, today),
+    counts: await countTabs(ctx, { ...filter, ids: undefined, acrossTabs: undefined }),
     today,
     tomorrow,
     weekEnd,

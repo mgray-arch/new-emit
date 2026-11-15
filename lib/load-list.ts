@@ -1,27 +1,41 @@
-import type { CustomerOrder, TrackingStage } from "@/lib/types";
+import { STATUS_LABEL, type CustomerOrder, type TrackingStage } from "@/lib/types";
 
-/** Working queues. On the Select side a load sits in exactly one of these. */
-export const LOAD_TABS = ["attention", "active", "delivered", "history"] as const;
+/**
+ * List tabs. Each open tab is one portal status. Shipped also keeps the old
+ * History list: shipped, delivered, and cancelled loads.
+ */
+export const LOAD_TABS = ["being_prepared", "ready_to_ship", "shipped"] as const;
 export type LoadTab = (typeof LOAD_TABS)[number];
 
-/** EMIT and view-as have no Needs Attention list. Those loads stay on Active or Delivered. */
-export function visibleLoadTabs(selectStaff: boolean): LoadTab[] {
-  return selectStaff ? [...LOAD_TABS] : LOAD_TABS.filter((tab) => tab !== "attention");
+/** Same three tabs for EMIT, view-as, and Select. */
+export function visibleLoadTabs(): LoadTab[] {
+  return [...LOAD_TABS];
 }
 
-/** Attention is omitted for EMIT and view-as. Select always receives it. */
+/** Older list names. History is Shipped. The other three open on Being Prepared. */
+const LEGACY_LOAD_TAB: Record<string, LoadTab> = {
+  history: "shipped",
+  delivered: "shipped",
+  attention: "being_prepared",
+  active: "being_prepared",
+};
+
+export function parseLoadTab(value: string | null | undefined, fallback: LoadTab): LoadTab {
+  if (value && (LOAD_TABS as readonly string[]).includes(value)) return value as LoadTab;
+  if (value && LEGACY_LOAD_TAB[value]) return LEGACY_LOAD_TAB[value];
+  return fallback;
+}
+
 export type LoadTabCounts = {
-  active: number;
-  delivered: number;
-  history: number;
-  attention?: number;
+  being_prepared: number;
+  ready_to_ship: number;
+  shipped: number;
 };
 
 export const LOAD_TAB_LABEL: Record<LoadTab, string> = {
-  attention: "Needs Attention",
-  active: "Active",
-  delivered: "Delivered",
-  history: "History",
+  being_prepared: STATUS_LABEL.being_prepared,
+  ready_to_ship: STATUS_LABEL.ready_to_ship,
+  shipped: STATUS_LABEL.shipped,
 };
 
 export type PickupGroup = "earlier" | "today" | "tomorrow" | "week" | "later" | "unscheduled";
@@ -227,10 +241,9 @@ export function tripCaption(stage: TrackingStage, cancelled: boolean): string {
 
 export function emptyListMessage(tab: LoadTab, filtering: boolean): string {
   if (filtering) return "No loads match that search. Try a load number, a city, or a receiver.";
-  if (tab === "attention") return "Nothing needs attention right now.";
-  if (tab === "active") return "No loads are booked or on the road.";
-  if (tab === "delivered") return "No deliveries in the last 7 days.";
-  return "History is empty. Older deliveries and cancelled loads show up here.";
+  if (tab === "being_prepared") return "No loads are being prepared.";
+  if (tab === "ready_to_ship") return "No loads are ready to ship.";
+  return "No shipped loads yet. Delivered and cancelled loads show up here.";
 }
 
 function cell(value: string | number | null | undefined): string {

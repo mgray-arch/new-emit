@@ -99,7 +99,7 @@ describe("Sales and Loader cannot see cost", () => {
       const one = await getOrderRoute(new Request(`http://portal.test/api/orders/${orderId}`, { headers: headers(cookie) }), {
         params: Promise.resolve({ id: orderId }),
       });
-      const csv = await exportOrders(new Request("http://portal.test/api/orders/export?tab=history&q=SO-PROFILE-COST", { headers: headers(cookie) }));
+      const csv = await exportOrders(new Request("http://portal.test/api/orders/export?tab=being_prepared&q=SO-PROFILE-COST", { headers: headers(cookie) }));
       const chat = await ask(
         new Request("http://portal.test/api/ask", {
           method: "POST",

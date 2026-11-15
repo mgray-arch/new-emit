@@ -265,7 +265,7 @@ describe("pricing follows the EMIT admin role", () => {
       expectNoSecrets(detailBody);
 
       const csvFile = await exportOrders(
-        new Request("http://portal.test/api/orders/export?tab=active&q=SO2196", { headers: headers(cookie) }),
+        new Request("http://portal.test/api/orders/export?tab=shipped&q=SO2196", { headers: headers(cookie) }),
       );
       const csv = await csvFile.text();
       expect(csv).toContain("SO2196");

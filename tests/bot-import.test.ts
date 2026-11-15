@@ -577,18 +577,19 @@ describe("POST /api/integrations/loads/import", () => {
     const old = await getOrder(ctx, body.results[0].orderId);
     expect(attentionReasons(old!, "2026-10-14")).not.toContain("Missing tracking");
     expect(attentionReasons(old!, "2026-10-14")).not.toContain("Past due");
-    expect((await listOrders(ctx, { tab: "attention", q: "470300-1", pageSize: 10 })).orders).toHaveLength(0);
-    expect((await listOrders(ctx, { tab: "history", q: "470300-1", pageSize: 10 })).orders.map((order) => order.loadNumber)).toContain("470300-1");
+    expect((await listOrders(ctx, { tab: "being_prepared", q: "470300-1", pageSize: 10 })).orders).toHaveLength(0);
+    expect((await listOrders(ctx, { tab: "shipped", q: "470300-1", pageSize: 10 })).orders.map((order) => order.loadNumber)).toContain("470300-1");
 
     const moving = await getOrder(ctx, body.results[1].orderId);
     expect(attentionReasons(moving!, "2026-10-14")).toEqual(expect.arrayContaining(["Missing tracking", "Past due"]));
-    expect((await listOrders(ctx, { tab: "attention", q: "470301-1", pageSize: 10 })).orders.map((order) => order.loadNumber)).toContain("470301-1");
+    expect((await listOrders(ctx, { tab: "shipped", q: "470301-1", pageSize: 10 })).orders.map((order) => order.loadNumber)).toContain("470301-1");
+    expect((await listOrders(ctx, { tab: "ready_to_ship", q: "470301-1", pageSize: 10 })).orders).toHaveLength(0);
 
     const recent = await getOrder(ctx, body.results[2].orderId);
     expect(attentionReasons(recent!, "2026-10-14")).not.toContain("Missing tracking");
     expect(attentionReasons(recent!, "2026-10-14")).not.toContain("Past due");
-    expect((await listOrders(ctx, { tab: "attention", q: "470302-1", pageSize: 10 })).orders).toHaveLength(0);
-    expect((await listOrders(ctx, { tab: "delivered", q: "470302-1", pageSize: 10 })).orders.map((order) => order.loadNumber)).toContain("470302-1");
+    expect((await listOrders(ctx, { tab: "being_prepared", q: "470302-1", pageSize: 10 })).orders).toHaveLength(0);
+    expect((await listOrders(ctx, { tab: "shipped", q: "470302-1", pageSize: 10 })).orders.map((order) => order.loadNumber)).toContain("470302-1");
   });
 
   it("links an exact delivery dock and does not create a location", async () => {
