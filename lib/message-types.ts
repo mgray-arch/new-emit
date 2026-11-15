@@ -18,6 +18,7 @@ export interface MessageMention {
 export interface MessageView {
   id: string;
   seq: number;
+  threadId: string;
   body: string;
   createdAt: string;
   authorName: string;
@@ -26,6 +27,36 @@ export interface MessageView {
   mine: boolean;
   load: MessageLoadRef | null;
   mentions: MessageMention[];
+}
+
+/** Lane shown on a thread row. Owner is a person's name. Prices are not on this object. */
+export interface ThreadLoadRef {
+  id: string | null;
+  loadNumber: string | null;
+  salesOrderNumber: string | null;
+  originCity: string;
+  originState: string;
+  destinationCity: string;
+  destinationState: string;
+  owner: string | null;
+}
+
+export interface ThreadLatest {
+  id: string;
+  preview: string;
+  authorName: string;
+  side: "emit" | "select";
+  createdAt: string;
+  mine: boolean;
+}
+
+export interface ThreadSummary {
+  id: string;
+  kind: "load" | "general";
+  load: ThreadLoadRef | null;
+  latest: ThreadLatest;
+  unread: number;
+  messageCount: number;
 }
 
 export interface LoadOption {

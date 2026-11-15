@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { Client, ResultSet, Row, Transaction, Value } from "@libsql/client";
@@ -279,14 +279,27 @@ CREATE TABLE IF NOT EXISTS messages (
   load_id TEXT,
   load_number TEXT,
   sales_order_number TEXT,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  thread_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS messages_seq ON messages(seq);
+CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread_id, seq);
 
-CREATE TABLE IF NOT EXISTS message_reads (
-  user_id TEXT PRIMARY KEY,
-  read_seq INTEGER NOT NULL
+CREATE TABLE IF NOT EXISTS message_threads (
+  id TEXT PRIMARY KEY,
+  load_id TEXT,
+  load_key TEXT NOT NULL UNIQUE,
+  slack_ts TEXT,
+  slack_channel TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS message_thread_reads (
+  user_id TEXT NOT NULL,
+  thread_id TEXT NOT NULL,
+  read_seq INTEGER NOT NULL,
+  PRIMARY KEY (user_id, thread_id)
 );
 
 CREATE TABLE IF NOT EXISTS order_seen (
@@ -488,6 +501,7 @@ export async function openDatabase(file?: string): Promise<SqlDatabase> {
   await migrateBolPrintColumns(db);
   await migrateUnassignedBooked(db);
   await migrateSoftDelete(db);
+  await migrateMessageThreads(db);
   await db.exec(`DROP TABLE IF EXISTS outbox`);
   return db;
 }
@@ -565,6 +579,99 @@ export async function migrateSoftDelete(db: SqlDatabase): Promise<void> {
   await ensureColumn(db, "loads", "audit_log", "TEXT");
   await ensureColumn(db, "loads", "deleted_at", "TEXT");
   await ensureColumn(db, "loads", "deleted_by", "TEXT");
+}
+
+/**
+ * One thread per load. Messages with no load share the General thread.
+ * Existing rows are attached and kept. The old per-user watermark becomes
+ * a per-thread read cursor, then message_reads is removed.
+ */
+export async function migrateMessageThreads(db: SqlDatabase): Promise<void> {
+  await ensureColumn(db, "messages", "thread_id", "TEXT");
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS message_threads (
+      id TEXT PRIMARY KEY,
+      load_id TEXT,
+      load_key TEXT NOT NULL UNIQUE,
+      slack_ts TEXT,
+      slack_channel TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS message_thread_reads (
+      user_id TEXT NOT NULL,
+      thread_id TEXT NOT NULL,
+      read_seq INTEGER NOT NULL,
+      PRIMARY KEY (user_id, thread_id)
+    );
+    CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread_id, seq);
+  `);
+  await ensureColumn(db, "message_threads", "slack_ts", "TEXT");
+  await ensureColumn(db, "message_threads", "slack_channel", "TEXT");
+
+  const orphans = await db
+    .prepare(
+      `SELECT
+         CASE WHEN load_id IS NULL OR trim(load_id) = '' THEN NULL ELSE load_id END AS load_id,
+         MIN(created_at) AS created_at
+       FROM messages
+       WHERE thread_id IS NULL OR trim(thread_id) = ''
+       GROUP BY CASE WHEN load_id IS NULL OR trim(load_id) = '' THEN '' ELSE load_id END`,
+    )
+    .all();
+
+  for (const row of orphans) {
+    const loadId = typeof row.load_id === "string" && row.load_id.trim() ? row.load_id : null;
+    const loadKey = loadId ?? "general";
+    const createdAt = typeof row.created_at === "string" && row.created_at ? row.created_at : new Date().toISOString();
+    const existing = await db.prepare(`SELECT id FROM message_threads WHERE load_key = ?`).get(loadKey);
+    let threadId = existing && typeof existing.id === "string" ? existing.id : "";
+    if (!threadId) {
+      threadId = randomUUID();
+      await db
+        .prepare(`INSERT INTO message_threads (id, load_id, load_key, created_at) VALUES (?, ?, ?, ?)`)
+        .run(threadId, loadId, loadKey, createdAt);
+    }
+    if (loadId) {
+      await db
+        .prepare(`UPDATE messages SET thread_id = ? WHERE (thread_id IS NULL OR trim(thread_id) = '') AND load_id = ?`)
+        .run(threadId, loadId);
+    } else {
+      await db
+        .prepare(
+          `UPDATE messages SET thread_id = ? WHERE (thread_id IS NULL OR trim(thread_id) = '') AND (load_id IS NULL OR trim(load_id) = '')`,
+        )
+        .run(threadId);
+    }
+  }
+
+  if ((await tableSql(db, "message_reads")) !== null) {
+    const reads = await db.prepare(`SELECT user_id, read_seq FROM message_reads`).all();
+    for (const read of reads) {
+      const userId = typeof read.user_id === "string" ? read.user_id : "";
+      const readSeq = Number(read.read_seq);
+      if (!userId || !Number.isFinite(readSeq)) continue;
+      const threads = await db
+        .prepare(
+          `SELECT thread_id, MAX(seq) AS seq FROM messages
+           WHERE thread_id IS NOT NULL AND trim(thread_id) <> '' AND seq <= ?
+           GROUP BY thread_id`,
+        )
+        .all(readSeq);
+      for (const thread of threads) {
+        const threadId = typeof thread.thread_id === "string" ? thread.thread_id : "";
+        if (!threadId) continue;
+        await db
+          .prepare(
+            `INSERT INTO message_thread_reads (user_id, thread_id, read_seq)
+             VALUES (?, ?, ?)
+             ON CONFLICT(user_id, thread_id) DO UPDATE SET
+               read_seq = MAX(message_thread_reads.read_seq, excluded.read_seq)`,
+          )
+          .run(userId, threadId, Number(thread.seq));
+      }
+    }
+    await db.exec(`DROP TABLE message_reads`);
+  }
 }
 
 /** Columns and the per-user seen table the loads list reads. Safe to call on every request. */
