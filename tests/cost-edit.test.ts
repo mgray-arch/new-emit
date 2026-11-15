@@ -128,7 +128,7 @@ describe("editing EMIT cost", () => {
     });
     expect((await detail.json()).order.customerCost).toBe(1800);
 
-    const csv = await exportOrders(new Request("http://portal.test/api/orders/export?tab=attention&q=SO-COST-EDIT", { headers: headers(admin) }));
+    const csv = await exportOrders(new Request("http://portal.test/api/orders/export?tab=being_prepared&q=SO-COST-EDIT", { headers: headers(admin) }));
     const csvText = await csv.text();
     expect(csvText).toContain("Cost");
     expect(csvText).toContain("1800.00");
@@ -290,7 +290,7 @@ describe("editing EMIT cost", () => {
       const detail = await getOrderRoute(new Request(`http://portal.test/api/orders/${order.id}`, { headers: { cookie } }), {
         params: Promise.resolve({ id: order.id }),
       });
-      const csvFile = await exportOrders(new Request("http://portal.test/api/orders/export?tab=active&q=SO-COST-HIDE", { headers: headers(cookie) }));
+      const csvFile = await exportOrders(new Request("http://portal.test/api/orders/export?tab=being_prepared&q=SO-COST-HIDE", { headers: headers(cookie) }));
       const csv = await csvFile.text();
       expect(csv).toContain("SO-COST-HIDE");
       const chat = await ask(

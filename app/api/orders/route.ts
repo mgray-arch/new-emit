@@ -3,12 +3,12 @@ import { presentCustomerOrder } from "@/lib/customer-view";
 import { ensureLoadListColumns } from "@/lib/db";
 import { errorResponse, json } from "@/lib/http";
 import { isSession, requireSession } from "@/lib/guard";
-import { LOAD_TABS, type LoadTab } from "@/lib/load-list";
+import { parseLoadTab } from "@/lib/load-list";
 import { listBoard, submitOrder } from "@/lib/orders";
 import { readyPortal } from "@/lib/portal";
 import { latestTrackingAt, trackingIsUnseen } from "@/lib/tracking-link";
 import type { CustomerOrder, PortalStatus, Session } from "@/lib/types";
-import { PORTAL_STATUSES, resolveAccess } from "@/lib/types";
+import { PORTAL_STATUSES } from "@/lib/types";
 import { orderInputSchema } from "@/lib/validate";
 
 export const runtime = "nodejs";
@@ -22,13 +22,7 @@ export async function GET(req: Request) {
     await ensureLoadListColumns(ctx.db);
     const url = new URL(req.url);
     const status = url.searchParams.get("status");
-    const tabParam = url.searchParams.get("tab");
-    const selectStaff = resolveAccess(session).select;
-    const requested: LoadTab = (LOAD_TABS as readonly string[]).includes(tabParam || "")
-      ? (tabParam as LoadTab)
-      : selectStaff
-        ? "attention"
-        : "active";
+    const requested = parseLoadTab(url.searchParams.get("tab"), "being_prepared");
     const page = Number(url.searchParams.get("page") || "1");
     const pageSize = Number(url.searchParams.get("pageSize") || "25");
     const updatedOnly = url.searchParams.get("updated") === "1";
@@ -41,7 +35,6 @@ export async function GET(req: Request) {
       pickup: url.searchParams.get("pickup"),
       receiverCompany: url.searchParams.get("receiver"),
       tab: requested,
-      includeAttention: selectStaff,
       page: Number.isFinite(page) ? page : 1,
       pageSize: Number.isFinite(pageSize) ? pageSize : 25,
       ids: updatedOnly ? unseen : undefined,

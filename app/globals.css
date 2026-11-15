@@ -567,7 +567,13 @@ html[data-theme="light"] .bol-reprint { color: #8a3b12; }
 }
 .tab strong { font-size: 15px; letter-spacing: -0.02em; color: var(--text); }
 .tab span { color: inherit; font-size: 14px; }
-.tab.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(28, 25, 22, 0.08); }
+.tab.on {
+  background: var(--orange);
+  color: #1a1208;
+  box-shadow: none;
+}
+.tab.on strong,
+.tab.on span { color: #1a1208; }
 .lane { font-size: 18px; font-weight: 750; letter-spacing: -0.02em; line-height: 1.3; overflow-wrap: anywhere; }
 .page h1.lane { font-size: 28px; }
 .load-dates { display: flex; flex-wrap: wrap; gap: 8px 18px; color: var(--text); }
@@ -1066,7 +1072,7 @@ html[data-theme="light"] .msg.mine { background: #f8efe4; }
 html[data-theme="light"] .load-picker-option.on { background: #f8efe4; }
 
 @media (max-width: 520px) {
-  .tabs { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+  .tabs { display: flex; flex-direction: column; width: 100%; }
   .tab { justify-content: center; }
 }
 

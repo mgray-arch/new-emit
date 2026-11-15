@@ -56,11 +56,11 @@ async function pdfText(bytes: Uint8Array): Promise<string> {
 }
 
 describe("demo sample documents and tracking links", () => {
-  it("releases watermarked BOL and POD files on Active, Delivered, and History loads", async () => {
+  it("releases watermarked BOL and POD files on Ready to Ship and Shipped loads", async () => {
     expect(DEMO_SAMPLE_DOCS.length).toBeGreaterThanOrEqual(4);
     expect(DEMO_SAMPLE_DOCS.length).toBeLessThanOrEqual(6);
     const tabs = new Set(DEMO_SAMPLE_DOCS.map((doc) => doc.tab));
-    expect(tabs).toEqual(new Set(["active", "delivered", "history"]));
+    expect(tabs).toEqual(new Set(["ready_to_ship", "shipped"]));
 
     for (const doc of DEMO_SAMPLE_DOCS) {
       const page = await listOrders(ctx, { tab: doc.tab, q: doc.salesOrderNumber, pageSize: 10 });
@@ -94,13 +94,13 @@ describe("demo sample documents and tracking links", () => {
     expect(extractPdfLiteralText(internal!.bytes).trim()).toBe("");
     expect(screenPageText(extractPdfLiteralText(internal!.bytes)).decision).toBe("uncertain");
 
-    const select = await listOrders(ctx, { tab: "attention", q: "SO4526", pageSize: 10 });
+    const select = await listOrders(ctx, { tab: "ready_to_ship", q: "SO4526", pageSize: 10 });
     expect(select.orders).toHaveLength(1);
     expect(attentionReasons(select.orders[0], "2026-10-14")).toContain("Files in review");
     expect((select.orders[0].pendingReviewCount ?? 0)).toBeGreaterThan(0);
-    const active = await listOrders(ctx, { tab: "active", q: "SO4526", pageSize: 10 });
-    expect(active.orders).toHaveLength(0);
-    const emit = await listOrders(ctx, { tab: "active", q: "SO4526", includeAttention: false, pageSize: 10 });
+    const other = await listOrders(ctx, { tab: "being_prepared", q: "SO4526", pageSize: 10 });
+    expect(other.orders).toHaveLength(0);
+    const emit = await listOrders(ctx, { tab: "ready_to_ship", q: "SO4526", includeAttention: false, pageSize: 10 });
     expect(emit.orders.map((order) => order.salesOrderNumber)).toContain("SO4526");
 
     const hidden = await listCustomerDocuments(ctx, select.orders[0].id);
@@ -119,14 +119,14 @@ describe("demo sample documents and tracking links", () => {
       .prepare(`SELECT tracking_link, tracking_stage FROM loads WHERE sales_order_number = ?`)
       .get("SO2196");
     expect(bare).toMatchObject({ tracking_link: null, tracking_stage: "in_transit" });
-    const attention = await listOrders(ctx, { tab: "attention", q: "SO2196", pageSize: 10 });
+    const attention = await listOrders(ctx, { tab: "shipped", q: "SO2196", pageSize: 10 });
     expect(attentionReasons(attention.orders[0], "2026-10-14")).toContain("Missing tracking");
     const stillBare = await ctx.db
       .prepare(`SELECT tracking_link FROM loads WHERE sales_order_number = ?`)
       .get("SO68582 and SO68583");
     expect(stillBare?.tracking_link ?? null).toBeNull();
 
-    const linked = await listOrders(ctx, { tab: "active", q: "SO4422", pageSize: 10 });
+    const linked = await listOrders(ctx, { tab: "shipped", q: "SO4422", pageSize: 10 });
     expect(linked.orders[0].trackingLink).toBe("https://example.com/track/TEST-2");
     expect(attentionReasons(linked.orders[0], "2026-10-14")).not.toContain("Missing tracking");
   });

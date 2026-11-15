@@ -1,11 +1,11 @@
 import { presentCustomerOrder } from "@/lib/customer-view";
 import { errorResponse } from "@/lib/http";
 import { isSession, requireSession } from "@/lib/guard";
-import { LOAD_TABS, loadsToCsv, type LoadTab } from "@/lib/load-list";
+import { loadsToCsv, parseLoadTab } from "@/lib/load-list";
 import { listOrders } from "@/lib/orders";
 import { readyPortal } from "@/lib/portal";
 import type { PortalStatus } from "@/lib/types";
-import { PORTAL_STATUSES, canSeeCarrierIdentity, canSeePricing, resolveAccess } from "@/lib/types";
+import { PORTAL_STATUSES, canSeeCarrierIdentity, canSeePricing } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,10 +17,7 @@ export async function GET(req: Request) {
     const ctx = await readyPortal();
     const url = new URL(req.url);
     const status = url.searchParams.get("status");
-    const tabParam = url.searchParams.get("tab");
-    const selectStaff = resolveAccess(session).select;
-    const requested: LoadTab = (LOAD_TABS as readonly string[]).includes(tabParam || "") ? (tabParam as LoadTab) : "history";
-    const tab: LoadTab = selectStaff || requested !== "attention" ? requested : "active";
+    const tab = parseLoadTab(url.searchParams.get("tab"), "shipped");
     const page = await listOrders(ctx, {
       q: url.searchParams.get("q") || undefined,
       status: status && (PORTAL_STATUSES as readonly string[]).includes(status) ? (status as PortalStatus) : null,
@@ -29,7 +26,6 @@ export async function GET(req: Request) {
       pickup: url.searchParams.get("pickup"),
       receiverCompany: url.searchParams.get("receiver"),
       tab,
-      includeAttention: selectStaff,
       grouped: true,
       exportAll: true,
       page: 1,

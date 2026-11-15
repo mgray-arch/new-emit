@@ -30,6 +30,7 @@ import {
   mergeListedOrders,
   preferNewerOrder,
   replaceListedOrder,
+  parseLoadTab,
   visibleLoadTabs,
   type LoadTab,
   type LoadTabCounts,
@@ -103,7 +104,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   const searchParams = useSearchParams();
   const updatedOnly = searchParams.get("updated") === "1";
   const sites = useSites();
-  const [tab, setTab] = useState<LoadTab>("active");
+  const tab = parseLoadTab(searchParams.get("tab"), "being_prepared");
   const [listReady, setListReady] = useState(false);
   const [status, setStatus] = useState<string>("");
   const [q, setQ] = useState("");
@@ -150,8 +151,6 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       .then((response) => (response.ok ? response.json() : null))
       .then((body: Me | null) => {
         setMe(body);
-        const select = Boolean(body && body.role === "admin" && !body.readOnly);
-        setTab((current) => (select ? "attention" : current === "attention" ? "active" : current));
         setListReady(true);
         const params = new URLSearchParams(window.location.search);
         const edit = params.get("edit");
@@ -161,7 +160,6 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       })
       .catch(() => {
         setMe(null);
-        setTab("active");
         setListReady(true);
       });
   }, []);
@@ -468,11 +466,20 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     toast(role === "admin" && body.heldForReview ? `${body.heldForReview} in review` : "Uploaded");
   }
 
-  const counts: LoadTabCounts = data?.counts ?? { active: 0, delivered: 0, history: 0 };
+  const counts: LoadTabCounts = data?.counts ?? { being_prepared: 0, ready_to_ship: 0, shipped: 0 };
 
-  function exportHistory() {
+  function chooseTab(next: LoadTab) {
+    setPage(1);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", next);
+    params.delete("updated");
+    const query = params.toString();
+    router.replace(query ? `/?${query}` : "/");
+  }
+
+  function exportShipped() {
     const params = new URLSearchParams();
-    params.set("tab", "history");
+    params.set("tab", "shipped");
     if (status) params.set("status", status);
     if (query.trim()) params.set("q", query.trim());
     if (shipFrom) params.set("shipFrom", shipFrom);
@@ -487,11 +494,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       <div className="page-head">
         <div>
           <h1>Loads</h1>
-          <p className="lede">
-            {selectView
-              ? "What needs a look, what is moving, and what already delivered."
-              : "What is moving, and what already delivered."}
-          </p>
+          <p className="lede">Loads being prepared, ready to ship, and already shipped.</p>
         </div>
         {allowLoads ? (
           <button
@@ -529,18 +532,14 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       )}
       {listReady ? (
         <div className="tabs" role="tablist" aria-label="Load lists">
-          {visibleLoadTabs(selectView).map((item) => (
+          {visibleLoadTabs().map((item) => (
             <button
               key={item}
               className={tab === item ? "tab on" : "tab"}
               type="button"
               role="tab"
               aria-selected={tab === item}
-              onClick={() => {
-                setTab(item);
-                setPage(1);
-                if (updatedOnly) router.replace("/");
-              }}
+              onClick={() => chooseTab(item)}
             >
               <strong>{counts[item] ?? 0}</strong>
               <span>{LOAD_TAB_LABEL[item]}</span>
@@ -610,8 +609,8 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
             ))}
           </select>
         </label>
-        {tab === "history" && (
-          <button className="btn secondary" type="button" onClick={exportHistory}>
+        {tab === "shipped" && (
+          <button className="btn secondary" type="button" onClick={exportShipped}>
             Export CSV
           </button>
         )}
