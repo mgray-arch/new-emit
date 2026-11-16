@@ -5,6 +5,7 @@ import { PortalError } from "@/lib/http";
 import { likeContains, OPEN_LOAD_SQL } from "@/lib/orders";
 import { chatEnabledFor } from "@/lib/users";
 import {
+  messageDestinationLabel,
   messagePreview,
   messageThreadUrl,
   notifySelectOfEmitMessage,
@@ -261,6 +262,27 @@ export async function searchMessageLoads(ctx: PortalContext, session: Session, q
   return loads;
 }
 
+/** Owner and destination for the Slack note. A bad row does not block the message. */
+async function loadSlackFacts(
+  ctx: PortalContext,
+  loadId: string | null,
+): Promise<{ destination: string; owner: string | null }> {
+  if (!loadId) return { destination: "", owner: null };
+  try {
+    const row = await ctx.db.prepare(`SELECT owner, destination_json, stops_json FROM loads WHERE id = ?`).get(loadId);
+    if (!row) return { destination: "", owner: null };
+    return {
+      destination: messageDestinationLabel(
+        typeof row.destination_json === "string" ? row.destination_json : null,
+        typeof row.stops_json === "string" ? row.stops_json : null,
+      ),
+      owner: typeof row.owner === "string" ? row.owner : null,
+    };
+  } catch {
+    return { destination: "", owner: null };
+  }
+}
+
 async function requireLoad(ctx: PortalContext, loadId: string): Promise<LoadOption> {
   const row = (await ctx.db.prepare(`SELECT ${LOAD_REF_COLUMNS} FROM loads WHERE id = ? AND ${OPEN_LOAD_SQL}`).get(loadId)) as LoadRow | undefined;
   if (!row) throw new PortalError("That load is not in this portal.", 400);
@@ -337,11 +359,14 @@ export async function postMessage(
   );
 
   if (side === "emit") {
+    const facts = await loadSlackFacts(ctx, attached?.id ?? null);
     const notice: MessageNotice = {
       authorName,
       authorEmail,
       loadNumber: message.load?.loadNumber ?? null,
       salesOrderNumber: message.load?.salesOrderNumber ?? null,
+      destination: facts.destination,
+      owner: facts.owner,
       preview: messagePreview(body),
       threadUrl: messageThreadUrl(),
     };
