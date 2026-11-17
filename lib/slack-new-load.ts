@@ -1,6 +1,11 @@
+import { customerFacingText } from "@/lib/customer-copy";
 import { formatEnteredBy } from "@/lib/entered-by";
+import { mappedLoadStops } from "@/lib/load-stops";
 import { assignLoadOwner, type LoadOwner } from "@/lib/load-owner";
-import type { CustomerOrder, Place } from "@/lib/types";
+import type { SalesOrderLine } from "@/lib/sales-orders";
+import { redactSensitiveText, sensitiveReason } from "@/lib/sensitive";
+import { formatStopSchedule } from "@/lib/stop-schedule";
+import type { CustomerOrder, Place, Stop, StopKind, StopSchedule } from "@/lib/types";
 
 const SLACK_USER_ID = /^[UW][A-Z0-9]+$/i;
 
@@ -11,7 +16,16 @@ export interface SlackPlace {
   address2?: string | null;
   city?: string | null;
   state?: string | null;
+  /** Shown with the state, as stored. A short zip is not padded. */
+  postalCode?: string | null;
   country?: string | null;
+}
+
+export interface SlackStop {
+  id: string;
+  kind: StopKind;
+  place: SlackPlace;
+  schedule?: StopSchedule | null;
 }
 
 export interface NewLoadNotice {
@@ -27,6 +41,12 @@ export interface NewLoadNotice {
   needsCheck?: boolean;
   enteredByName: string | null;
   enteredByEmail: string | null;
+  /** Full route. When set, the note lists every stop. Origin and destination stay the first pickup and last drop. */
+  stops?: SlackStop[];
+  /** Per-drop sales orders. When omitted, the SO line is split the same way as the load-builder payload. */
+  salesOrders?: SalesOrderLine[];
+  /** Order comments. Posted as Notes after price, carrier pay, and SAM are removed. */
+  comments?: string | null;
 }
 
 /** Slack user id for an owner, or null when the env var is missing or not a user id. */
@@ -60,14 +80,16 @@ function countryLabel(country: string | null | undefined): string {
 
 /**
  * Old portal address: "EMIT TECHNOLOGIES — 2437 Allen Avenue, Sheridan, WY, USA".
- * Company, street, and country are included only when the order stored them.
+ * A stored zip sits with the state: "Sheridan, WY 82801, USA".
+ * Company, street, zip, and country are included only when the order stored them.
  */
 export function slackPlaceLine(place: SlackPlace): string {
   const company = text(place.company);
   const street = [text(place.address1), text(place.address2)].filter(Boolean).join(", ");
-  const cityState = [text(place.city), text(place.state)].filter(Boolean).join(", ");
+  const stateZip = [text(place.state), text(place.postalCode)].filter(Boolean).join(" ");
+  const locality = [text(place.city), stateZip].filter(Boolean).join(", ");
   const country = countryLabel(place.country);
-  const address = [street, [cityState, country].filter(Boolean).join(", ")].filter(Boolean).join(", ");
+  const address = [street, locality, country].filter(Boolean).join(", ");
   if (company && address) return `${company} — ${address}`;
   return company || address || "not set";
 }
@@ -89,14 +111,76 @@ function scheduleLines(notice: Pick<NewLoadNotice, "shipDate" | "shipTime" | "de
   return lines;
 }
 
+function countWord(count: number, word: string): string {
+  return `${count} ${word}${count === 1 ? "" : "s"}`;
+}
+
+function stopsForMapping(notice: NewLoadNotice): Stop[] {
+  return (notice.stops ?? []).map((stop) => ({
+    id: stop.id,
+    kind: stop.kind,
+    place: {
+      company: text(stop.place.company),
+      address1: text(stop.place.address1),
+      address2: text(stop.place.address2),
+      city: text(stop.place.city),
+      state: text(stop.place.state),
+      postalCode: text(stop.place.postalCode),
+      country: text(stop.place.country),
+    },
+    ...(stop.schedule ? { schedule: stop.schedule } : {}),
+  }));
+}
+
+/** Every stop, in route order, using the same per-drop sales orders as loadBuilderPayload. */
+function stopSection(notice: NewLoadNotice): string[] {
+  const stops = stopsForMapping(notice);
+  if (!stops.length) return [];
+  const mapped = mappedLoadStops({
+    salesOrderNumber: notice.salesOrderNumber,
+    salesOrders: notice.salesOrders,
+    stops,
+  });
+  const pickups = mapped.stops.filter((stop) => stop.kind === "pickup").length;
+  const drops = mapped.stops.filter((stop) => stop.kind === "drop").length;
+  const seen = { pickup: 0, drop: 0 };
+  const lines = mapped.stops.map((stop) => {
+    seen[stop.kind] += 1;
+    const total = stop.kind === "pickup" ? pickups : drops;
+    const label = stop.kind === "pickup" ? "Pickup" : "Drop";
+    const parts = [`${label} ${seen[stop.kind]} of ${total}: ${slackPlaceLine(stop.place)}`];
+    const schedule = formatStopSchedule(stop.schedule).replace(/\|/g, "/");
+    if (schedule) parts.push(`Schedule: ${schedule}`);
+    if (stop.salesOrders.length) parts.push(`SO: ${stop.salesOrders.join(", ")}`);
+    return parts.join(" | ");
+  });
+  return [`Stops: ${mapped.stops.length} (${countWord(pickups, "pickup")}, ${countWord(drops, "drop")})`, ...lines];
+}
+
+/** Price, EMIT cost, carrier pay, and SAM stay out of the note. */
+const PRICE_NOTE = /\b(prices?|emit\s+cost|customer\s*costs?)\b|\$\s?\d/i;
+
+function slackNoteLine(comments: string | null | undefined): string | null {
+  const redacted = customerFacingText(redactSensitiveText(comments ?? ""));
+  const kept = redacted
+    .split(/\n+|(?<=[.!?])\s+/)
+    .map((part) => part.trim())
+    .filter((part) => part && !PRICE_NOTE.test(part) && !sensitiveReason(part));
+  const note = kept.join(" ").replace(/\s+/g, " ").trim();
+  return note ? `Notes: ${note}` : null;
+}
+
 function detailLines(notice: NewLoadNotice, env: Record<string, string | undefined>): string[] {
+  const notes = slackNoteLine(notice.comments);
   return [
     `SO: ${salesOrderLabel(notice.salesOrderNumber)}`,
     `Origin: ${slackPlaceLine(notice.origin)}`,
     `Destination: ${slackPlaceLine(notice.destination)}`,
+    ...stopSection(notice),
     equipmentLine(notice.equipment),
     ...scheduleLines(notice),
     ownerLine(notice.owner, env),
+    ...(notes ? [notes] : []),
   ];
 }
 
@@ -138,6 +222,7 @@ function placeNotice(place: Place | null | undefined): SlackPlace {
     address2: place?.address2 ?? "",
     city: place?.city ?? "",
     state: place?.state ?? "",
+    postalCode: place?.postalCode ?? "",
     country: place?.country ?? "",
   };
 }
@@ -151,6 +236,14 @@ function noticeFromOrder(order: CustomerOrder, enteredBy?: { name: string; email
     shipDate: order.shipDate,
     shipTime: order.shipTime,
     deliveryDate: order.mustDeliverDate,
+    stops: order.stops.map((stop) => ({
+      id: stop.id,
+      kind: stop.kind,
+      place: placeNotice(stop.place),
+      schedule: stop.schedule ?? null,
+    })),
+    salesOrders: order.salesOrders,
+    comments: order.comments,
     ...ownerNotice(order),
     enteredByName: enteredBy?.name ?? order.enteredByName ?? null,
     enteredByEmail: enteredBy?.email ?? order.enteredByEmail ?? null,

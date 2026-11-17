@@ -1,5 +1,5 @@
 import { findRateField } from "@/lib/carrier-notice";
-import { applyLoadStatus, consumeLoadBuilderCallback, loadBuilderSecretMatches } from "@/lib/load-builder";
+import { applyLoadStatus, consumeLoadBuilderCallback, loadBuilderPayloadForQuery, loadBuilderSecretMatches } from "@/lib/load-builder";
 import { errorResponse, json, PortalError } from "@/lib/http";
 import { clientIp } from "@/lib/passwords";
 import { readyPortal } from "@/lib/portal";
@@ -23,6 +23,24 @@ const bodySchema = z.object({
   trackingUrl: z.string().trim().max(2000).optional(),
   tracking_url: z.string().trim().max(2000).optional(),
 });
+
+export async function GET(req: Request) {
+  try {
+    const ctx = await readyPortal();
+    const limit = await consumeLoadBuilderCallback(ctx, clientIp(req));
+    if (!limit.allowed) {
+      return json({ error: "Too many requests. Try again shortly." }, 429, { "retry-after": String(limit.retryAfterSeconds) });
+    }
+    if (!loadBuilderSecretMatches(req)) return json({ error: "Unauthorized" }, 401);
+    const url = new URL(req.url);
+    const orderId = url.searchParams.get("orderId")?.trim() ?? "";
+    const salesOrderNumber = (url.searchParams.get("salesOrderNumber") ?? url.searchParams.get("sales_order_number") ?? "").trim();
+    if (!orderId && !salesOrderNumber) throw new PortalError("Send orderId or salesOrderNumber.");
+    return json(await loadBuilderPayloadForQuery(ctx, { orderId, salesOrderNumber }));
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
 
 export async function POST(req: Request) {
   try {
