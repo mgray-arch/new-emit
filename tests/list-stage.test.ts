@@ -89,12 +89,12 @@ function patchStatus(id: string, cookie: string | undefined, portalStatus: strin
 describe("list card stage menu", () => {
   it("asks only when the stage is newly Ready to Ship, and lets the other two apply", () => {
     expect(listStageChoice("being_prepared", "ready_to_ship")).toBe("confirm");
-    expect(listStageChoice("shipped", "ready_to_ship")).toBe("confirm");
+    expect(listStageChoice("in_transit", "ready_to_ship")).toBe("confirm");
     expect(listStageChoice("ready_to_ship", "ready_to_ship")).toBe("noop");
     expect(listStageChoice("being_prepared", "being_prepared")).toBe("noop");
     expect(listStageChoice("being_prepared", "shipped")).toBe("apply");
-    expect(listStageChoice("ready_to_ship", "shipped")).toBe("apply");
-    expect(listStageChoice("shipped", "being_prepared")).toBe("apply");
+    expect(listStageChoice("ready_to_ship", "in_transit")).toBe("apply");
+    expect(listStageChoice("in_transit", "being_prepared")).toBe("apply");
     expect(listStageChoice("ready_to_ship", "being_prepared")).toBe("apply");
     expect(listStageChoice("being_prepared", "cancelled")).toBe("noop");
     expect(listStageChoice("cancelled", "shipped")).toBe("apply");
@@ -113,7 +113,9 @@ describe("list card stage menu", () => {
     expect(html).toContain('aria-label="Stage for SO123454TEST"');
     expect(html).toContain("Being Prepared");
     expect(html).toContain("Ready to Ship");
-    expect(html).toContain("Shipped");
+    expect(html).toContain("In Transit");
+    expect(html).not.toContain("Shipped");
+    expect(html).not.toContain("Delivered");
     expect(html).not.toContain("Cancelled");
     expect(html).toContain('value="ready_to_ship"');
     expect(html).toContain("Booked");
@@ -249,9 +251,9 @@ describe("list card stage change", () => {
     const shipped = await patchStatus(order.id, select, "shipped");
     expect(shipped.status).toBe(200);
     const shippedOrder = (await shipped.json()).order as CustomerOrder;
-    expect(shippedOrder.portalStatus).toBe("shipped");
+    expect(shippedOrder.portalStatus).toBe("in_transit");
     expect(shippedOrder.trackingStage).toBe("in_transit");
-    expect(shippedOrder.stageEvents?.at(-1)?.text).toBe("Stage changed from Ready to Ship to Shipped.");
+    expect(shippedOrder.stageEvents?.at(-1)?.text).toBe("Stage changed from Ready to Ship to In Transit.");
     expect(posts).toHaveLength(2);
     expect(JSON.stringify(shippedOrder)).not.toMatch(/8765|carrierPay|carrier_pay/);
 

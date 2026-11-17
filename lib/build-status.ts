@@ -1,4 +1,4 @@
-import { PORTAL_STATUSES, STATUS_LABEL, type AuditEvent, type OrderNotice, type PortalStatus, type StageEvent } from "@/lib/types";
+import { STATUS_LABEL, isStageStatus, type AuditEvent, type OrderNotice, type StageEvent, type StageStatus } from "@/lib/types";
 
 /** Read-only label for the list and the load page. */
 export function buildStatusLabel(
@@ -56,11 +56,7 @@ export function parseOrderNotices(raw: string | null | undefined): OrderNotice[]
   }
 }
 
-function isPortalStatus(value: unknown): value is PortalStatus {
-  return typeof value === "string" && (PORTAL_STATUSES as readonly string[]).includes(value);
-}
-
-export function stageHistoryText(from: PortalStatus | null, to: PortalStatus): string {
+export function stageHistoryText(from: StageStatus | null, to: StageStatus): string {
   const next = STATUS_LABEL[to];
   if (!from) return `Stage set to ${next}.`;
   return `Stage changed from ${STATUS_LABEL[from]} to ${next}.`;
@@ -96,8 +92,8 @@ export function parseStageEvents(raw: string | null | undefined): StageEvent[] {
     for (const item of parsed) {
       if (!item || typeof item !== "object") continue;
       const row = item as Record<string, unknown>;
-      const to = isPortalStatus(row.to) ? row.to : null;
-      const from = row.from == null ? null : isPortalStatus(row.from) ? row.from : null;
+      const to = isStageStatus(row.to) ? row.to : null;
+      const from = row.from == null ? null : isStageStatus(row.from) ? row.from : null;
       const text = typeof row.text === "string" ? row.text.trim() : "";
       const at = typeof row.at === "string" ? row.at : "";
       if (!to || !text) continue;

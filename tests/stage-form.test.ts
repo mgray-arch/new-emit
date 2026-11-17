@@ -9,7 +9,7 @@ describe("stage on the load form", () => {
     expect(stageBecomesReadyToShip(null, "being_prepared")).toBe(false);
     expect(stageBecomesReadyToShip("being_prepared", "ready_to_ship")).toBe(true);
     expect(stageBecomesReadyToShip("ready_to_ship", "ready_to_ship")).toBe(false);
-    expect(stageBecomesReadyToShip("ready_to_ship", "shipped")).toBe(false);
+    expect(stageBecomesReadyToShip("ready_to_ship", "in_transit")).toBe(false);
 
     const form = readFileSync("components/load-form.tsx", "utf8");
     const dashboard = readFileSync("components/dashboard.tsx", "utf8");

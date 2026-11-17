@@ -570,7 +570,9 @@ describe("stage changes", () => {
       { params: Promise.resolve({ id: order.id }) },
     );
     expect(again.status).toBe(200);
-    expect((await again.json()).order.stageEvents?.at(-1)?.text).toBe("Stage changed from Ready to Ship to Shipped.");
+    const shippedBody = await again.json();
+    expect(shippedBody.order.portalStatus).toBe("in_transit");
+    expect(shippedBody.order.stageEvents?.at(-1)?.text).toBe("Stage changed from Ready to Ship to In Transit.");
     expect(posts).toHaveLength(2);
 
     const back = await patchOrderRoute(

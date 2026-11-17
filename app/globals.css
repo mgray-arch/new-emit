@@ -574,6 +574,12 @@ html[data-theme="light"] .bol-reprint { color: #8a3b12; }
 }
 .tab.on strong,
 .tab.on span { color: #1a1208; }
+.tab.on[data-tab="being_prepared"] { background: var(--gold); }
+.tab.on[data-tab="ready_to_ship"] { background: var(--orange); }
+.tab.on[data-tab="in_transit"] { background: var(--blue); }
+.tab.on[data-tab="delivered"] { background: var(--green); }
+.tab.on[data-tab="in_transit"] strong,
+.tab.on[data-tab="in_transit"] span { color: #041018; }
 .lane { font-size: 18px; font-weight: 750; letter-spacing: -0.02em; line-height: 1.3; overflow-wrap: anywhere; }
 .page h1.lane { font-size: 28px; }
 .load-dates { display: flex; flex-wrap: wrap; gap: 8px 18px; color: var(--text); }
@@ -1175,6 +1181,17 @@ html[data-theme="light"] .carrier-badge { background: #e5f6ec; color: #0f5c32; }
 html[data-theme="light"] .carrier-badge[data-kind="changed"] { background: #fbf3df; color: #6a4e08; }
 .load-row-status { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
 .stage-name { font-weight: 750; font-size: 13px; }
+.stage-action {
+  font-size: 13px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+}
+.stage-action:hover { border-color: var(--green); }
+.stage-action:disabled { opacity: 0.6; }
 .stage-menu {
   display: flex;
   flex-direction: column;

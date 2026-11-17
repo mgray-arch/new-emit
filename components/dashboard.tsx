@@ -9,6 +9,7 @@ import LoadForm, { draftFromCopy, draftFromOrder, draftSalesOrderErrors, emptyDr
 import { ListCostEditor, formatCustomerCost } from "@/components/cost-field";
 import BuildStatus from "@/components/build-status";
 import PhotoGallery from "@/components/photo-gallery";
+import DeliveredActions from "@/components/delivered-actions";
 import PortalStatusControl from "@/components/portal-status-control";
 import SelectLoadField from "@/components/select-load-field";
 import ListStopNames from "@/components/list-stop-names";
@@ -41,6 +42,7 @@ import {
   STATUS_LABEL,
   canAddLoads,
   canDeleteLoad,
+  canMarkDelivered,
   canPrintBol,
   canSeeCarrierIdentity,
   canSeePricing,
@@ -172,6 +174,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
   const allowPrint = canPrintBol(me);
   const selectView = role === "admin" && !readOnly;
   const canChangeStage = allowLoads && !readOnly;
+  const canDeliver = canMarkDelivered(me) && !readOnly;
   const canDelete = canDeleteLoad(me) && !readOnly;
 
   useEffect(() => {
@@ -297,8 +300,13 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     void changeListStage(order, next);
   }
 
-  async function changeListStage(order: CustomerOrder, next: ListPortalStatus) {
-    if (!canChangeStage || stageBusyRef.current.has(order.id)) return;
+  async function changeListStage(order: CustomerOrder, next: ListPortalStatus | "delivered") {
+    const deliveryMove = next === "delivered" || (order.portalStatus === "delivered" && next === "in_transit");
+    if (deliveryMove) {
+      if (!canDeliver || stageBusyRef.current.has(order.id)) return;
+    } else if (!canChangeStage || stageBusyRef.current.has(order.id)) {
+      return;
+    }
     stageBusyRef.current.add(order.id);
     setStageBusyId(order.id);
     setStageError((current) => (current?.id === order.id ? null : current));
@@ -466,7 +474,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     toast(role === "admin" && body.heldForReview ? `${body.heldForReview} in review` : "Uploaded");
   }
 
-  const counts: LoadTabCounts = data?.counts ?? { being_prepared: 0, ready_to_ship: 0, shipped: 0 };
+  const counts: LoadTabCounts = data?.counts ?? { being_prepared: 0, ready_to_ship: 0, in_transit: 0, delivered: 0 };
 
   function chooseTab(next: LoadTab) {
     setPage(1);
@@ -477,9 +485,9 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
     router.replace(query ? `/?${query}` : "/");
   }
 
-  function exportShipped() {
+  function exportList() {
     const params = new URLSearchParams();
-    params.set("tab", "shipped");
+    params.set("tab", tab);
     if (status) params.set("status", status);
     if (query.trim()) params.set("q", query.trim());
     if (shipFrom) params.set("shipFrom", shipFrom);
@@ -494,7 +502,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
       <div className="page-head">
         <div>
           <h1>Loads</h1>
-          <p className="lede">Loads being prepared, ready to ship, and already shipped.</p>
+          <p className="lede">Loads being prepared, ready to ship, in transit, and delivered.</p>
         </div>
         {allowLoads ? (
           <button
@@ -536,6 +544,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
             <button
               key={item}
               className={tab === item ? "tab on" : "tab"}
+              data-tab={item}
               type="button"
               role="tab"
               aria-selected={tab === item}
@@ -609,8 +618,8 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
             ))}
           </select>
         </label>
-        {tab === "shipped" && (
-          <button className="btn secondary" type="button" onClick={exportShipped}>
+        {(tab === "in_transit" || tab === "delivered") && (
+          <button className="btn secondary" type="button" onClick={exportList}>
             Export CSV
           </button>
         )}
@@ -660,6 +669,14 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
                         onConfirm={() => void changeListStage(order, "ready_to_ship")}
                         onCancel={() => clearStagePrompt(order.id)}
                       />
+                      {canDeliver ? (
+                        <DeliveredActions
+                          status={order.portalStatus}
+                          busy={stageBusyId === order.id}
+                          onMark={() => void changeListStage(order, "delivered")}
+                          onUndo={() => void changeListStage(order, "in_transit")}
+                        />
+                      ) : null}
                       {order.carrierBadge ? <CarrierBadge kind={order.carrierBadge} /> : null}
                       {order.trackingBadge ? (
                         <span className="carrier-badge" data-kind="tracking">
@@ -830,6 +847,7 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
               sites={sites}
               hideCommercial={!showPricing}
               readOnly={readOnly}
+              allowDelivered={canDeliver}
               onEnterCost={() => void save()}
             />
             {confirmReady ? (

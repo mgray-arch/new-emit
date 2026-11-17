@@ -86,18 +86,18 @@ async function countLoads(loadNumber: string): Promise<number> {
 
 describe("SAM status, equipment, and sales order mapping", () => {
   it("maps SAM transit statuses onto the portal status and tracking stage", () => {
-    expect(mapImportStatus("Completed")).toEqual({ portalStatus: "shipped", trackingStage: "delivered" });
-    expect(mapImportStatus("Delivered")).toEqual({ portalStatus: "shipped", trackingStage: "delivered" });
-    expect(mapImportStatus("complete")).toEqual({ portalStatus: "shipped", trackingStage: "delivered" });
-    expect(mapImportStatus("In Transit")).toEqual({ portalStatus: "shipped", trackingStage: "in_transit" });
-    expect(mapImportStatus("active")).toEqual({ portalStatus: "shipped", trackingStage: "in_transit" });
+    expect(mapImportStatus("Completed")).toEqual({ portalStatus: "delivered", trackingStage: "delivered" });
+    expect(mapImportStatus("Delivered")).toEqual({ portalStatus: "delivered", trackingStage: "delivered" });
+    expect(mapImportStatus("complete")).toEqual({ portalStatus: "delivered", trackingStage: "delivered" });
+    expect(mapImportStatus("In Transit")).toEqual({ portalStatus: "in_transit", trackingStage: "in_transit" });
+    expect(mapImportStatus("active")).toEqual({ portalStatus: "in_transit", trackingStage: "in_transit" });
     expect(mapImportStatus("Covered")).toEqual({ portalStatus: "ready_to_ship", trackingStage: "submitted" });
     expect(mapImportStatus("Dispatched")).toEqual({ portalStatus: "ready_to_ship", trackingStage: "submitted" });
     expect(mapImportStatus("ready to ship")).toEqual({ portalStatus: "ready_to_ship", trackingStage: "submitted" });
-    expect(mapImportStatus("Loaded")).toEqual({ portalStatus: "shipped", trackingStage: "at_pickup" });
-    expect(mapImportStatus("At Shipper")).toEqual({ portalStatus: "shipped", trackingStage: "at_pickup" });
-    expect(mapImportStatus("At Receiver")).toEqual({ portalStatus: "shipped", trackingStage: "in_transit" });
-    expect(mapImportStatus("Out for Delivery")).toEqual({ portalStatus: "shipped", trackingStage: "in_transit" });
+    expect(mapImportStatus("Loaded")).toEqual({ portalStatus: "in_transit", trackingStage: "at_pickup" });
+    expect(mapImportStatus("At Shipper")).toEqual({ portalStatus: "in_transit", trackingStage: "at_pickup" });
+    expect(mapImportStatus("At Receiver")).toEqual({ portalStatus: "in_transit", trackingStage: "in_transit" });
+    expect(mapImportStatus("Out for Delivery")).toEqual({ portalStatus: "in_transit", trackingStage: "in_transit" });
     expect(mapImportStatus("Open")).toEqual({ portalStatus: "being_prepared", trackingStage: "submitted" });
     expect(mapImportStatus("Cancelled", true)).toEqual({ portalStatus: "cancelled", trackingStage: "submitted" });
     expect(mapImportStatus("Not a status")).toEqual({ error: 'Status "Not a status" is not a SAM transit status.' });
@@ -190,7 +190,7 @@ describe("POST /api/integrations/loads/import", () => {
       action: "created",
       selectLoadNumber: "470100-1",
       salesOrderNumber: "SO-68458",
-      portalStatus: "shipped",
+      portalStatus: "in_transit",
       trackingStage: "in_transit",
       truckType: "Flatbed",
     });
@@ -210,7 +210,7 @@ describe("POST /api/integrations/loads/import", () => {
     expect(updatedBody.results[0]).toMatchObject({
       action: "updated",
       orderId: id,
-      portalStatus: "shipped",
+      portalStatus: "delivered",
       trackingStage: "delivered",
       truckType: "Hot Shot",
     });
@@ -578,18 +578,18 @@ describe("POST /api/integrations/loads/import", () => {
     expect(attentionReasons(old!, "2026-10-14")).not.toContain("Missing tracking");
     expect(attentionReasons(old!, "2026-10-14")).not.toContain("Past due");
     expect((await listOrders(ctx, { tab: "being_prepared", q: "470300-1", pageSize: 10 })).orders).toHaveLength(0);
-    expect((await listOrders(ctx, { tab: "shipped", q: "470300-1", pageSize: 10 })).orders.map((order) => order.loadNumber)).toContain("470300-1");
+    expect((await listOrders(ctx, { tab: "delivered", q: "470300-1", pageSize: 10 })).orders.map((order) => order.loadNumber)).toContain("470300-1");
 
     const moving = await getOrder(ctx, body.results[1].orderId);
     expect(attentionReasons(moving!, "2026-10-14")).toEqual(expect.arrayContaining(["Missing tracking", "Past due"]));
-    expect((await listOrders(ctx, { tab: "shipped", q: "470301-1", pageSize: 10 })).orders.map((order) => order.loadNumber)).toContain("470301-1");
+    expect((await listOrders(ctx, { tab: "in_transit", q: "470301-1", pageSize: 10 })).orders.map((order) => order.loadNumber)).toContain("470301-1");
     expect((await listOrders(ctx, { tab: "ready_to_ship", q: "470301-1", pageSize: 10 })).orders).toHaveLength(0);
 
     const recent = await getOrder(ctx, body.results[2].orderId);
     expect(attentionReasons(recent!, "2026-10-14")).not.toContain("Missing tracking");
     expect(attentionReasons(recent!, "2026-10-14")).not.toContain("Past due");
     expect((await listOrders(ctx, { tab: "being_prepared", q: "470302-1", pageSize: 10 })).orders).toHaveLength(0);
-    expect((await listOrders(ctx, { tab: "shipped", q: "470302-1", pageSize: 10 })).orders.map((order) => order.loadNumber)).toContain("470302-1");
+    expect((await listOrders(ctx, { tab: "delivered", q: "470302-1", pageSize: 10 })).orders.map((order) => order.loadNumber)).toContain("470302-1");
   });
 
   it("links an exact delivery dock and does not create a location", async () => {

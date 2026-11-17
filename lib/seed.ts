@@ -108,7 +108,7 @@ const LOADS: SeedLoad[] = [
   {
     salesOrderNumber: "SO2196",
     loadNumber: "900196-1",
-    portalStatus: "shipped",
+    portalStatus: "in_transit",
     trackingStage: "in_transit",
     origin: allen,
     destination: kodiak,
@@ -144,7 +144,7 @@ const LOADS: SeedLoad[] = [
   {
     salesOrderNumber: "SO68582 and SO68583",
     loadNumber: "900182-1",
-    portalStatus: "shipped",
+    portalStatus: "in_transit",
     trackingStage: "at_pickup",
     origin: allen,
     destination: johnson,
@@ -162,7 +162,7 @@ const LOADS: SeedLoad[] = [
   {
     salesOrderNumber: "so-003108_T16",
     loadNumber: "900183-1",
-    portalStatus: "shipped",
+    portalStatus: "in_transit",
     trackingStage: "in_transit",
     origin: north,
     destination: enchanted,
@@ -198,7 +198,7 @@ const LOADS: SeedLoad[] = [
   {
     salesOrderNumber: "SO-002722",
     loadNumber: "900185-1",
-    portalStatus: "shipped",
+    portalStatus: "in_transit",
     trackingStage: "delivered",
     origin: allen,
     destination: kodiak,
@@ -252,7 +252,7 @@ const LOADS: SeedLoad[] = [
   {
     salesOrderNumber: "so-68008, so-67870, so-2482, so-2483",
     loadNumber: "900188-1",
-    portalStatus: "shipped",
+    portalStatus: "in_transit",
     trackingStage: "in_transit",
     origin: allen,
     destination: spitzer,
@@ -288,7 +288,7 @@ const LOADS: SeedLoad[] = [
   {
     salesOrderNumber: "SO4418",
     loadNumber: "900190-1",
-    portalStatus: "shipped",
+    portalStatus: "in_transit",
     trackingStage: "delivered",
     origin: north,
     destination: johnson,
@@ -306,7 +306,7 @@ const LOADS: SeedLoad[] = [
   {
     salesOrderNumber: "SO4422",
     loadNumber: "900191-1",
-    portalStatus: "shipped",
+    portalStatus: "in_transit",
     trackingStage: "in_transit",
     origin: allen,
     destination: enchanted,
@@ -396,7 +396,7 @@ const LOADS: SeedLoad[] = [
   {
     salesOrderNumber: "SO4520",
     loadNumber: "900197-1",
-    portalStatus: "shipped",
+    portalStatus: "in_transit",
     trackingStage: "in_transit",
     origin: north,
     destination: spitzer,
@@ -450,7 +450,7 @@ const LOADS: SeedLoad[] = [
   {
     salesOrderNumber: "SO4540",
     loadNumber: "900200-1",
-    portalStatus: "shipped",
+    portalStatus: "in_transit",
     trackingStage: "delivered",
     origin: allen,
     destination: encore,
@@ -468,7 +468,7 @@ const LOADS: SeedLoad[] = [
   {
     salesOrderNumber: "SO4547",
     loadNumber: "900201-1",
-    portalStatus: "shipped",
+    portalStatus: "in_transit",
     trackingStage: "at_pickup",
     origin: allen,
     destination: johnson,
@@ -522,7 +522,7 @@ const LOADS: SeedLoad[] = [
   {
     salesOrderNumber: "SO4570",
     loadNumber: "900204-1",
-    portalStatus: "shipped",
+    portalStatus: "in_transit",
     trackingStage: "in_transit",
     origin: allen,
     destination: encore,
@@ -592,7 +592,7 @@ export const DEMO_SAMPLE_DOCS = [
     slot: "attachment" as const,
     title: "PROOF OF DELIVERY",
     consignee: "Enchanted Rock LLC",
-    tab: "shipped" as const,
+    tab: "in_transit" as const,
   },
   {
     salesOrderNumber: "SO4422",
@@ -600,7 +600,7 @@ export const DEMO_SAMPLE_DOCS = [
     slot: "bol" as const,
     title: "BILL OF LADING",
     consignee: "Enchanted Rock LLC",
-    tab: "shipped" as const,
+    tab: "in_transit" as const,
   },
   {
     salesOrderNumber: "SO-002722",
@@ -608,7 +608,7 @@ export const DEMO_SAMPLE_DOCS = [
     slot: "attachment" as const,
     title: "PROOF OF DELIVERY",
     consignee: "Kodiak Gas Services",
-    tab: "shipped" as const,
+    tab: "in_transit" as const,
   },
   {
     salesOrderNumber: "SO4418",
@@ -616,7 +616,7 @@ export const DEMO_SAMPLE_DOCS = [
     slot: "bol" as const,
     title: "BILL OF LADING",
     consignee: "Johnson Thermal Systems LLC",
-    tab: "shipped" as const,
+    tab: "in_transit" as const,
   },
   {
     salesOrderNumber: "SO4540",
@@ -624,7 +624,7 @@ export const DEMO_SAMPLE_DOCS = [
     slot: "attachment" as const,
     title: "PROOF OF DELIVERY",
     consignee: "Encore Oilfield Services LLC",
-    tab: "shipped" as const,
+    tab: "in_transit" as const,
   },
 ];
 

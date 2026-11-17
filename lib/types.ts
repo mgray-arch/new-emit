@@ -1,6 +1,35 @@
 import type { SalesOrderLine } from "@/lib/sales-orders";
-export const PORTAL_STATUSES = ["being_prepared", "ready_to_ship", "shipped", "cancelled"] as const;
+export const PORTAL_STATUSES = ["being_prepared", "ready_to_ship", "in_transit", "delivered", "cancelled"] as const;
 export type PortalStatus = (typeof PORTAL_STATUSES)[number];
+
+/**
+ * Older rows and history lines used this for the stage that is now In Transit.
+ * Reading it still works. New saves store `in_transit`.
+ */
+export const LEGACY_SHIPPED_STATUS = "shipped" as const;
+export type StageStatus = PortalStatus | typeof LEGACY_SHIPPED_STATUS;
+
+export function isPortalStatus(value: unknown): value is PortalStatus {
+  return typeof value === "string" && (PORTAL_STATUSES as readonly string[]).includes(value);
+}
+
+export function isStageStatus(value: unknown): value is StageStatus {
+  return value === LEGACY_SHIPPED_STATUS || isPortalStatus(value);
+}
+
+/** `shipped` is the old name for In Transit. Delivered stays Delivered. */
+export function normalizePortalStatus(value: unknown): PortalStatus | null {
+  if (value === LEGACY_SHIPPED_STATUS) return "in_transit";
+  return isPortalStatus(value) ? value : null;
+}
+
+/**
+ * What used to be checked with `status == shipped`.
+ * In Transit and Delivered are that same "already shipped" set. Cancelled is not.
+ */
+export function isShippedStatus(value: unknown): boolean {
+  return value === LEGACY_SHIPPED_STATUS || value === "in_transit" || value === "delivered";
+}
 
 export const TRACKING_STAGES = ["submitted", "booked", "at_pickup", "in_transit", "delivered"] as const;
 export type TrackingStage = (typeof TRACKING_STAGES)[number];
@@ -46,11 +75,13 @@ export const RATE_REASONS = [
 ] as const;
 export type RateReason = (typeof RATE_REASONS)[number];
 
-export const STATUS_LABEL: Record<PortalStatus, string> = {
+export const STATUS_LABEL: Record<StageStatus, string> = {
   being_prepared: "Being Prepared",
   ready_to_ship: "Ready to Ship",
-  shipped: "Shipped",
+  in_transit: "In Transit",
+  delivered: "Delivered",
   cancelled: "Cancelled",
+  shipped: "Shipped",
 };
 
 export const STAGE_LABEL: Record<TrackingStage, string> = {
@@ -111,8 +142,8 @@ export interface OrderNotice {
 /** A portal stage change. The text is the stage names only. It has no pay. */
 export interface StageEvent {
   at: string;
-  from: PortalStatus | null;
-  to: PortalStatus;
+  from: StageStatus | null;
+  to: StageStatus;
   text: string;
 }
 
@@ -408,6 +439,14 @@ export function canDeleteLoad(viewer: Viewer): boolean {
   if (access.viewAs) return false;
   if (access.select) return true;
   return access.role === "emit_admin";
+}
+
+/**
+ * Mark Delivered, and move a delivered load back to In Transit.
+ * Select staff and EMIT admins. A view-as preview cannot. A regular EMIT user cannot.
+ */
+export function canMarkDelivered(viewer: Viewer): boolean {
+  return canDeleteLoad(viewer);
 }
 
 /** Freight photos. Select, Sales, and Loader. Not a pricing permission. */

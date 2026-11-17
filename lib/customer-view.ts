@@ -8,7 +8,6 @@ import type {
   HaulCallout,
   OrderNotice,
   Place,
-  PortalStatus,
   StageEvent,
   TrackingEvent,
   PublicTracking,
@@ -19,7 +18,6 @@ import type {
   TransitOption,
 } from "@/lib/types";
 import {
-  PORTAL_STATUSES,
   RATE_REASONS,
   STAGE_LABEL,
   TRACKING_STAGES,
@@ -32,7 +30,7 @@ import { portalPublicUrl } from "@/lib/public-url";
 import { redactSensitiveText, sensitiveReason } from "@/lib/sensitive";
 import { samLoadUrl } from "@/lib/sam-link";
 import { sanitizeSchedule } from "@/lib/stop-schedule";
-import { canSeeCarrierIdentity, canSeePricing, resolveAccess, type Viewer } from "@/lib/types";
+import { canSeeCarrierIdentity, canSeePricing, isStageStatus, normalizePortalStatus, resolveAccess, type Viewer } from "@/lib/types";
 import { parseTrackingLink } from "@/lib/tracking-link";
 
 /**
@@ -149,7 +147,7 @@ export function serializeCustomerOrder(value: unknown, options?: CustomerViewOpt
   const includeEnteredBy = options?.includeEnteredBy === true;
   const includeCarrier = options?.includeCarrier === true;
   const includeBolPrint = options?.includeBolPrint === true;
-  const portalStatus = oneOf(raw.portalStatus, PORTAL_STATUSES) ?? "being_prepared";
+  const portalStatus = normalizePortalStatus(raw.portalStatus) ?? "being_prepared";
   const trackingStage = oneOf(raw.trackingStage, TRACKING_STAGES) ?? "submitted";
   const documents = Array.isArray(raw.documents)
     ? raw.documents.map(serializeDocument).filter((doc): doc is CustomerDocument => doc !== null)
@@ -375,11 +373,11 @@ function presentStageEvents(events: StageEvent[] | undefined): StageEvent[] {
   if (!events?.length) return [];
   const safe: StageEvent[] = [];
   for (const event of events) {
-    if (!(PORTAL_STATUSES as readonly string[]).includes(event.to)) continue;
+    if (!isStageStatus(event.to)) continue;
     const text = redactSensitiveText(event.text);
     if (!text) continue;
-    const from = event.from && (PORTAL_STATUSES as readonly string[]).includes(event.from) ? event.from : null;
-    safe.push({ at: event.at, from, to: event.to as PortalStatus, text });
+    const from = event.from && isStageStatus(event.from) ? event.from : null;
+    safe.push({ at: event.at, from, to: event.to, text });
   }
   return safe;
 }

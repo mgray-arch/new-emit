@@ -10,6 +10,7 @@ import { formatWhen } from "@/lib/dates";
 import { applyStopOrder, type RoutePlan } from "@/lib/route-optimize";
 import { normalizeSalesOrder, parseLegacySalesOrders, salesOrderError, salesOrderLineErrors } from "@/lib/sales-orders";
 import { timeSelectOptions } from "@/lib/ship-time";
+import { formStageOptions } from "@/lib/load-stage";
 import {
   RATE_REASONS,
   STATUS_LABEL,
@@ -637,6 +638,7 @@ export default function LoadForm({
   sites,
   hideCommercial = false,
   readOnly = false,
+  allowDelivered = false,
   onEnterCost,
 }: {
   draft: Draft;
@@ -645,6 +647,8 @@ export default function LoadForm({
   sites: Site[];
   hideCommercial?: boolean;
   readOnly?: boolean;
+  /** Select and EMIT admins can choose Delivered. Everyone else sees it only when the load is already there. */
+  allowDelivered?: boolean;
   /** Enter in the cost field saves the load. The list card has its own editor. */
   onEnterCost?: () => void;
 }) {
@@ -677,16 +681,20 @@ export default function LoadForm({
           id="load-stage"
           aria-label="Stage"
           value={draft.portalStatus}
-          disabled={readOnly}
+          disabled={readOnly || (draft.portalStatus === "delivered" && !allowDelivered)}
           onChange={(event) => setDraft({ ...draft, portalStatus: event.target.value as PortalStatus })}
         >
-          {Object.entries(STATUS_LABEL).map(([value, label]) => (
+          {formStageOptions(draft.portalStatus, allowDelivered).map((value) => (
             <option key={value} value={value}>
-              {label}
+              {STATUS_LABEL[value]}
             </option>
           ))}
         </select>
-        <p className="mini">New loads start at Being Prepared. Saving this form saves the stage.</p>
+        <p className="mini">
+          {draft.portalStatus === "delivered" && !allowDelivered
+            ? "Only Select and an EMIT admin can move a delivered load."
+            : "New loads start at Being Prepared. Saving this form saves the stage."}
+        </p>
       </div>
       <SalesOrdersEditor draft={draft} setDraft={setDraft} readOnly={readOnly} />
       <div className="grid-2">

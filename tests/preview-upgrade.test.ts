@@ -128,12 +128,15 @@ describe("preview database upgrade", () => {
       expect.arrayContaining(["sam_build_status", "sam_build_error", "sam_build_at", "slack_notified_at", "carrier_name", "carrier_mc", "carrier_notice_log"]),
     );
     const ctx: PortalContext = { db, now: () => new Date("2026-10-21T18:00:00Z") };
-    for (const tab of ["being_prepared", "ready_to_ship", "shipped"] as const) {
+    const stored = await db.prepare(`SELECT portal_status FROM loads WHERE id = ?`).get("l1");
+    expect(stored?.portal_status).toBe("in_transit");
+    for (const tab of ["being_prepared", "ready_to_ship", "in_transit", "delivered"] as const) {
       const board = await listBoard(ctx, { tab, page: 1, pageSize: 25 });
-      expect(board.counts.being_prepared + board.counts.ready_to_ship + board.counts.shipped).toBe(1);
+      expect(board.counts.being_prepared + board.counts.ready_to_ship + board.counts.in_transit + board.counts.delivered).toBe(1);
     }
-    const shipped = await listBoard(ctx, { tab: "shipped", page: 1, pageSize: 25 });
-    expect(shipped.orders.map((order) => order.salesOrderNumber)).toEqual(["SO2196"]);
+    const moving = await listBoard(ctx, { tab: "in_transit", page: 1, pageSize: 25 });
+    expect(moving.orders.map((order) => order.salesOrderNumber)).toEqual(["SO2196"]);
+    expect(moving.orders[0]?.portalStatus).toBe("in_transit");
     const saved = await db.prepare(`SELECT email, role FROM users ORDER BY email`).all();
     expect(saved).toEqual([
       { email: "lead@emit.example", role: "emit_admin" },
@@ -231,9 +234,10 @@ describe("preview database upgrade", () => {
       expect(response.status, JSON.stringify(body)).toBe(200);
       expect(body.orders).toHaveLength(1);
       expect(body.orders[0].salesOrderNumber).toBe("SO2196");
-      expect(body.tab).toBe("shipped");
+      expect(body.tab).toBe("in_transit");
       expect(body.counts).not.toHaveProperty("attention");
-      expect(body.counts.shipped).toBe(1);
+      expect(body.counts.in_transit).toBe(1);
+      expect(body.orders[0].portalStatus).toBe("in_transit");
       expect(body.counts.being_prepared).toBe(0);
       expect(Object.prototype.hasOwnProperty.call(body.orders[0], "customerCost")).toBe(item.pricing);
       expect(Object.prototype.hasOwnProperty.call(body.orders[0], "pendingReviewCount")).toBe(item.review);

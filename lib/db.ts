@@ -488,8 +488,23 @@ export async function openDatabase(file?: string): Promise<SqlDatabase> {
   await migrateBolPrintColumns(db);
   await migrateUnassignedBooked(db);
   await migrateSoftDelete(db);
+  await migrateShippedToInTransit(db);
   await db.exec(`DROP TABLE IF EXISTS outbox`);
   return db;
+}
+
+/**
+ * Existing Shipped loads start as In Transit. The 5:00 AM America/Boise job
+ * moves the ones with a delivery signal to Delivered. This runs when the
+ * server opens the database, including the first boot of a deploy. It is
+ * idempotent. It is not a manual production script.
+ */
+export async function migrateShippedToInTransit(db: SqlDatabase): Promise<number> {
+  await ensureColumn(db, "loads", "delivery_signal_at", "TEXT");
+  await ensureColumn(db, "loads", "delivery_signal_kind", "TEXT");
+  await ensureColumn(db, "loads", "delivery_held_at", "TEXT");
+  const result = await db.prepare(`UPDATE loads SET portal_status = 'in_transit' WHERE portal_status = 'shipped'`).run();
+  return result.changes;
 }
 
 /**
