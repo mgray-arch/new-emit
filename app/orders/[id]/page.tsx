@@ -11,6 +11,7 @@ import LoadOwnerField from "@/components/load-owner-field";
 import PhotoGallery from "@/components/photo-gallery";
 import BuildStatus from "@/components/build-status";
 import OrderHistory from "@/components/order-history";
+import DeliveredActions from "@/components/delivered-actions";
 import StageField from "@/components/stage-field";
 import TrackingCallout from "@/components/tracking-callout";
 import SelectLoadField from "@/components/select-load-field";
@@ -30,6 +31,7 @@ import { toast } from "@/lib/toast";
 import {
   canAddLoads,
   canDeleteLoad,
+  canMarkDelivered,
   canPrintBol,
   canSeeCarrierIdentity,
   canSeePricing,
@@ -81,6 +83,24 @@ export default function OrderPage() {
   const allowBol = canUploadBol(me) && !readOnly;
   const allowPhotos = canUploadPhotos(me) && !readOnly;
   const canDelete = canDeleteLoad(me) && !readOnly;
+  const canDeliver = canMarkDelivered(me) && !readOnly;
+
+  async function setDelivered(next: "delivered" | "in_transit") {
+    if (!order || !canDeliver) return;
+    setProblem("");
+    const response = await fetch(`/api/orders/${order.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ portalStatus: next }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setProblem(typeof body.error === "string" ? body.error : "Could not change the stage");
+      return;
+    }
+    if (body.order) setOrder(body.order);
+    toast(next === "delivered" ? "Marked delivered." : "Back in transit.");
+  }
 
   async function uploadFile(slot: "attachment" | "bol", file: File) {
     if (!order) return;
@@ -200,6 +220,13 @@ export default function OrderPage() {
               {formatLoadNumber(order.loadNumber)}
             </p>
             <StageField order={order} canEdit={allowLoads && !readOnly} />
+            {canDeliver ? (
+              <DeliveredActions
+                status={order.portalStatus}
+                onMark={() => void setDelivered("delivered")}
+                onUndo={() => void setDelivered("in_transit")}
+              />
+            ) : null}
             <BuildStatus status={order.buildStatus} />
             {showCarrier ? <CarrierCallout order={order} badge={order.carrierBadge} /> : null}
             {order.bolPrint?.reprint ? (

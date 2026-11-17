@@ -2,7 +2,7 @@ import { z } from "zod";
 import { parseCustomerCost } from "@/lib/cost";
 import { salesOrderLineErrors, SALES_ORDERS_MAX } from "@/lib/sales-orders";
 import { HH_MM } from "@/lib/ship-time";
-import { PORTAL_STATUSES, RATE_REASONS, TRANSIT_OPTIONS } from "@/lib/types";
+import { PORTAL_STATUSES, RATE_REASONS, TRANSIT_OPTIONS, type PortalStatus } from "@/lib/types";
 
 const dateField = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a YYYY-MM-DD date").nullable().optional();
 
@@ -45,7 +45,13 @@ const orderFields = {
   origin: placeSchema.optional(),
   destination: placeSchema.optional(),
   stops: z.array(stopSchema).max(25).optional(),
-  portalStatus: z.enum(PORTAL_STATUSES).optional(),
+  /**
+   * `shipped` is the old Shipped action. It stores In Transit and keeps that action's side effects.
+   */
+  portalStatus: z
+    .union([z.enum(PORTAL_STATUSES), z.literal("shipped")])
+    .optional()
+    .transform((value): PortalStatus | undefined => (value === "shipped" ? "in_transit" : value)),
   truckType: z.string().trim().min(1).max(80).nullable().optional(),
   transit: z.enum(TRANSIT_OPTIONS).nullable().optional(),
   shipDate: dateField,

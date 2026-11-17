@@ -118,7 +118,8 @@ Leave these blank unless you are turning that feature on:
 | `BOT_UPLOAD_KEY` | Bearer token for the Select bot. At least 16 characters. Same key for `POST /api/integrations/documents`, `POST /api/integrations/tracking-link`, and `POST /api/integrations/loads/import`. |
 | `LOAD_BUILDER_WEBHOOK_URL` | Leave blank. The portal does not call it. The Load Builder bot reads the Slack note instead. |
 | `LOAD_BUILDER_SECRET` | Shared bearer secret, at least 16 characters. The bot sends it on `POST /api/integrations/sam-load`. A session cookie is not accepted. |
-| `LOAD_STATUS_WEBHOOK_SECRET` | Optional second bearer secret for that same callback, at least 16 characters. Either this or `LOAD_BUILDER_SECRET` is enough. |
+| `LOAD_STATUS_WEBHOOK_SECRET` | Optional second bearer secret for that same callback, at least 16 characters. Either this or `LOAD_BUILDER_SECRET` is enough. The delivery-event path accepts the same two secrets. |
+| `CRON_SECRET` | Set this on the Vercel project (Production and Preview). The route `GET /api/cron/deliver-loads` reads `CRON_SECRET` and accepts only `Authorization: Bearer` plus that value. At least 16 characters. Vercel attaches the header when the variable is set. Unset or short: the job answers 401 and no load moves. |
 | `SAM_LOAD_URL_TEMPLATE` | Link for a stored SAM number. Must contain `{loadNumber}`. Example: `https://sam.example.com/loads/{loadNumber}`. Unset: the number shows and is not a link. |
 | `SAM_API_BASE_URL`, `SAM_API_TOKEN`, `SAM_CUSTOMER_ID` | Leave blank. The portal does not call the SAM API. |
 | `SLACK_NEW_LOADS_WEBHOOK_URL` | Slack incoming webhook for a new-load note. Unset: no Slack message is sent. The note names the owner and who entered the load. It does not include carrier pay. A missing equipment type or destination adds a line that the owner needs a human check. |
@@ -130,6 +131,31 @@ Leave these blank unless you are turning that feature on:
 | `INBOUND_EMAIL_ALLOWED_SENDERS` | Who may file a BOL. Unset means `goselect.com` only. |
 
 Do not set `DEMO_USER_PASSWORD` in production. Do not set a Gmail client. Order mail has been removed.
+
+## In Transit and Delivered
+
+The loads list has four tabs: Being Prepared, Ready to Ship, In Transit, and Delivered. EMIT and Select see the same tabs. The selected tab keeps its own color. Each tab shows a count. In Transit and Delivered keep the search, date, site, receiver, and status filters, and both export CSV. Cancelled loads stay in the database and are left off every tab, every count, and the loads search.
+
+Marking a load with the old Shipped action stores **In Transit**. That action still advances tracking to In Transit and still writes the stage line. It does not post to Slack, so Load Builder does not hear it. The same is true of Delivered and of moving a load back to In Transit. Load Builder only hears the Being Prepared note and the Ready to Ship note, the same as before those two stages. A tracking link or a position does not move a load onto In Transit.
+
+**Delivered** happens in two ways:
+
+- Select, or an EMIT admin, chooses **Mark Delivered**. **Back to In Transit** puts it back. A manual return stays until someone marks it delivered again, or until a newer delivery event is posted. A regular EMIT user cannot do either.
+- A Vercel cron calls `GET /api/cron/deliver-loads` every day at 12:00 UTC. That is 5:00 AM in Boise. Boise stays on Mountain Standard Time (UTC−7) all year, so the clock does not shift in the summer. Set `CRON_SECRET` on Vercel; the route reads that variable and rejects any other caller. The job moves **In Transit** loads to Delivered when one of these is already stored: a proof of delivery (a bot upload with `doc_type` `pod`, or a file whose name says POD or proof of delivery), a drop stop with a recorded arrival or departure time, tracking stage Delivered from a status import, or a delivery event posted to the integration below. It does not use GPS. It does not touch Being Prepared, Ready to Ship, Cancelled, or a deleted load. It does not post to Slack.
+
+On deploy, opening the database runs the migration that sets every stored `shipped` row to `in_transit`. Nothing else is rewritten. The first 5:00 AM run then sorts those loads into Delivered where a signal is already on file. The migration is part of server startup. It is not a script to run against production by hand.
+
+An integration records a delivery event without waiting on the portal status. Same bearer secret as the load-status callback (`LOAD_BUILDER_SECRET` or `LOAD_STATUS_WEBHOOK_SECRET`). A session cookie is not accepted. Send JSON:
+
+```http
+POST /api/integrations/delivery
+Authorization: Bearer <secret>
+Content-Type: application/json
+
+{"loadNumber":"458934-1","event":"departure"}
+```
+
+`event` is `delivered`, `departure`, or `arrival_completed`. Identify the load with `orderId`, `salesOrderNumber`, or `loadNumber`. The response records the event and leaves `portalStatus` unchanged. The morning job applies it. Latitude, a tracking URL, and a rate field are not a delivery signal. A rate, pay, or rate-confirmation field is rejected.
 
 `ALLOW_PASSWORD_LOGIN` is not a variable anymore. Email and password is how EMIT signs in.
 

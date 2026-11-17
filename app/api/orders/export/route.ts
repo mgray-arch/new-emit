@@ -17,7 +17,9 @@ export async function GET(req: Request) {
     const ctx = await readyPortal();
     const url = new URL(req.url);
     const status = url.searchParams.get("status");
-    const tab = parseLoadTab(url.searchParams.get("tab"), "shipped");
+    const rawTab = url.searchParams.get("tab");
+    const tab =
+      !rawTab || rawTab === "shipped" || rawTab === "history" ? "legacy_shipped" : parseLoadTab(rawTab, "in_transit");
     const page = await listOrders(ctx, {
       q: url.searchParams.get("q") || undefined,
       status: status && (PORTAL_STATUSES as readonly string[]).includes(status) ? (status as PortalStatus) : null,

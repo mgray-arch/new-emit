@@ -6,7 +6,7 @@ import { POST as createOrderRoute } from "@/app/api/orders/route";
 import { presentCustomerOrder } from "@/lib/customer-view";
 import { formatEnteredBy } from "@/lib/entered-by";
 import { assignLoadOwner } from "@/lib/load-owner";
-import { newLoadSlackText, readyToShipSlackText, slackUserIdForOwner } from "@/lib/slack-new-load";
+import { loadBuilderNotice, newLoadSlackText, readyToShipSlackText, slackUserIdForOwner } from "@/lib/slack-new-load";
 import type { PortalContext } from "@/lib/db";
 import type { CustomerOrder, Session } from "@/lib/types";
 import { adminSession, customerSession, seededPortal, sessionCookie } from "./helpers";
@@ -117,6 +117,15 @@ describe("load owner", () => {
 });
 
 describe("new load slack text", () => {
+  it("tells Load Builder only about Being Prepared and Ready to Ship", () => {
+    expect(loadBuilderNotice("being_prepared")).toBe("being_prepared");
+    expect(loadBuilderNotice("ready_to_ship")).toBe("ready_to_ship");
+    expect(loadBuilderNotice("in_transit")).toBeNull();
+    expect(loadBuilderNotice("delivered")).toBeNull();
+    expect(loadBuilderNotice("shipped")).toBeNull();
+    expect(loadBuilderNotice("cancelled")).toBeNull();
+  });
+
   const notice = {
     salesOrderNumber: "SO-1",
     origin: { city: "Sheridan", state: "WY" },
@@ -570,7 +579,9 @@ describe("stage changes", () => {
       { params: Promise.resolve({ id: order.id }) },
     );
     expect(again.status).toBe(200);
-    expect((await again.json()).order.stageEvents?.at(-1)?.text).toBe("Stage changed from Ready to Ship to Shipped.");
+    const shippedBody = await again.json();
+    expect(shippedBody.order.portalStatus).toBe("in_transit");
+    expect(shippedBody.order.stageEvents?.at(-1)?.text).toBe("Stage changed from Ready to Ship to In Transit.");
     expect(posts).toHaveLength(2);
 
     const back = await patchOrderRoute(

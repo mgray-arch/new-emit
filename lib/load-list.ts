@@ -1,21 +1,25 @@
-import { STATUS_LABEL, type CustomerOrder, type TrackingStage } from "@/lib/types";
+import { STATUS_LABEL, isShippedStatus, type CustomerOrder, type TrackingStage } from "@/lib/types";
 
 /**
- * List tabs. Each open tab is one portal status. Shipped also keeps the old
- * History list: shipped, delivered, and cancelled loads.
+ * List tabs. Being Prepared and Ready to Ship are one status each.
+ * In Transit is the old Shipped stage. Delivered is its own list.
+ * Cancelled loads stay stored and are left off every tab.
  */
-export const LOAD_TABS = ["being_prepared", "ready_to_ship", "shipped"] as const;
+export const LOAD_TABS = ["being_prepared", "ready_to_ship", "in_transit", "delivered"] as const;
 export type LoadTab = (typeof LOAD_TABS)[number];
 
-/** Same three tabs for EMIT, view-as, and Select. */
+/** Same four tabs for EMIT, view-as, and Select. */
 export function visibleLoadTabs(): LoadTab[] {
   return [...LOAD_TABS];
 }
 
-/** Older list names. History is Shipped. The other three open on Being Prepared. */
+/**
+ * Older list names. `shipped` and `history` open In Transit, where those loads
+ * start after the status migration. `delivered` is a real tab now.
+ */
 const LEGACY_LOAD_TAB: Record<string, LoadTab> = {
-  history: "shipped",
-  delivered: "shipped",
+  history: "in_transit",
+  shipped: "in_transit",
   attention: "being_prepared",
   active: "being_prepared",
 };
@@ -26,16 +30,13 @@ export function parseLoadTab(value: string | null | undefined, fallback: LoadTab
   return fallback;
 }
 
-export type LoadTabCounts = {
-  being_prepared: number;
-  ready_to_ship: number;
-  shipped: number;
-};
+export type LoadTabCounts = Record<LoadTab, number>;
 
 export const LOAD_TAB_LABEL: Record<LoadTab, string> = {
   being_prepared: STATUS_LABEL.being_prepared,
   ready_to_ship: STATUS_LABEL.ready_to_ship,
-  shipped: STATUS_LABEL.shipped,
+  in_transit: STATUS_LABEL.in_transit,
+  delivered: STATUS_LABEL.delivered,
 };
 
 export type PickupGroup = "earlier" | "today" | "tomorrow" | "week" | "later" | "unscheduled";
@@ -102,8 +103,8 @@ export function displayStatus(
   const needsAttention = options?.needsAttention !== false;
   if (order.portalStatus === "cancelled") return "cancelled";
   if (needsAttention && attentionReasons(order, today).length) return "attention";
-  if (order.trackingStage === "delivered") return "delivered";
-  if (order.trackingStage === "in_transit" || order.trackingStage === "at_pickup" || order.portalStatus === "shipped") {
+  if (order.portalStatus === "delivered" || order.trackingStage === "delivered") return "delivered";
+  if (order.trackingStage === "in_transit" || order.trackingStage === "at_pickup" || isShippedStatus(order.portalStatus)) {
     return "in_transit";
   }
   if (order.trackingStage === "booked") return "booked";
@@ -131,12 +132,12 @@ export function listEndpointNames(order: {
   };
 }
 
-/** Shipped, Delivered, and Cancelled sit below loads that are still open. */
+/** In Transit, Delivered, and Cancelled sit below loads that are still open. The old Shipped status does too. */
 export function loadIsFinished(order: {
   portalStatus?: string | null;
   trackingStage?: string | null;
 }): boolean {
-  return order.portalStatus === "shipped" || order.portalStatus === "cancelled" || order.trackingStage === "delivered";
+  return isShippedStatus(order.portalStatus) || order.portalStatus === "cancelled" || order.trackingStage === "delivered";
 }
 
 export interface LoadListSortKey {
@@ -191,7 +192,7 @@ export function sortLoadList<T extends LoadListSortKey>(orders: T[]): T[] {
   return [...orders].sort(compareLoadList);
 }
 
-/** Put an updated card back into the list order. A new Shipped status drops it into the finished group. */
+/** Put an updated card back into the list order. In Transit or Delivered drops it into the finished group. */
 export function replaceListedOrder<T extends LoadListSortKey>(rows: T[], next: T): T[] {
   return sortLoadList(rows.map((row) => (row.id === next.id ? next : row)));
 }
@@ -243,7 +244,8 @@ export function emptyListMessage(tab: LoadTab, filtering: boolean): string {
   if (filtering) return "No loads match that search. Try a load number, a city, or a receiver.";
   if (tab === "being_prepared") return "No loads are being prepared.";
   if (tab === "ready_to_ship") return "No loads are ready to ship.";
-  return "No shipped loads yet. Delivered and cancelled loads show up here.";
+  if (tab === "in_transit") return "No loads are in transit.";
+  return "No delivered loads yet.";
 }
 
 function cell(value: string | number | null | undefined): string {

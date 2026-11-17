@@ -5,7 +5,7 @@ import type { PortalContext } from "@/lib/db";
 import { weekRange } from "@/lib/dates";
 import { formatWhen } from "@/lib/dates";
 import type { AssistantAnswer, AssistantReference, CustomerOrder, TrackingStage } from "@/lib/types";
-import { STAGE_LABEL, STATUS_LABEL, canSeePricing, type Viewer } from "@/lib/types";
+import { STAGE_LABEL, STATUS_LABEL, canSeePricing, isShippedStatus, type Viewer } from "@/lib/types";
 
 const REFUSAL =
   "I can only answer questions about your EMIT shipments: status, dates, ETAs, and tracking. I don't have access to carrier pay, carrier rates, or rate confirmations.";
@@ -179,6 +179,14 @@ function answerLocally(question: string, orders: CustomerOrder[], now: Date, inc
         refused: false,
       };
     }
+  }
+  if (/\bshipped\b/.test(q)) {
+    const rows = orders.filter((order) => isShippedStatus(order.portalStatus));
+    return {
+      text: rows.length ? rows.map((order) => compact(order, includePricing)).join("\n") : "No loads are in transit or delivered.",
+      references: rows.map(reference),
+      refused: false,
+    };
   }
   if (/\bcancell/.test(q)) {
     const rows = orders.filter((order) => order.portalStatus === "cancelled");

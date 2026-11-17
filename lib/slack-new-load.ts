@@ -194,6 +194,15 @@ export async function notifyNewLoad(
   }
 }
 
+/**
+ * The only stages that post a Slack note for Load Builder.
+ * In Transit, Delivered, the old Shipped name, and Cancelled do not.
+ */
+export function loadBuilderNotice(status: string): "being_prepared" | "ready_to_ship" | null {
+  if (status === "being_prepared" || status === "ready_to_ship") return status;
+  return null;
+}
+
 /** Post the Ready to Ship note. A missing URL or a failed post does not change the load. */
 export async function notifyReadyToShip(order: CustomerOrder, fetchImpl: typeof fetch = fetch): Promise<boolean> {
   const url = newLoadWebhookUrl();

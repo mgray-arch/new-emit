@@ -63,8 +63,11 @@ export function mapTransitToPortal(transitStatus: string, voided = false): Porta
     case "Covered":
     case "Dispatched":
       return "ready_to_ship";
+    case "Delivered":
+    case "Completed":
+      return "delivered";
     default:
-      return transitStatus ? "shipped" : "being_prepared";
+      return transitStatus ? "in_transit" : "being_prepared";
   }
 }
 

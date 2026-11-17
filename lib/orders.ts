@@ -25,10 +25,20 @@ import { LOAD_TABS, type LoadTab, type LoadTabCounts } from "@/lib/load-list";
 import { listCustomerDocuments } from "@/lib/documents";
 import { PortalError } from "@/lib/http";
 import type { AuditEvent, CustomerOrder, PortalStatus, Session, StageEvent, TimelineEvent, TrackingStage } from "@/lib/types";
-import { STAGE_LABEL, TRACKING_STAGES, canAddLoads, canEditLoad, canSeePricing, type Stop } from "@/lib/types";
+import {
+  STAGE_LABEL,
+  TRACKING_STAGES,
+  canAddLoads,
+  canEditLoad,
+  canMarkDelivered,
+  canSeePricing,
+  isShippedStatus,
+  normalizePortalStatus,
+  type Stop,
+} from "@/lib/types";
 import { syncStopLocations } from "@/lib/locations";
 import { assignLoadOwner, type LoadOwner } from "@/lib/load-owner";
-import { notifyNewLoad, notifyReadyToShip } from "@/lib/slack-new-load";
+import { loadBuilderNotice, notifyNewLoad, notifyReadyToShip } from "@/lib/slack-new-load";
 import { formatEnteredBy } from "@/lib/entered-by";
 import { legacyStops, resolvedRoute } from "@/lib/stops";
 import type { OrderInput, OrderPatch } from "@/lib/validate";
@@ -43,7 +53,7 @@ export interface OrderFilter {
   receiverCompany?: string | null;
   /** Pickup yard company, matched to the origin. */
   pickup?: string | null;
-  tab?: LoadTab | null;
+  tab?: LoadTab | "legacy_shipped" | null;
   /**
    * Unused. Status tabs are the same for every viewer. Needs Attention stays a
    * marker on the card, not its own list.
@@ -73,8 +83,11 @@ export interface OrderStats {
   total: number;
   being_prepared: number;
   ready_to_ship: number;
-  shipped: number;
+  in_transit: number;
+  delivered: number;
   cancelled: number;
+  /** In Transit plus Delivered. Older callers that counted Shipped still see both. */
+  shipped: number;
 }
 
 interface LoadRow {
@@ -260,22 +273,24 @@ function deliversTo(row: { destination_json: string; stops_json: string | null }
 }
 
 /**
- * Shipped is the old History list plus every shipped or delivered load.
- * Cancelled has no tab of its own, so it stays here with History.
- * A delivered load stays here even if its portal status is still an earlier stage.
+ * Tabs follow the portal status. A tracking update does not move a load
+ * between tabs. Cancelled loads stay in the database and are left off every tab.
+ * `legacy_shipped` is the old Shipped/History export: In Transit and Delivered.
  */
-const SHIPPED_TAB_SQL = `(portal_status IN ('shipped', 'cancelled') OR tracking_stage = 'delivered')`;
+const IN_TRANSIT_TAB_SQL = `(portal_status IN ('in_transit', 'shipped'))`;
+const DELIVERED_TAB_SQL = `(portal_status = 'delivered')`;
+const LEGACY_SHIPPED_TAB_SQL = `(portal_status IN ('in_transit', 'delivered', 'shipped'))`;
 
-function tabClause(tab: LoadTab): { sql: string; params: SqlArg[] } {
-  if (tab === "shipped") return { sql: SHIPPED_TAB_SQL, params: [] };
-  if (tab === "ready_to_ship") {
-    return { sql: `(portal_status = 'ready_to_ship' AND tracking_stage != 'delivered')`, params: [] };
-  }
-  return { sql: `(portal_status = 'being_prepared' AND tracking_stage != 'delivered')`, params: [] };
+function tabClause(tab: LoadTab | "legacy_shipped"): { sql: string; params: SqlArg[] } {
+  if (tab === "legacy_shipped") return { sql: LEGACY_SHIPPED_TAB_SQL, params: [] };
+  if (tab === "in_transit") return { sql: IN_TRANSIT_TAB_SQL, params: [] };
+  if (tab === "delivered") return { sql: DELIVERED_TAB_SQL, params: [] };
+  if (tab === "ready_to_ship") return { sql: `(portal_status = 'ready_to_ship')`, params: [] };
+  return { sql: `(portal_status = 'being_prepared')`, params: [] };
 }
 
 function buildWhere(filter: OrderFilter): { sql: string; params: SqlArg[] } {
-  const clauses: string[] = [OPEN_LOAD_SQL];
+  const clauses: string[] = [OPEN_LOAD_SQL, `portal_status != 'cancelled'`];
   const params: SqlArg[] = [];
   if (filter.status) {
     clauses.push("portal_status = ?");
@@ -327,7 +342,7 @@ function buildWhere(filter: OrderFilter): { sql: string; params: SqlArg[] } {
   return { sql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
 }
 
-const FINISHED_LIST_SQL = `(portal_status IN ('shipped', 'cancelled') OR tracking_stage = 'delivered')`;
+const FINISHED_LIST_SQL = `(portal_status IN ('in_transit', 'delivered', 'shipped', 'cancelled') OR tracking_stage = 'delivered')`;
 
 /**
  * Loads list order.
@@ -393,11 +408,9 @@ async function countTabs(ctx: PortalContext, filter: OrderFilter): Promise<LoadT
   const row = await ctx.db
     .prepare(`SELECT ${pieces.map((piece) => piece.sql).join(", ")} FROM loads ${where.sql}`)
     .get(...pieces.flatMap((piece) => piece.params), ...where.params);
-  return {
-    being_prepared: Number(row?.being_prepared ?? 0),
-    ready_to_ship: Number(row?.ready_to_ship ?? 0),
-    shipped: Number(row?.shipped ?? 0),
-  };
+  const counts = {} as LoadTabCounts;
+  for (const tab of LOAD_TABS) counts[tab] = Number(row?.[tab] ?? 0);
+  return counts;
 }
 
 /** Dashboard list. A search ignores the selected tab so one box finds any load. */
@@ -477,13 +490,25 @@ export async function orderStats(ctx: PortalContext, receiverCompany?: string | 
   const rows = await ctx.db
     .prepare(`SELECT portal_status, COUNT(*) AS n FROM loads ${where} GROUP BY portal_status`)
     .all(...(receiverCompany ? [receiverCompany, receiverCompany] : []));
-  const stats: OrderStats = { total: 0, being_prepared: 0, ready_to_ship: 0, shipped: 0, cancelled: 0 };
+  const stats: OrderStats = {
+    total: 0,
+    being_prepared: 0,
+    ready_to_ship: 0,
+    in_transit: 0,
+    delivered: 0,
+    cancelled: 0,
+    shipped: 0,
+  };
   for (const row of rows) {
     const count = Number(row.n);
     stats.total += count;
     const status = String(row.portal_status);
-    if (status in stats) stats[status as PortalStatus] = count;
+    if (status === "shipped" || status === "in_transit") stats.in_transit += count;
+    else if (status === "being_prepared" || status === "ready_to_ship" || status === "delivered" || status === "cancelled") {
+      stats[status] += count;
+    }
   }
+  stats.shipped = stats.in_transit + stats.delivered;
   return stats;
 }
 
@@ -498,12 +523,13 @@ export function timelineThrough(stage: TrackingStage, at: string): TimelineEvent
 
 /**
  * Portal stage is not a truck booking. Ready to Ship stays Confirmed until a carrier
- * is recorded. Shipped still means the load is on the road.
+ * is recorded. In Transit (the old Shipped action) means the load is on the road.
+ * Delivered moves the tracking stage to Delivered. Neither change comes from a tracking ping.
  */
 function advanceStage(current: TrackingStage, portalStatus: PortalStatus): TrackingStage {
   if (portalStatus === "cancelled") return current;
   const order = TRACKING_STAGES;
-  const minimum: TrackingStage = portalStatus === "shipped" ? "in_transit" : "submitted";
+  const minimum: TrackingStage = portalStatus === "delivered" ? "delivered" : isShippedStatus(portalStatus) ? "in_transit" : "submitted";
   return order.indexOf(minimum) > order.indexOf(current) ? minimum : current;
 }
 
@@ -665,6 +691,21 @@ function salesOrdersFor(
   return resolved;
 }
 
+function statusOnlyPatch(patch: OrderPatch): boolean {
+  return Object.entries(patch).every(([key, value]) => value === undefined || key === "portalStatus");
+}
+
+/** A manual move off Delivered sticks until someone marks it delivered again, or a newer delivery event arrives. */
+async function rememberDeliveryHold(ctx: PortalContext, id: string, from: PortalStatus, to: PortalStatus, at: string): Promise<void> {
+  if (to === "delivered") {
+    await ctx.db.prepare(`UPDATE loads SET delivery_held_at = NULL WHERE id = ?`).run(id);
+    return;
+  }
+  if (from === "delivered") {
+    await ctx.db.prepare(`UPDATE loads SET delivery_held_at = ? WHERE id = ?`).run(at, id);
+  }
+}
+
 async function writeStage(ctx: PortalContext, id: string, from: PortalStatus | null, to: PortalStatus, at: string): Promise<void> {
   const row = await ctx.db.prepare(`SELECT stage_log FROM loads WHERE id = ?`).get(id);
   const events: StageEvent[] = parseStageEvents(typeof row?.stage_log === "string" ? row.stage_log : null);
@@ -704,7 +745,10 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
   const now = ctx.now().toISOString();
   const id = randomUUID();
   const token = randomBytes(24).toString("base64url");
-  const portalStatus = input.portalStatus ?? "being_prepared";
+  const portalStatus = normalizePortalStatus(input.portalStatus ?? "being_prepared") ?? "being_prepared";
+  if (portalStatus === "delivered" && !canMarkDelivered(actor)) {
+    throw new PortalError("Only Select and an EMIT admin can mark a load delivered.", 403);
+  }
   const trackingStage = advanceStage("submitted", portalStatus);
   const timeline = timelineThrough(trackingStage, now);
   const drafted = routeFrom(input);
@@ -774,9 +818,10 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
   await writeStage(ctx, id, null, portalStatus, now);
   const order = await getOrder(ctx, id);
   if (!order) throw new PortalError("The order could not be saved", 500);
-  if (portalStatus === "ready_to_ship") {
+  const createdNotice = loadBuilderNotice(portalStatus);
+  if (createdNotice === "ready_to_ship") {
     await postReadyToShip(ctx, id);
-  } else if (portalStatus === "being_prepared") {
+  } else if (createdNotice === "being_prepared") {
     const posted = await notifyNewLoad(order, { name: actor.name, email: actor.email });
     if (posted) await markSlack(ctx, id, false);
   }
@@ -792,11 +837,21 @@ export async function updateOrder(
   actor: Session,
 ): Promise<{ order: CustomerOrder; warnings: SalesOrderWarning[] }> {
   if (actor.viewAs) throw new PortalError("View-as is read-only. Switch back to Select view to change anything.", 403);
-  if (!canEditLoad(actor)) throw new PortalError("This account can view loads but cannot change them.", 403);
   const existing = (await ctx.db.prepare(`${LIST_SQL_HEAD} WHERE id = ? AND ${OPEN_LOAD_SQL}`).get(id)) as LoadRow | undefined;
   if (!existing) throw new PortalError("Order not found", 404);
   const current = await rowToOrder(ctx, existing, false);
-  const portalStatus = patch.portalStatus ?? current.portalStatus;
+  const portalStatus = normalizePortalStatus(patch.portalStatus ?? current.portalStatus) ?? current.portalStatus;
+  const deliveryChange = portalStatus !== current.portalStatus && (portalStatus === "delivered" || current.portalStatus === "delivered");
+  if (deliveryChange) {
+    if (!canMarkDelivered(actor)) {
+      throw new PortalError("Only Select and an EMIT admin can mark a load delivered or move it back to In Transit.", 403);
+    }
+    if (!canEditLoad(actor) && !statusOnlyPatch(patch)) {
+      throw new PortalError("This account can view loads but cannot change them.", 403);
+    }
+  } else if (!canEditLoad(actor)) {
+    throw new PortalError("This account can view loads but cannot change them.", 403);
+  }
   const trackingStage = advanceStage(current.trackingStage, portalStatus);
   const timeline =
     trackingStage === current.trackingStage ? current.timeline : timelineThrough(trackingStage, ctx.now().toISOString());
@@ -872,8 +927,9 @@ export async function updateOrder(
   });
   if (portalStatus !== current.portalStatus) {
     await writeStage(ctx, id, current.portalStatus, portalStatus, now);
+    await rememberDeliveryHold(ctx, id, current.portalStatus, portalStatus, now);
   }
-  if (portalStatus === "ready_to_ship") await postReadyToShip(ctx, id);
+  if (loadBuilderNotice(portalStatus) === "ready_to_ship") await postReadyToShip(ctx, id);
   void actor;
   const updated = await getOrder(ctx, id);
   if (!updated) throw new PortalError("Order not found", 404);
