@@ -1,10 +1,5 @@
-import {
-  SALES_ORDER_MATCH_SQL,
-  parseLegacySalesOrders,
-  resolveSalesOrders,
-  salesOrderMatchArgs,
-  salesOrdersForStop,
-} from "@/lib/sales-orders";
+import { mappedLoadStops } from "@/lib/load-stops";
+import { SALES_ORDER_MATCH_SQL, salesOrderMatchArgs } from "@/lib/sales-orders";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { recordCarrierAssignment, type CarrierNoticeResult, type CarrierUpdate } from "@/lib/carrier-notice";
 import type { PortalContext } from "@/lib/db";
@@ -95,21 +90,19 @@ export function loadBuilderOwner(
  * even if it is later added to the stored order.
  */
 export function loadBuilderPayload(order: CustomerOrder): Record<string, unknown> {
-  const salesOrderLines = order.salesOrders?.length
-    ? order.salesOrders
-    : resolveSalesOrders(parseLegacySalesOrders(order.salesOrderNumber).map((number) => ({ number, stopId: null })), order.stops);
+  const mapped = mappedLoadStops(order);
   return {
     orderId: order.id,
     salesOrderNumber: order.salesOrderNumber,
-    salesOrders: salesOrderLines.map((line) => ({
+    salesOrders: mapped.lines.map((line) => ({
       number: line.number,
       stopSequence: line.stopId ? order.stops.findIndex((stop) => stop.id === line.stopId) + 1 || null : null,
     })),
     portalStatus: order.portalStatus,
-    stops: order.stops.map((stop, index) => ({
-      sequence: index + 1,
+    stops: mapped.stops.map((stop) => ({
+      sequence: stop.sequence,
       kind: stop.kind,
-      salesOrders: stop.kind === "drop" ? salesOrdersForStop(salesOrderLines, stop.id) : [],
+      salesOrders: stop.salesOrders,
       company: stop.place.company,
       address1: stop.place.address1,
       address2: stop.place.address2 ?? "",
@@ -117,6 +110,7 @@ export function loadBuilderPayload(order: CustomerOrder): Record<string, unknown
       state: stop.place.state,
       postalCode: stop.place.postalCode,
       country: stop.place.country,
+      ...(stop.schedule ? { schedule: stop.schedule } : {}),
     })),
     truckType: order.truckType,
     transit: order.transit,
@@ -130,6 +124,17 @@ export function loadBuilderPayload(order: CustomerOrder): Record<string, unknown
     createdBy: order.createdBy,
     owner: loadBuilderOwner(order),
   };
+}
+
+/** The load-builder payload for one sales order or portal id. Missing and ambiguous matches throw. */
+export async function loadBuilderPayloadForQuery(
+  ctx: PortalContext,
+  input: { orderId?: string; salesOrderNumber?: string },
+): Promise<Record<string, unknown>> {
+  const id = await orderIdForCallback(ctx, input.orderId?.trim() ?? "", input.salesOrderNumber?.trim() ?? "");
+  const order = await getOrder(ctx, id);
+  if (!order) throw new PortalError("Order not found", 404);
+  return loadBuilderPayload(order);
 }
 
 async function markBuild(ctx: PortalContext, orderId: string): Promise<void> {

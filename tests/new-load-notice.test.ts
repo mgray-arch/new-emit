@@ -1,14 +1,16 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { PATCH as setOwnerRoute } from "@/app/api/admin/orders/[id]/owner/route";
+import { GET as getBuilderLoad } from "@/app/api/integrations/sam-load/route";
 import { GET as listOrdersRoute } from "@/app/api/orders/route";
 import { GET as getOrderRoute, PATCH as patchOrderRoute } from "@/app/api/orders/[id]/route";
 import { POST as createOrderRoute } from "@/app/api/orders/route";
 import { presentCustomerOrder } from "@/lib/customer-view";
 import { formatEnteredBy } from "@/lib/entered-by";
 import { assignLoadOwner } from "@/lib/load-owner";
-import { loadBuilderNotice, newLoadSlackText, readyToShipSlackText, slackUserIdForOwner } from "@/lib/slack-new-load";
+import { loadBuilderPayload } from "@/lib/load-builder";
+import { loadBuilderNotice, newLoadSlackText, readyToShipSlackText, slackUserIdForOwner, type SlackStop } from "@/lib/slack-new-load";
 import type { PortalContext } from "@/lib/db";
-import type { CustomerOrder, Session } from "@/lib/types";
+import type { CustomerOrder, Session, Stop } from "@/lib/types";
 import { adminSession, customerSession, seededPortal, sessionCookie } from "./helpers";
 
 let ctx: PortalContext;
@@ -16,7 +18,7 @@ const savedEnv: Record<string, string | undefined> = {};
 
 beforeAll(async () => {
   ctx = await seededPortal();
-  for (const key of ["SLACK_NEW_LOADS_WEBHOOK_URL", "SLACK_USER_ID_DREW", "SLACK_USER_ID_AINSLEY"]) {
+  for (const key of ["SLACK_NEW_LOADS_WEBHOOK_URL", "SLACK_USER_ID_DREW", "SLACK_USER_ID_AINSLEY", "LOAD_BUILDER_SECRET"]) {
     savedEnv[key] = process.env[key];
     delete process.env[key];
   }
@@ -27,6 +29,7 @@ afterEach(() => {
   delete process.env.SLACK_NEW_LOADS_WEBHOOK_URL;
   delete process.env.SLACK_USER_ID_DREW;
   delete process.env.SLACK_USER_ID_AINSLEY;
+  delete process.env.LOAD_BUILDER_SECRET;
 });
 
 afterAll(() => {
@@ -216,6 +219,209 @@ describe("new load slack text", () => {
     expect(formatEnteredBy("M. Gray", null)).toBe("M. Gray");
     expect(formatEnteredBy(null, "jane@emit.example")).toBe("jane@emit.example");
     expect(formatEnteredBy("  ", "jane@emit.example")).toBe("jane@emit.example");
+  });
+
+  it("adds the zip on a single-drop load and leaves the other lines unchanged", () => {
+    const origin = {
+      company: "EMIT TECHNOLOGIES",
+      address1: "2437 Allen Avenue",
+      address2: "Dock 2",
+      city: "Sheridan",
+      state: "WY",
+      postalCode: "82801",
+      country: "US",
+    };
+    const destination = {
+      company: "SPITZER INDUSTRIES, INC.",
+      address1: "10543 Fisher Road",
+      city: "Houston",
+      state: "TX",
+      postalCode: "77002",
+      country: "US",
+    };
+    const notice = {
+      salesOrderNumber: "so-44",
+      origin,
+      destination,
+      equipment: "48' Flatbed",
+      shipDate: "2026-11-05",
+      shipTime: "14:00",
+      deliveryDate: "2026-11-07",
+      owner: "Drew" as const,
+      enteredByName: null,
+      enteredByEmail: null,
+    };
+    const text = readyToShipSlackText(notice, { SLACK_USER_ID_DREW: "UDREW123" });
+    expect(text).toBe(
+      [
+        "Ready to Ship",
+        "SO: SO-44",
+        "Origin: EMIT TECHNOLOGIES — 2437 Allen Avenue, Dock 2, Sheridan, WY 82801, USA",
+        "Destination: SPITZER INDUSTRIES, INC. — 10543 Fisher Road, Houston, TX 77002, USA",
+        "Equipment: 48' Flatbed",
+        "Ship date: 2026-11-05 at 14:00",
+        "Delivery date: 2026-11-07",
+        "Owner: <@UDREW123>",
+      ].join("\n"),
+    );
+
+    const stops: SlackStop[] = [
+      { id: "p", kind: "pickup", place: origin },
+      { id: "d", kind: "drop", place: destination },
+    ];
+    expect(readyToShipSlackText({ ...notice, stops }, { SLACK_USER_ID_DREW: "UDREW123" })).toBe(
+      [
+        "Ready to Ship",
+        "SO: SO-44",
+        "Origin: EMIT TECHNOLOGIES — 2437 Allen Avenue, Dock 2, Sheridan, WY 82801, USA",
+        "Destination: SPITZER INDUSTRIES, INC. — 10543 Fisher Road, Houston, TX 77002, USA",
+        "Stops: 2 (1 pickup, 1 drop)",
+        "Pickup 1 of 1: EMIT TECHNOLOGIES — 2437 Allen Avenue, Dock 2, Sheridan, WY 82801, USA",
+        "Drop 1 of 1: SPITZER INDUSTRIES, INC. — 10543 Fisher Road, Houston, TX 77002, USA | SO: SO-44",
+        "Equipment: 48' Flatbed",
+        "Ship date: 2026-11-05 at 14:00",
+        "Delivery date: 2026-11-07",
+        "Owner: <@UDREW123>",
+      ].join("\n"),
+    );
+  });
+
+  it("lists every stop, the short zip, and a cleaned note on a five-stop load", () => {
+    const place = (
+      company: string,
+      address1: string,
+      city: string,
+      state: string,
+      postalCode: string,
+    ): SlackStop["place"] => ({ company, address1, city, state, postalCode, country: "US" });
+    const stops: SlackStop[] = [
+      {
+        id: "p1",
+        kind: "pickup",
+        place: place("EMIT NORTH", "2571 North Main Street", "Sheridan", "WY", "82801"),
+        schedule: {
+          date: "2026-11-18",
+          appointmentStart: "08:00",
+          appointmentEnd: "10:00",
+          appointmentText: null,
+          arrivedAt: null,
+          departedAt: null,
+        },
+      },
+      { id: "d1", kind: "drop", place: place("KODIAK FAS SERVICES", "1324 W Derrick Road", "Carlsbad", "NM", "8133") },
+      { id: "d2", kind: "drop", place: place("KODIAK GAS SERVICES", "827 Allison Crane Drive", "Pecos", "TX", "79772") },
+      {
+        id: "d3",
+        kind: "drop",
+        place: place("EMIT TECHNOLOGIES MIDLAND DCO1", "5308 South County Road 1180", "Midland", "TX", "79706"),
+      },
+      { id: "d4", kind: "drop", place: place("KODIAK GAS SERVICES", "11503 US Highway 59 N", "Victoria", "TX", "77905") },
+    ];
+    const salesOrders = [
+      { number: "SO-3705", stopId: "d1" },
+      { number: "SO-3402", stopId: "d2" },
+      { number: "SO-3561", stopId: "d2" },
+      { number: "TO-MID", stopId: "d3" },
+      { number: "SO-3433", stopId: "d4" },
+    ];
+    const notice = {
+      salesOrderNumber: "SO-3705, SO-3402, SO-3561, TO-MID, SO-3433",
+      origin: stops[0].place,
+      destination: stops[4].place,
+      equipment: "53' Flatbed",
+      shipDate: "2026-11-18",
+      owner: "Drew" as const,
+      enteredByName: "M. Gray",
+      enteredByEmail: "m.gray@emit.example",
+      stops,
+      salesOrders,
+      comments: "Call Kodiak before the Pecos drop. Carrier pay is 8765.43. EMIT cost is 2400. This was built in SAM.",
+    };
+    const ready = readyToShipSlackText(notice, {});
+    expect(ready).toBe(
+      [
+        "Ready to Ship",
+        "SO: SO-3705, SO-3402, SO-3561, TO-MID, SO-3433",
+        "Origin: EMIT NORTH — 2571 North Main Street, Sheridan, WY 82801, USA",
+        "Destination: KODIAK GAS SERVICES — 11503 US Highway 59 N, Victoria, TX 77905, USA",
+        "Stops: 5 (1 pickup, 4 drops)",
+        "Pickup 1 of 1: EMIT NORTH — 2571 North Main Street, Sheridan, WY 82801, USA | Schedule: Nov 18 · 08:00–10:00",
+        "Drop 1 of 4: KODIAK FAS SERVICES — 1324 W Derrick Road, Carlsbad, NM 8133, USA | SO: SO-3705",
+        "Drop 2 of 4: KODIAK GAS SERVICES — 827 Allison Crane Drive, Pecos, TX 79772, USA | SO: SO-3402, SO-3561",
+        "Drop 3 of 4: EMIT TECHNOLOGIES MIDLAND DCO1 — 5308 South County Road 1180, Midland, TX 79706, USA | SO: TO-MID",
+        "Drop 4 of 4: KODIAK GAS SERVICES — 11503 US Highway 59 N, Victoria, TX 77905, USA | SO: SO-3433",
+        "Equipment: 53' Flatbed",
+        "Ship date: 2026-11-18",
+        "Owner: Drew",
+        "Notes: Call Kodiak before the Pecos drop.",
+      ].join("\n"),
+    );
+    expect(ready).not.toMatch(/8765|\$|carrier pay|customerCost|\bSAM\b|EMIT cost|price/i);
+    const prepared = newLoadSlackText(notice, {});
+    expect(prepared.startsWith("Order received - Being Prepared\n")).toBe(true);
+    expect(prepared).toContain("Drop 2 of 4: KODIAK GAS SERVICES — 827 Allison Crane Drive, Pecos, TX 79772, USA | SO: SO-3402, SO-3561");
+    expect(prepared).toContain("Notes: Call Kodiak before the Pecos drop.");
+    expect(prepared).toContain("Entered by: M. Gray (m.gray@emit.example)");
+    expect(prepared).not.toMatch(/New load request|Ready to Ship|8765|\$|carrier pay|\bSAM\b|EMIT cost/i);
+
+    const route: Stop[] = stops.map((stop) => ({
+      id: stop.id,
+      kind: stop.kind,
+      place: {
+        company: stop.place.company ?? "",
+        address1: stop.place.address1 ?? "",
+        address2: "",
+        city: stop.place.city ?? "",
+        state: stop.place.state ?? "",
+        postalCode: stop.place.postalCode ?? "",
+        country: stop.place.country ?? "",
+      },
+      ...(stop.schedule ? { schedule: stop.schedule } : {}),
+    }));
+    const payload = loadBuilderPayload({
+      id: "order-five",
+      salesOrderNumber: notice.salesOrderNumber,
+      salesOrders,
+      stops: route,
+      portalStatus: "ready_to_ship",
+      truckType: "53' Flatbed",
+      comments: "",
+      createdBy: "M. Gray",
+      owner: "Drew",
+    } as CustomerOrder);
+    expect((payload.stops as Array<{ salesOrders: string[]; postalCode: string }>).map((stop) => stop.salesOrders)).toEqual([
+      [],
+      ["SO-3705"],
+      ["SO-3402", "SO-3561"],
+      ["TO-MID"],
+      ["SO-3433"],
+    ]);
+    expect((payload.stops as Array<{ postalCode: string }>)[1].postalCode).toBe("8133");
+    for (const stop of payload.stops as Array<{ salesOrders: string[] }>) {
+      if (stop.salesOrders.length) expect(ready).toContain(`SO: ${stop.salesOrders.join(", ")}`);
+    }
+
+    const secondPickup: SlackStop = {
+      id: "p2",
+      kind: "pickup",
+      place: place("EMIT ALLEN", "2437 Allen Avenue", "Sheridan", "WY", "82801"),
+    };
+    const extra = readyToShipSlackText(
+      {
+        ...notice,
+        comments: null,
+        stops: [stops[0], secondPickup, stops[4]],
+        salesOrders: [{ number: "SO-3433", stopId: "d4" }],
+        salesOrderNumber: "SO-3433",
+        destination: stops[4].place,
+      },
+      {},
+    );
+    expect(extra).toContain("Stops: 3 (2 pickups, 1 drop)");
+    expect(extra).toContain("Pickup 1 of 2: EMIT NORTH — 2571 North Main Street, Sheridan, WY 82801, USA | Schedule: Nov 18 · 08:00–10:00");
+    expect(extra).toContain("Pickup 2 of 2: EMIT ALLEN — 2437 Allen Avenue, Sheridan, WY 82801, USA");
+    expect(extra).toContain("Drop 1 of 1: KODIAK GAS SERVICES — 11503 US Highway 59 N, Victoria, TX 77905, USA | SO: SO-3433");
+    expect(extra).not.toContain("Notes:");
   });
 });
 
@@ -520,8 +726,11 @@ describe("stage changes", () => {
     expect(posts[0]).toContain("Order received - Being Prepared");
     expect(posts[0]).not.toMatch(/New load request/i);
     expect(posts[0]).toContain("SO: SO-STAGE");
-    expect(posts[0]).toContain("Origin: EMIT ALLEN — 2437 Allen Avenue, Sheridan, WY, USA");
-    expect(posts[0]).toContain("Destination: Receiver — 100 Market, Houston, TX, USA");
+    expect(posts[0]).toContain("Origin: EMIT ALLEN — 2437 Allen Avenue, Sheridan, WY 82801, USA");
+    expect(posts[0]).toContain("Destination: Receiver — 100 Market, Houston, TX 77002, USA");
+    expect(posts[0]).toContain("Stops: 2 (1 pickup, 1 drop)");
+    expect(posts[0]).toContain("Pickup 1 of 1: EMIT ALLEN — 2437 Allen Avenue, Sheridan, WY 82801, USA");
+    expect(posts[0]).toContain("Drop 1 of 1: Receiver — 100 Market, Houston, TX 77002, USA | SO: SO-STAGE");
     expect(posts[0]).toContain("Ship date: 2026-11-10 at 14:00");
     expect(posts[0]).toContain("Delivery date: 2026-11-12");
     expect(posts[0]).not.toContain("Ready to Ship");
@@ -562,8 +771,10 @@ describe("stage changes", () => {
     expect(posts).toHaveLength(2);
     expect(posts[1]).toContain("Ready to Ship");
     expect(posts[1]).toContain("SO: SO-STAGE");
-    expect(posts[1]).toContain("Origin: EMIT ALLEN — 2437 Allen Avenue, Sheridan, WY, USA");
-    expect(posts[1]).toContain("Destination: Receiver — 100 Market, Houston, TX, USA");
+    expect(posts[1]).toContain("Origin: EMIT ALLEN — 2437 Allen Avenue, Sheridan, WY 82801, USA");
+    expect(posts[1]).toContain("Destination: Receiver — 100 Market, Houston, TX 77002, USA");
+    expect(posts[1]).toContain("Stops: 2 (1 pickup, 1 drop)");
+    expect(posts[1]).toContain("Drop 1 of 1: Receiver — 100 Market, Houston, TX 77002, USA | SO: SO-STAGE");
     expect(posts[1]).toContain("Equipment: 53' Flatbed");
     expect(posts[1]).toContain("Ship date: 2026-11-10 at 14:00");
     expect(posts[1]).toContain("Delivery date: 2026-11-12");
@@ -594,5 +805,111 @@ describe("stage changes", () => {
     );
     expect(back.status).toBe(200);
     expect(posts).toHaveLength(2);
+  });
+});
+
+describe("GET /api/integrations/sam-load", () => {
+  it("returns the load-builder stops for one sales order and rejects a missing secret", async () => {
+    process.env.LOAD_BUILDER_SECRET = "load-builder-secret-1";
+    process.env.SLACK_NEW_LOADS_WEBHOOK_URL = "https://hooks.slack.test/new-loads";
+    const posts: string[] = [];
+    vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => {
+      posts.push(String(init?.body));
+      return new Response("ok", { status: 200 });
+    });
+    const place = (company: string, address1: string, city: string, state: string, postalCode: string) => ({
+      company,
+      address1,
+      city,
+      state,
+      postalCode,
+      country: "US",
+    });
+    const cookie = await sessionCookie(customerSession());
+    const created = await createOrderRoute(
+      new Request("http://portal.test/api/orders", {
+        method: "POST",
+        headers: headers(cookie),
+        body: JSON.stringify({
+          salesOrders: [
+            { number: "SO-3705", stopId: "d1" },
+            { number: "SO-3402", stopId: "d2" },
+            { number: "SO-3561", stopId: "d2" },
+            { number: "TO-MID", stopId: "d3" },
+            { number: "SO-3433", stopId: "d4" },
+          ],
+          stops: [
+            { id: "p1", kind: "pickup", place: place("EMIT NORTH", "2571 North Main Street", "Sheridan", "WY", "82801") },
+            { id: "d1", kind: "drop", place: place("KODIAK FAS SERVICES", "1324 W Derrick Road", "Carlsbad", "NM", "8133") },
+            { id: "d2", kind: "drop", place: place("KODIAK GAS SERVICES", "827 Allison Crane Drive", "Pecos", "TX", "79772") },
+            { id: "d3", kind: "drop", place: place("EMIT TECHNOLOGIES MIDLAND DCO1", "5308 South County Road 1180", "Midland", "TX", "79706") },
+            { id: "d4", kind: "drop", place: place("KODIAK GAS SERVICES", "11503 US Highway 59 N", "Victoria", "TX", "77905") },
+          ],
+          truckType: "53' Flatbed",
+          shipDate: "2026-11-18",
+          customerCost: 2400,
+          comments: "Call Kodiak before the Pecos drop. Carrier pay is 8765.43. EMIT cost is 2400. This was built in SAM.",
+        }),
+      }),
+    );
+    expect(created.status).toBe(201);
+    const order = (await created.json()).order as CustomerOrder;
+    expect(posts).toHaveLength(1);
+    const sent = JSON.parse(posts[0]) as { text: string };
+    expect(sent.text).toContain("Stops: 5 (1 pickup, 4 drops)");
+    expect(sent.text).toContain("Drop 1 of 4: KODIAK FAS SERVICES — 1324 W Derrick Road, Carlsbad, NM 8133, USA | SO: SO-3705");
+    expect(sent.text).toContain("Drop 2 of 4: KODIAK GAS SERVICES — 827 Allison Crane Drive, Pecos, TX 79772, USA | SO: SO-3402, SO-3561");
+    expect(sent.text).toContain("Notes: Call Kodiak before the Pecos drop.");
+    expect(sent.text).not.toMatch(/2400|8765|\$|carrier pay|customerCost|\bSAM\b|EMIT cost/i);
+    expect(sent.text).toContain("SO: SO-3705, SO-3402, SO-3561, TO-MID, SO-3433");
+    expect(sent.text).toContain("Destination: KODIAK GAS SERVICES — 11503 US Highway 59 N, Victoria, TX 77905, USA");
+
+    const bare = await getBuilderLoad(
+      new Request("http://portal.test/api/integrations/sam-load", {
+        headers: { authorization: "Bearer load-builder-secret-1", host: "portal.test" },
+      }),
+    );
+    expect(bare.status).toBe(400);
+
+    const cookieOnly = await getBuilderLoad(
+      new Request("http://portal.test/api/integrations/sam-load?salesOrderNumber=SO-3402", {
+        headers: { cookie, host: "portal.test" },
+      }),
+    );
+    expect(cookieOnly.status).toBe(401);
+
+    const wrong = await getBuilderLoad(
+      new Request("http://portal.test/api/integrations/sam-load?salesOrderNumber=SO-3402", {
+        headers: { authorization: "Bearer not-the-secret", host: "portal.test" },
+      }),
+    );
+    expect(wrong.status).toBe(401);
+
+    const missing = await getBuilderLoad(
+      new Request("http://portal.test/api/integrations/sam-load?salesOrderNumber=SO-DOES-NOT-EXIST", {
+        headers: { authorization: "Bearer load-builder-secret-1", host: "portal.test" },
+      }),
+    );
+    expect(missing.status).toBe(404);
+
+    const got = await getBuilderLoad(
+      new Request("http://portal.test/api/integrations/sam-load?sales_order_number=so-3402", {
+        headers: { authorization: "Bearer load-builder-secret-1", host: "portal.test" },
+      }),
+    );
+    expect(got.status).toBe(200);
+    const payload = (await got.json()) as { stops: Array<{ salesOrders: string[]; postalCode: string; sequence: number }> };
+    expect(payload.stops.map((stop) => stop.salesOrders)).toEqual([[], ["SO-3705"], ["SO-3402", "SO-3561"], ["TO-MID"], ["SO-3433"]]);
+    expect(payload.stops[1].postalCode).toBe("8133");
+    expect(payload.stops[2].sequence).toBe(3);
+    expect(JSON.stringify(payload)).not.toMatch(/carrierPay|carrier_pay|8765/);
+
+    const byId = await getBuilderLoad(
+      new Request(`http://portal.test/api/integrations/sam-load?orderId=${order.id}`, {
+        headers: { authorization: "Bearer load-builder-secret-1", host: "portal.test" },
+      }),
+    );
+    expect(byId.status).toBe(200);
+    expect(((await byId.json()) as { orderId: string }).orderId).toBe(order.id);
   });
 });
