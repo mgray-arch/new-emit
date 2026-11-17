@@ -257,6 +257,14 @@ describe("list card stage change", () => {
     expect(posts).toHaveLength(2);
     expect(JSON.stringify(shippedOrder)).not.toMatch(/8765|carrierPay|carrier_pay/);
 
+    const markedDelivered = await patchStatus(order.id, select, "delivered");
+    expect(markedDelivered.status).toBe(200);
+    expect(posts).toHaveLength(2);
+    const backToTransit = await patchStatus(order.id, select, "in_transit");
+    expect(backToTransit.status).toBe(200);
+    expect((await backToTransit.json()).order.portalStatus).toBe("in_transit");
+    expect(posts).toHaveLength(2);
+
     const back = await patchStatus(order.id, emit, "being_prepared");
     expect(back.status).toBe(200);
     expect((await back.json()).order.portalStatus).toBe("being_prepared");

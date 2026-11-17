@@ -24,6 +24,7 @@ import { listStageChoice, stageBecomesReadyToShip, type ListPortalStatus } from 
 import { formatEnteredBy } from "@/lib/entered-by";
 import {
   LOAD_TAB_LABEL,
+  LOAD_TABS,
   attentionReasons,
   displayStatus,
   emptyListMessage,
@@ -39,7 +40,6 @@ import {
 import { parseCustomerCost } from "@/lib/cost";
 import { toast } from "@/lib/toast";
 import {
-  STATUS_LABEL,
   canAddLoads,
   canDeleteLoad,
   canMarkDelivered,
@@ -611,9 +611,9 @@ export default function Dashboard({ startNew = false }: { startNew?: boolean }) 
             }}
           >
             <option value="">All statuses</option>
-            {Object.entries(STATUS_LABEL).map(([value, label]) => (
+            {LOAD_TABS.map((value) => (
               <option key={value} value={value}>
-                {label}
+                {LOAD_TAB_LABEL[value]}
               </option>
             ))}
           </select>

@@ -3,7 +3,7 @@ import { STATUS_LABEL, isShippedStatus, type CustomerOrder, type TrackingStage }
 /**
  * List tabs. Being Prepared and Ready to Ship are one status each.
  * In Transit is the old Shipped stage. Delivered is its own list.
- * Cancelled has no tab of its own and stays on Delivered.
+ * Cancelled loads stay stored and are left off every tab.
  */
 export const LOAD_TABS = ["being_prepared", "ready_to_ship", "in_transit", "delivered"] as const;
 export type LoadTab = (typeof LOAD_TABS)[number];
@@ -245,7 +245,7 @@ export function emptyListMessage(tab: LoadTab, filtering: boolean): string {
   if (tab === "being_prepared") return "No loads are being prepared.";
   if (tab === "ready_to_ship") return "No loads are ready to ship.";
   if (tab === "in_transit") return "No loads are in transit.";
-  return "No delivered loads yet. Cancelled loads show up here.";
+  return "No delivered loads yet.";
 }
 
 function cell(value: string | number | null | undefined): string {

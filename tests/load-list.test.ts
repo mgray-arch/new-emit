@@ -87,7 +87,8 @@ describe("load lists", () => {
     expect(emptyListMessage("being_prepared", false)).toContain("being prepared");
     expect(emptyListMessage("ready_to_ship", false)).toContain("ready to ship");
     expect(emptyListMessage("in_transit", false)).toContain("in transit");
-    expect(emptyListMessage("delivered", false)).toContain("Cancelled");
+    expect(emptyListMessage("delivered", false)).toBe("No delivered loads yet.");
+    expect(emptyListMessage("delivered", false)).not.toContain("ancelled");
     expect(emptyListMessage("delivered", true)).toContain("No loads match");
     expect(parseLoadTab("history", "being_prepared")).toBe("in_transit");
     expect(parseLoadTab("shipped", "being_prepared")).toBe("in_transit");
@@ -114,11 +115,14 @@ describe("load lists", () => {
     expect(inTab(tabs[2], "SO2196")).toBe(true);
     expect(inTab(tabs[2], "SO-002722")).toBe(true);
     expect(inTab(tabs[2], "SO4540")).toBe(true);
-    expect(inTab(tabs[3], "SO4410")).toBe(true);
+    expect(tabs.some((tab) => inTab(tab, "SO4410"))).toBe(false);
+    expect((await listOrders(ctx, { q: "SO4410", pageSize: 10 })).orders).toHaveLength(0);
+    const kept = await ctx.db.prepare(`SELECT portal_status FROM loads WHERE sales_order_number = ?`).get("SO4410");
+    expect(kept?.portal_status).toBe("cancelled");
     expect(tabs[0].orders.every((order) => order.portalStatus === "being_prepared")).toBe(true);
     expect(tabs[1].orders.every((order) => order.portalStatus === "ready_to_ship")).toBe(true);
     expect(tabs[2].orders.every((order) => order.portalStatus === "in_transit")).toBe(true);
-    expect(tabs[3].orders.every((order) => order.portalStatus === "delivered" || order.portalStatus === "cancelled")).toBe(true);
+    expect(tabs[3].orders.every((order) => order.portalStatus === "delivered")).toBe(true);
 
     const ready = tabs[1];
     const sooner = ready.orders.findIndex((order) => order.salesOrderNumber === "SO2981");
@@ -189,7 +193,7 @@ describe("load lists", () => {
     expect(prepared.total).toBeGreaterThan(0);
     expect(ready.total).toBeGreaterThan(0);
     expect(moving.total).toBeGreaterThan(0);
-    expect(delivered.total).toBeGreaterThan(0);
+    expect(delivered.total).toBe(0);
 
     const asked = await listBoard(ctx, { tab: "being_prepared", includeAttention: false, pageSize: 50 });
     expect(asked.tab).toBe("being_prepared");
@@ -243,8 +247,9 @@ describe("load lists", () => {
     expect(oldHistory.orders.some((order: CustomerOrder) => order.salesOrderNumber === "SO4410")).toBe(false);
     const oldShipped = await board(customer, "tab=shipped&page=1&pageSize=50");
     expect(oldShipped.tab).toBe("in_transit");
-    const cancelled = await board(customer, "tab=delivered&page=1&pageSize=50");
-    expect(cancelled.orders.some((order: CustomerOrder) => order.salesOrderNumber === "SO4410")).toBe(true);
+    const deliveredTab = await board(customer, "tab=delivered&page=1&pageSize=50");
+    expect(deliveredTab.orders.some((order: CustomerOrder) => order.salesOrderNumber === "SO4410")).toBe(false);
+    expect(deliveredTab.counts.delivered).toBe(0);
 
     const preparedFile = await exportOrders(
       new Request("http://portal.test/api/orders/export?tab=being_prepared", { headers: headers(customer) }),
@@ -259,7 +264,7 @@ describe("load lists", () => {
     const shippedCsv = await shippedFile.text();
     expect(shippedCsv).toContain("SO2196");
     expect(shippedCsv).toContain("SO4540");
-    expect(shippedCsv).toContain("SO4410");
+    expect(shippedCsv).not.toContain("SO4410");
     expect(shippedCsv).not.toContain("SO4429");
   });
 
@@ -309,7 +314,7 @@ describe("load lists", () => {
     expect(staffFile.headers.get("content-type")).toMatch(/text\/csv/);
     const staffCsv = await staffFile.text();
     expect(staffCsv).toContain("SO4540");
-    expect(staffCsv).toContain("SO4410");
+    expect(staffCsv).not.toContain("SO4410");
     expect(staffCsv).not.toMatch(/Cost,|carrierPay|carrier_pay|1320|1400/);
     expectNoSecrets(staffCsv);
 
@@ -348,7 +353,7 @@ describe("load lists", () => {
         .run(sample.so, sample.status, sample.stage, sample.date || null, sample.time || null, `900-sort-${index}`, ids[index].id);
     }
 
-    const expected = ["SO-SORT-B", "SO-SORT-A", "SO-SORT-C", "SO-SORT-D", "SO-SORT-E", "SO-SORT-F", "SO-SORT-G", "SO-SORT-H", "SO-SORT-I"];
+    const expected = ["SO-SORT-B", "SO-SORT-A", "SO-SORT-C", "SO-SORT-D", "SO-SORT-E", "SO-SORT-F", "SO-SORT-G", "SO-SORT-I"];
     const board = await listBoard(ctx, { q: "SO-SORT-", pageSize: 20 });
     expect(board.orders.map((order) => order.salesOrderNumber)).toEqual(expected);
     expect(board.orders.map((order) => order.salesOrderNumber)).toEqual(sortLoadList(board.orders).map((order) => order.salesOrderNumber));

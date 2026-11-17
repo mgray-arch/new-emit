@@ -38,7 +38,7 @@ import {
 } from "@/lib/types";
 import { syncStopLocations } from "@/lib/locations";
 import { assignLoadOwner, type LoadOwner } from "@/lib/load-owner";
-import { notifyNewLoad, notifyReadyToShip } from "@/lib/slack-new-load";
+import { loadBuilderNotice, notifyNewLoad, notifyReadyToShip } from "@/lib/slack-new-load";
 import { formatEnteredBy } from "@/lib/entered-by";
 import { legacyStops, resolvedRoute } from "@/lib/stops";
 import type { OrderInput, OrderPatch } from "@/lib/validate";
@@ -274,12 +274,12 @@ function deliversTo(row: { destination_json: string; stops_json: string | null }
 
 /**
  * Tabs follow the portal status. A tracking update does not move a load
- * between tabs. Cancelled has no tab of its own, so it stays on Delivered.
- * `legacy_shipped` is the old Shipped/History export: In Transit, Delivered, and Cancelled.
+ * between tabs. Cancelled loads stay in the database and are left off every tab.
+ * `legacy_shipped` is the old Shipped/History export: In Transit and Delivered.
  */
 const IN_TRANSIT_TAB_SQL = `(portal_status IN ('in_transit', 'shipped'))`;
-const DELIVERED_TAB_SQL = `(portal_status IN ('delivered', 'cancelled'))`;
-const LEGACY_SHIPPED_TAB_SQL = `(portal_status IN ('in_transit', 'delivered', 'shipped', 'cancelled'))`;
+const DELIVERED_TAB_SQL = `(portal_status = 'delivered')`;
+const LEGACY_SHIPPED_TAB_SQL = `(portal_status IN ('in_transit', 'delivered', 'shipped'))`;
 
 function tabClause(tab: LoadTab | "legacy_shipped"): { sql: string; params: SqlArg[] } {
   if (tab === "legacy_shipped") return { sql: LEGACY_SHIPPED_TAB_SQL, params: [] };
@@ -290,7 +290,7 @@ function tabClause(tab: LoadTab | "legacy_shipped"): { sql: string; params: SqlA
 }
 
 function buildWhere(filter: OrderFilter): { sql: string; params: SqlArg[] } {
-  const clauses: string[] = [OPEN_LOAD_SQL];
+  const clauses: string[] = [OPEN_LOAD_SQL, `portal_status != 'cancelled'`];
   const params: SqlArg[] = [];
   if (filter.status) {
     clauses.push("portal_status = ?");
@@ -818,9 +818,10 @@ export async function submitOrder(ctx: PortalContext, input: OrderInput, actor: 
   await writeStage(ctx, id, null, portalStatus, now);
   const order = await getOrder(ctx, id);
   if (!order) throw new PortalError("The order could not be saved", 500);
-  if (portalStatus === "ready_to_ship") {
+  const createdNotice = loadBuilderNotice(portalStatus);
+  if (createdNotice === "ready_to_ship") {
     await postReadyToShip(ctx, id);
-  } else if (portalStatus === "being_prepared") {
+  } else if (createdNotice === "being_prepared") {
     const posted = await notifyNewLoad(order, { name: actor.name, email: actor.email });
     if (posted) await markSlack(ctx, id, false);
   }
@@ -928,7 +929,7 @@ export async function updateOrder(
     await writeStage(ctx, id, current.portalStatus, portalStatus, now);
     await rememberDeliveryHold(ctx, id, current.portalStatus, portalStatus, now);
   }
-  if (portalStatus === "ready_to_ship") await postReadyToShip(ctx, id);
+  if (loadBuilderNotice(portalStatus) === "ready_to_ship") await postReadyToShip(ctx, id);
   void actor;
   const updated = await getOrder(ctx, id);
   if (!updated) throw new PortalError("Order not found", 404);
