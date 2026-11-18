@@ -63,7 +63,7 @@ export function dropHasDeliveryTime(stopsJson: unknown): boolean {
 }
 
 /**
- * Reliable delivery evidence already on the load.
+ * One signal is enough. A proof of delivery is not required.
  * A tracking ping, a share link, or a raw position is not evidence.
  * A manual undo blocks the file, stop, and tracking-stage evidence until a newer
  * integration event is recorded.
@@ -73,9 +73,10 @@ function rowHasDeliverySignal(row: Record<string, unknown>): boolean {
   const signal = text(row.delivery_signal_at);
   if (signal && (!held || signal > held)) return true;
   if (held) return false;
-  if (row.tracking_stage === "delivered") return true;
-  if (Number(row.has_pod) === 1) return true;
-  return dropHasDeliveryTime(row.stops_json);
+  const trackingDelivered = row.tracking_stage === "delivered";
+  const podOnFile = Number(row.has_pod) === 1;
+  const stopCompleted = dropHasDeliveryTime(row.stops_json);
+  return trackingDelivered || podOnFile || stopCompleted;
 }
 
 function tokenMatches(presented: string, expected: string): boolean {
@@ -152,7 +153,9 @@ export interface DeliveryRun {
 }
 
 /**
- * Move In Transit loads to Delivered when a delivery signal is on file.
+ * Move In Transit loads to Delivered when any one delivery signal is on file.
+ * A proof of delivery counts. It is not required. A drop arrival or departure,
+ * tracking stage Delivered, or a recorded delivery event is enough on its own.
  * Does not touch Being Prepared, Ready to Ship, Cancelled, or deleted loads.
  * Does not use a tracking ping or a position.
  */

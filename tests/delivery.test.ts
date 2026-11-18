@@ -115,9 +115,15 @@ describe("delivery signals", () => {
     expect((await statusOf(order.id)).portal).toBe("delivered");
   });
 
-  it("uses a recorded drop departure and ignores a load that is not In Transit", async () => {
+  it("uses a recorded drop departure with no proof of delivery, and ignores a load that is not In Transit", async () => {
     const moving = await loadBySo("SO4422");
     await ctx.db.prepare(`UPDATE loads SET portal_status = 'in_transit', tracking_stage = 'in_transit', delivery_held_at = NULL, delivery_signal_at = NULL WHERE id = ?`).run(moving.id);
+    const podUploads = await ctx.db.prepare(`SELECT COUNT(*) AS n FROM document_uploads WHERE load_id = ? AND lower(doc_type) = 'pod'`).get(moving.id);
+    const podFiles = await ctx.db
+      .prepare(`SELECT COUNT(*) AS n FROM customer_documents WHERE load_id = ? AND lower(filename) LIKE '%pod%'`)
+      .get(moving.id);
+    expect(Number(podUploads?.n)).toBe(0);
+    expect(Number(podFiles?.n)).toBe(0);
     const stops = JSON.parse(String((await ctx.db.prepare(`SELECT stops_json FROM loads WHERE id = ?`).get(moving.id))?.stops_json)) as Array<Record<string, unknown>>;
     const drop = [...stops].reverse().find((stop) => stop.kind === "drop");
     if (!drop) throw new Error("no drop");
@@ -138,6 +144,22 @@ describe("delivery signals", () => {
     const skipped = await promoteDeliveredLoads(ctx);
     expect(skipped.loadIds).not.toContain(preparing.id);
     expect((await statusOf(preparing.id)).portal).toBe("being_prepared");
+  });
+
+  it("moves an In Transit load from tracking stage Delivered when no proof of delivery is on file", async () => {
+    const order = await loadBySo("SO4570");
+    await ctx.db.prepare(`DELETE FROM document_uploads WHERE load_id = ? AND lower(doc_type) = 'pod'`).run(order.id);
+    await ctx.db.prepare(`DELETE FROM customer_documents WHERE load_id = ? AND lower(filename) LIKE '%pod%'`).run(order.id);
+    await ctx.db
+      .prepare(
+        `UPDATE loads SET portal_status = 'in_transit', tracking_stage = 'delivered', delivery_held_at = NULL, delivery_signal_at = NULL, deleted_at = NULL WHERE id = ?`,
+      )
+      .run(order.id);
+    const pods = await ctx.db.prepare(`SELECT COUNT(*) AS n FROM document_uploads WHERE load_id = ? AND lower(doc_type) = 'pod'`).get(order.id);
+    expect(Number(pods?.n)).toBe(0);
+    const run = await promoteDeliveredLoads(ctx);
+    expect(run.loadIds).toContain(order.id);
+    expect((await statusOf(order.id)).portal).toBe("delivered");
   });
 
   it("does not promote a deleted load", async () => {
@@ -203,6 +225,12 @@ describe("delivery signals", () => {
     );
     expect(refused.status).toBe(403);
     expect((await statusOf(order.id)).portal).toBe("in_transit");
+    const podUploads = await ctx.db.prepare(`SELECT COUNT(*) AS n FROM document_uploads WHERE load_id = ? AND lower(doc_type) = 'pod'`).get(order.id);
+    const podFiles = await ctx.db
+      .prepare(`SELECT COUNT(*) AS n FROM customer_documents WHERE load_id = ? AND lower(filename) LIKE '%pod%'`)
+      .get(order.id);
+    expect(Number(podUploads?.n)).toBe(0);
+    expect(Number(podFiles?.n)).toBe(0);
 
     const emitAdmin = await sessionCookie({
       userId: "emit-admin-1",

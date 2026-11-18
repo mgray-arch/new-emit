@@ -841,6 +841,7 @@ export async function updateOrder(
   if (!existing) throw new PortalError("Order not found", 404);
   const current = await rowToOrder(ctx, existing, false);
   const portalStatus = normalizePortalStatus(patch.portalStatus ?? current.portalStatus) ?? current.portalStatus;
+  // No paperwork check. A proof of delivery is not required to mark Delivered or to move back.
   const deliveryChange = portalStatus !== current.portalStatus && (portalStatus === "delivered" || current.portalStatus === "delivered");
   if (deliveryChange) {
     if (!canMarkDelivered(actor)) {
