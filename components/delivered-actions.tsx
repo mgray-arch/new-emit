@@ -1,6 +1,6 @@
 import type { PortalStatus } from "@/lib/types";
 
-/** Mark Delivered, or move a delivered load back to In Transit. Select and EMIT admins only. */
+/** Mark Delivered, or move a delivered load back to In Transit. Select and EMIT admins only. A proof of delivery is not required. */
 export default function DeliveredActions({
   status,
   busy,

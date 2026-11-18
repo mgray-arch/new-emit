@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import ReceiverLinkPage from "@/app/r/[token]/page";
 import { PATCH as patchOrderRoute } from "@/app/api/orders/[id]/route";
 import { GET as listOrdersRoute, POST as createOrderRoute } from "@/app/api/orders/route";
+import DeliveredActions from "@/components/delivered-actions";
 import PortalStatusControl from "@/components/portal-status-control";
 import StatusPill from "@/components/status-pill";
 import type { PortalContext } from "@/lib/db";
@@ -117,6 +118,9 @@ describe("list card stage menu", () => {
     expect(html).not.toContain("Shipped");
     expect(html).not.toContain("Delivered");
     expect(html).not.toContain("Cancelled");
+    const mark = renderToStaticMarkup(createElement(DeliveredActions, { status: "in_transit", onMark: () => {}, onUndo: () => {} }));
+    expect(mark).toContain("Mark Delivered");
+    expect(mark).not.toMatch(/pod|proof of delivery|disabled/i);
     expect(html).toContain('value="ready_to_ship"');
     expect(html).toContain("Booked");
     expect(html).toContain("status-booked");
