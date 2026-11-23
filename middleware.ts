@@ -1,6 +1,9 @@
 import { jwtVerify } from "jose";
 import { NextResponse, type NextRequest } from "next/server";
-import { VIEW_AS_COOKIE, authSecret, isPublicPath, parseViewAs, safeNextPath } from "@/lib/session";
+import { VIEW_AS_COOKIE, authSecret, isPublicPath, parseViewAs, rollingSessionCookie, safeNextPath } from "@/lib/session";
+
+/** This route replaces the session cookie itself. A refresh here would race that write. */
+const SESSION_WRITE_PATH = "/api/me/password";
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -11,24 +14,33 @@ export async function middleware(req: NextRequest) {
 
   try {
     const { payload } = await jwtVerify(token, authSecret());
-    const previewing = parseViewAs(req.cookies.get(VIEW_AS_COOKIE)?.value) !== null;
-    const adminPath = pathname.startsWith("/admin") || pathname.startsWith("/api/admin");
-    if (previewing && adminPath && payload.role === "admin") {
-      if (pathname.startsWith("/api/")) {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-      }
-      return NextResponse.redirect(new URL("/", req.url));
+    const response = gate(req, pathname, payload.role);
+    if (pathname !== SESSION_WRITE_PATH) {
+      const renewed = await rollingSessionCookie(token);
+      if (renewed) response.headers.append("set-cookie", renewed);
     }
-    if (adminPath && payload.role !== "admin") {
-      if (pathname.startsWith("/api/")) {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-      }
-      return NextResponse.redirect(new URL("/", req.url));
-    }
-    return NextResponse.next();
+    return response;
   } catch {
     return unauthenticated(req, pathname);
   }
+}
+
+function gate(req: NextRequest, pathname: string, role: unknown): NextResponse {
+  const previewing = parseViewAs(req.cookies.get(VIEW_AS_COOKIE)?.value) !== null;
+  const adminPath = pathname.startsWith("/admin") || pathname.startsWith("/api/admin");
+  if (previewing && adminPath && role === "admin") {
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    return NextResponse.redirect(new URL("/", req.url));
+  }
+  if (adminPath && role !== "admin") {
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    return NextResponse.redirect(new URL("/", req.url));
+  }
+  return NextResponse.next();
 }
 
 function unauthenticated(req: NextRequest, pathname: string) {

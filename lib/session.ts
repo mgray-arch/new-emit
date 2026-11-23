@@ -8,6 +8,15 @@ export { safeNextPath };
 const COOKIE = "portal_session";
 const STATE_COOKIE = "oauth_state";
 
+/**
+ * Signed-in EMIT and Select sessions last 30 days.
+ * A visit after the first day issues a fresh 30-day cookie, so someone who keeps
+ * using the portal stays signed in. Nothing signs them out for being idle, and
+ * there is no countdown. Signing out, a password change, or deactivation still ends it.
+ */
+export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
+export const SESSION_REFRESH_AFTER_SECONDS = 60 * 60 * 24;
+
 export function authSecret(): Uint8Array {
   const secret = process.env.AUTH_SECRET;
   if (!secret || secret.length < 16) {
@@ -29,8 +38,32 @@ export async function signSession(session: Session): Promise<string> {
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(session.userId)
     .setIssuedAt()
-    .setExpirationTime("7d")
+    .setExpirationTime(Math.floor(Date.now() / 1000) + SESSION_MAX_AGE_SECONDS)
     .sign(authSecret());
+}
+
+/** True when a still-valid session should be reissued so active use does not run into the 30-day end. */
+export function sessionNeedsRefresh(issuedAt: number, nowSeconds = Math.floor(Date.now() / 1000)): boolean {
+  if (!Number.isFinite(issuedAt) || issuedAt <= 0) return true;
+  return nowSeconds - issuedAt >= SESSION_REFRESH_AFTER_SECONDS;
+}
+
+/**
+ * A replacement session cookie when this token is still valid and at least a day old.
+ * Returns null for a fresh cookie, an expired cookie, or a cookie this server cannot read.
+ * The new cookie keeps the same person, role, and password epoch.
+ */
+export async function rollingSessionCookie(token: string, nowSeconds = Math.floor(Date.now() / 1000)): Promise<string | null> {
+  const session = await verifySessionToken(token);
+  if (!session || !sessionNeedsRefresh(session.issuedAt, nowSeconds)) return null;
+  const next = await signSession({
+    userId: session.userId,
+    email: session.email,
+    name: session.name,
+    role: session.role,
+    passwordEpoch: session.passwordEpoch,
+  });
+  return sessionCookie(next);
 }
 
 export async function verifySessionToken(token: string): Promise<(Session & { issuedAt: number }) | null> {
@@ -71,7 +104,7 @@ export async function readSession(req: Request): Promise<Session | null> {
 
 export function sessionCookie(token: string): string {
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-  return `${COOKIE}=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${60 * 60 * 24 * 7}${secure}`;
+  return `${COOKIE}=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_SECONDS}${secure}`;
 }
 
 export function clearSessionCookie(): string {
@@ -118,7 +151,7 @@ export function parseViewAs(value: string | null | undefined): ViewAsPreview | n
 
 export function viewAsCookie(role: string): string {
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-  return `${VIEW_AS_COOKIE}=${encodeURIComponent(role)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${60 * 60 * 24 * 7}${secure}`;
+  return `${VIEW_AS_COOKIE}=${encodeURIComponent(role)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_SECONDS}${secure}`;
 }
 
 export function clearViewAsCookie(): string {
@@ -126,6 +159,7 @@ export function clearViewAsCookie(): string {
   return `${VIEW_AS_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${secure}`;
 }
 
+/** Microsoft sign-in nonce. Ten minutes, then it is useless. This is not the signed-in session. */
 export function stateCookie(state: string): string {
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   return `${STATE_COOKIE}=${state}; HttpOnly; Path=/; SameSite=Lax; Max-Age=600${secure}`;
